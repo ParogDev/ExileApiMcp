@@ -35,7 +35,23 @@ The two-process split means you can restart the MCP server without reloading the
 
 ## Setup
 
-### Step 1: Verify the plugin is running
+### Quick Setup (Claude Code)
+
+If you're using [Claude Code](https://docs.anthropic.com/en/docs/claude-code), open this directory and run:
+
+```
+/setup-mcp
+```
+
+This will detect your bridge directory, create `.mcp.json`, build, and tell you when to restart. Skip to [Available Tools](#available-tools) once it's done.
+
+> **Don't have the skill?** Paste this into Claude Code instead:
+>
+> *Build this project with `dotnet build`, find my ExileApi bridge directory (look for a `claude-bridge` folder containing `bridge-port.txt` in my Documents), and create a `.mcp.json` in my current directory that points to this project and the bridge directory. Then tell me to restart Claude Code.*
+
+### Manual Setup
+
+#### Step 1: Verify the plugin is running
 
 Launch ExileApi with Path of Exile running. In the ExileApi plugin list, make sure **What's an AI Bridge?** is enabled. You should see a small status indicator on screen:
 - **Green dot** = TCP server is up and idle
@@ -46,13 +62,13 @@ The plugin writes two files to its bridge directory (default: `<ExileApi install
 - `bridge-port.txt` -- the TCP port it's listening on
 - `bridge-token.txt` -- a random auth token (regenerated each plugin start)
 
-### Step 2: Clone this repo
+#### Step 2: Clone this repo
 
 ```bash
 git clone https://github.com/ParogDev/ExileApiMcp.git
 ```
 
-### Step 3: Test the connection (optional)
+#### Step 3: Test the connection (optional)
 
 You can verify everything works before configuring your AI client:
 
@@ -76,7 +92,7 @@ If the plugin is **not** running, you'll see connection retries -- this is norma
 
 Press `Ctrl+C` to stop. The MCP server will reconnect automatically when configured as a client tool.
 
-### Step 4: Configure your MCP client
+#### Step 4: Configure your MCP client
 
 #### Claude Code
 
