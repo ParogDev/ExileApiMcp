@@ -112,7 +112,7 @@ Create or edit `.mcp.json` in your project root:
 }
 ```
 
-Replace the paths:
+Replace the paths with your actual locations. Keep the double backslashes (`\\`) -- JSON requires backslashes to be escaped:
 - `C:\\path\\to\\ExileApiMcp` -- where you cloned this repo
 - `C:\\path\\to\\ExileApi\\claude-bridge` -- your ExileApi install's `claude-bridge` folder
 
