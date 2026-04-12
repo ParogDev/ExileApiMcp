@@ -182,6 +182,12 @@ The MCP server can't reach the plugin. Check:
 - Does `bridge-port.txt` exist in your `BRIDGE_DIR`? If not, the plugin hasn't started its TCP server
 - Is another process using port 50900? The plugin will write the actual port to `bridge-port.txt`
 
+### Tools return stale or empty data
+
+The plugin runs on the game's main thread. If ExileApi is **not in the foreground**, the game thread may be throttled or paused, which means the plugin can't process queries and game state may not update.
+
+Fix: either keep ExileApi in the foreground while querying, or enable **Core > Force Foreground** in ExileApi's settings so the HUD keeps processing even when alt-tabbed.
+
 ### "Not connected to plugin" errors
 
 The MCP server started but lost its connection. This happens when:
@@ -209,6 +215,14 @@ This usually means the MCP server process crashed or the config path is wrong. C
 - The `--project` path in your `.mcp.json` is correct
 - Run `dotnet build` in the ExileApiMcp directory to check for build errors
 - Try `/mcp` in Claude Code to see connection status
+
+## Quick Start Prompt
+
+Once everything is set up, give your AI this prompt to verify the connection and start exploring:
+
+> I have ExileApiMcp configured as an MCP server. It connects to Path of Exile 2 via the ExileApi HUD overlay. Use the `get_bridge_status` tool to check the connection, then `get_all` to see my current game state. If tools hang or return errors, the HUD might not be in the foreground -- remind me to enable "Force Foreground" in ExileApi's Core settings.
+
+From there, the AI can query your character, inspect nearby entities, explore the object graph, and help you build plugins with live data.
 
 ## Authentication
 
