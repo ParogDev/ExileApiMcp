@@ -1,13 +1,13 @@
 # ExileApiMcp
 
-MCP server that exposes live Path of Exile 2 game state as [Model Context Protocol](https://modelcontextprotocol.io/) tools. It connects to the [What's an AI Bridge?](https://github.com/ParogDev/WhatsAnAiBridge) ExileApi plugin over TCP and makes game data queryable from Claude Code, VS Code Copilot, or any MCP-compatible AI client.
+MCP server that exposes live Path of Exile game state as [Model Context Protocol](https://modelcontextprotocol.io/) tools. It connects to the [What's an AI Bridge?](https://github.com/ParogDev/WhatsAnAiBridge) ExileApi plugin over TCP and makes game data queryable from Claude Code, VS Code Copilot, or any MCP-compatible AI client.
 
 > **What does this actually do?** When you're developing ExileApi plugins with an AI assistant, the AI can't see your game. This MCP server gives it eyes -- it can check your character's health, see nearby monsters, inspect UI panels, and explore the full ExileApi object graph in real time. Instead of you copy-pasting game data, the AI queries it directly.
 
 ## How It Works
 
 ```
-Path of Exile 2 (ExileApi HUD)
+Path of Exile (ExileApi HUD)
          |
   [What's an AI Bridge?]   <-- in-game plugin, runs on game thread
     TCP JSON-RPC 2.0 on localhost:50900
@@ -28,7 +28,7 @@ The two-process split means you can restart the MCP server without reloading the
 
 | Requirement | Details |
 |------------|---------|
-| **ExileApi HUD** | Installed and running. ExileApi is a third-party overlay framework for Path of Exile 2 |
+| **ExileApi HUD** | Installed and running. ExileApi is a third-party overlay framework for Path of Exile |
 | **What's an AI Bridge?** | [Plugin](https://github.com/ParogDev/WhatsAnAiBridge) installed in ExileApi's `Plugins/Source/` folder and enabled |
 | **.NET 10 SDK** | [Download here](https://dotnet.microsoft.com/download/dotnet/10.0) -- this is currently a preview SDK. Install the SDK (not just the runtime) |
 | **An MCP-compatible client** | [Claude Code](https://docs.anthropic.com/en/docs/claude-code), VS Code with Copilot, or any client supporting the [MCP standard](https://modelcontextprotocol.io/) |
@@ -37,7 +37,7 @@ The two-process split means you can restart the MCP server without reloading the
 
 ### Step 1: Verify the plugin is running
 
-Launch ExileApi with Path of Exile 2 running. In the ExileApi plugin list, make sure **What's an AI Bridge?** is enabled. You should see a small status indicator on screen:
+Launch ExileApi with Path of Exile running. In the ExileApi plugin list, make sure **What's an AI Bridge?** is enabled. You should see a small status indicator on screen:
 - **Green dot** = TCP server is up and idle
 - **Yellow dot** = processing a query  
 - **Grey dot** = TCP server is disabled (check plugin settings)
@@ -177,7 +177,7 @@ Capture gameplay snapshots for offline analysis (useful for debugging without th
 ### Tools hang or time out
 
 The MCP server can't reach the plugin. Check:
-- Is ExileApi running with Path of Exile 2?
+- Is ExileApi running with Path of Exile?
 - Is the **What's an AI Bridge?** plugin enabled? (check ExileApi's plugin list)
 - Does `bridge-port.txt` exist in your `BRIDGE_DIR`? If not, the plugin hasn't started its TCP server
 - Is another process using port 50900? The plugin will write the actual port to `bridge-port.txt`
@@ -220,7 +220,7 @@ This usually means the MCP server process crashed or the config path is wrong. C
 
 Once everything is set up, give your AI this prompt to verify the connection and start exploring:
 
-> I have ExileApiMcp configured as an MCP server. It connects to Path of Exile 2 via the ExileApi HUD overlay. Use the `get_bridge_status` tool to check the connection, then `get_all` to see my current game state. If tools hang or return errors, the HUD might not be in the foreground -- remind me to enable "Force Foreground" in ExileApi's Core settings.
+> I have ExileApiMcp configured as an MCP server. It connects to Path of Exile via the ExileApi HUD overlay. Use the `get_bridge_status` tool to check the connection, then `get_all` to see my current game state. If tools hang or return errors, the HUD might not be in the foreground -- remind me to enable "Force Foreground" in ExileApi's Core settings.
 
 From there, the AI can query your character, inspect nearby entities, explore the object graph, and help you build plugins with live data.
 
