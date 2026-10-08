@@ -31,6 +31,27 @@ const PATHS = {
   up: "M12 19V5M5 12l7-7 7 7",
   down: "M12 5v14M19 12l-7 7-7-7",
   arrowUpRight: "M7 17L17 7M8 7h9v9",
+  // Data explorer
+  chevronRight: "M9 6l6 6-6 6",
+  arrowLeft: "M19 12H5M12 5l-7 7 7 7",
+  arrowRight: "M5 12h14M12 5l7 7-7 7",
+  eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+  eyeOff: "M3 3l18 18M10.6 10.6A3 3 0 0 0 13.4 13.4M9.9 5.2A10.5 10.5 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 3.8M6.2 6.2A17 17 0 0 0 2 12s4 7 10 7a10 10 0 0 0 4.8-1.2",
+  lock: "M6 11V8a6 6 0 0 1 12 0v3M5 11h14v10H5z",
+  clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
+  puzzle: "M10 3a2 2 0 0 1 4 0v1h3a1 1 0 0 1 1 1v3h1a2 2 0 0 1 0 4h-1v3a1 1 0 0 1-1 1h-3v1a2 2 0 0 1-4 0v-1H7a1 1 0 0 1-1-1v-3H5a2 2 0 0 1 0-4h1V5a1 1 0 0 1 1-1h3z",
+  pencil: "M4 20h4L18 10l-4-4L4 16zM13 7l4 4",
+  send: "M22 2L11 13M22 2l-7 20-4-9-9-4z",
+  target: "M12 3v3M12 18v3M3 12h3M18 12h3M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10z",
+  square: "M5 5h14v14H5z",
+  checkSquare: "M5 5h14v14H5zM8.5 12.5l2.5 2.5 5-5",
+  list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
+  braces: "M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1",
+  play: "M7 4l13 8-13 8z",
+  pause: "M8 5v14M16 5v14",
+  dot: "M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
+  box: "M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5",
+  hash: "M5 9h14M5 15h14M9.5 4l-2 16M16.5 4l-2 16",
 } as const;
 
 export type IconName = keyof typeof PATHS;

@@ -28,9 +28,9 @@ jobs:
       - name: Build
         run: dotnet build ExileApiMcp.csproj -c Release -nologo
 
-      # The MCP App UI is built locally in a container (ui-src/build.ps1) and the single-file
-      # output is committed as ui/player-stats.html. Rebuild it here with the same Node version
-      # and lockfile, and fail if the committed bundle doesn't match its source.
+      # The MCP App UIs are built locally in a container (ui-src/build.ps1) and the single-file
+      # outputs are committed as ui/*.html. Rebuild them here with the same Node version and
+      # lockfile, and fail if a committed bundle doesn't match its source.
       - name: UI typecheck, build and freshness check
         working-directory: ui-src
         env:
@@ -38,7 +38,9 @@ jobs:
         run: |
           npm ci --no-audit --no-fund --no-progress
           npm run build
-          if ! cmp -s dist/player-stats.html ../ui/player-stats.html; then
-            echo "::error file=ui/player-stats.html::Stale UI bundle: run ui-src/build.ps1 and commit ui/player-stats.html"
-            exit 1
-          fi
+          for app in player-stats data-explorer; do
+            if ! cmp -s "dist/$app.html" "../ui/$app.html"; then
+              echo "::error file=ui/$app.html::Stale UI bundle: run ui-src/build.ps1 and commit ui/$app.html"
+              exit 1
+            fi
+          done
