@@ -14,7 +14,7 @@
 // bridge's: {error: "no_address" | "no_struct" | "unreadable", message}.
 
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import type { Access, AccessFunction, Candidate, CompareResult, CorrelateResult, Decompiled, FieldAccessResult, Finding, FindingsResult, LayoutField, LayoutResult, PopulationResult, ReadResult, ReadSlot, VerifyResult, WatchResult, WhereResult } from "../src/memory/types";
+import type { Access, AccessFunction, AwaitResult, Candidate, CompareResult, CorrelateResult, Decompiled, ExperimentChange, ExperimentRecord, FieldAccessResult, Finding, FindingsResult, GuideState, LayoutField, LayoutResult, PopulationResult, PresetsResult, ReadResult, ReadSlot, SummaryResult, VerifyResult, WatchResult, WhereResult } from "../src/memory/types";
 import type { CallLogEntry } from "./fakeServer";
 import layoutLife from "./memory/layout-life.json";
 import layoutStash from "./memory/layout-stashtab.json";
@@ -31,6 +31,13 @@ import findingsFixture from "./memory/findings.json";
 import verifyAffinity from "./memory/verify-affinity.json";
 import accessFlags from "./memory/field-access-stash-flags.json";
 import accessAffinity from "./memory/field-access-stash-affinity.json";
+import presetsFixture from "./memory/experiment-presets.json";
+import recordCtrlClick from "./memory/experiment-ctrl-click.json";
+import recordSwitchTab from "./memory/experiment-switch-tab.json";
+import guideFixture from "./memory/guide-state.json";
+
+/** What the fake user does when await_change waits: acts after actMs, never acts (timeout), or the host gives up first. */
+export type FakeUser = "acts" | "nothing" | "host-timeout";
 
 /** ghidra-down: every find_field_access fails like the real server does when the headless Ghidra isn't up. */
 export type MemoryScenario = "live" | "offline" | "flaky" | "ghidra-down";
@@ -63,6 +70,24 @@ export class FakeMemory {
   /** Offsets already scanned (struct:offset): the stash tab's Flags and Affinity come pre-cached like on the dev machine. */
   private scanned = new Set<string>(["GameOffsets.ServerStashTabOffsets:61", "GameOffsets.ServerStashTabOffsets:63", "GameOffsets.ServerStashTabOffsets:56", "GameOffsets.ServerStashTabOffsets:52", "GameOffsets.ServerStashTabOffsets:50", "GameOffsets.ServerStashTabOffsets:49", "GameOffsets.ServerStashTabOffsets:48"]);
 
+  // Guided experiments. The records are the two real PoE1 runs (stash-ctrl-click: 4 steps, stash-switch-tab: 2 steps);
+  // await_change appends synthesised steps shaped like them, and the fake guide card follows the same states the HUD's does.
+  /** The fake user: acts `actMs` after the card appears, or never, or the host times out first. */
+  user: FakeUser = "acts";
+  actMs = 2500;
+  /** A "nothing happened" wait ends after this long (the real one honours timeoutMs). */
+  noActionMs = 5000;
+  private records = new Map<string, ExperimentRecord>([
+    ["stash-ctrl-click", structuredClone((recordCtrlClick as unknown as SummaryResult).record)],
+    ["stash-switch-tab", structuredClone((recordSwitchTab as unknown as SummaryResult).record)],
+  ]);
+  private recordUpdated = new Map<string, number>([["stash-ctrl-click", Date.now() - 9 * 60_000], ["stash-switch-tab", Date.now() - 38 * 60_000]]);
+  private guide: GuideState = structuredClone(guideFixture as unknown as GuideState);
+  /** Game state the synthesised steps move: inventory and stash item counts, visible tab, hover. */
+  private game = { inv: 11, stash: 45, tab: 0, tabItems: 84, invId: 156, hover: 0 };
+  private actNow?: () => void;
+  private agentBusy = false;
+
   async handle(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
     const t0 = performance.now();
     const jitter = this.scenario === "flaky" ? Math.random() * 600 : Math.random() * 20;
@@ -74,7 +99,7 @@ export class FakeMemory {
       if (this.scenario === "offline" || (this.scenario === "flaky" && Math.random() < 0.3)) {
         throw new Error("The poe1 HUD bridge is not reachable (connection refused on 127.0.0.1:50900). Is the HUD running?");
       }
-      const result = this.dispatch(name, args);
+      const result = name === "await_change" ? await this.awaitChange(args) : this.dispatch(name, args);
       entry.outcome = result.isError ? "error" : "ok";
       return result;
     } catch (e) {
@@ -115,7 +140,164 @@ export class FakeMemory {
       case "findings": return this.findings(a);
       case "verify_finding": return this.verify(a);
       case "find_field_access": return this.fieldAccess(a);
+      case "experiment_presets": return this.presets(a);
+      case "experiment_summary": return this.summary(a);
+      case "guide": return this.guideTool(a);
       default: throw new Error(`Unknown tool: ${name}`);
+    }
+  }
+
+  // ── Guided experiments ─────────────────────────────────────────────
+
+  /** The user acts now (resolves a pending await_change at once). */
+  act() { this.actNow?.(); }
+
+  private presets(a: Record<string, unknown>): CallToolResult {
+    const all = (presetsFixture as unknown as PresetsResult).presets;
+    const game = a.game === "poe2" ? "poe2" : a.game === "poe1" ? "poe1" : undefined;
+    const presets = all.filter((p) => !game || p.games.includes(game));
+    const records = [...this.records.keys()].map((name) => ({ name, updated: new Date(this.recordUpdated.get(name) ?? Date.now()).toISOString() })).sort((x, y) => y.updated.localeCompare(x.updated)).slice(0, 30);
+    return json({ presets, records });
+  }
+
+  private summary(a: Record<string, unknown>): CallToolResult {
+    const name = String(a.experiment ?? "").trim();
+    if (!name) return this.presets(a);
+    const record = this.records.get(name);
+    if (!record) return err("error", `No experiment record '${name}'.`);
+    const labels = [...new Set(record.steps.map((s) => s.label))].map((label) => ({ label, repeats: record.steps.filter((s) => s.label === label).length, consistent: consistent(record, label) }));
+    return json({ experiment: name, labels, record: structuredClone(record) } satisfies SummaryResult);
+  }
+
+  private setGuide(set: Partial<GuideState> & { clear?: boolean }) {
+    const g = this.guide;
+    if (set.clear) { g.instruction = null; g.status = "idle"; g.detail = null; g.step = null; g.steps = null; }
+    if (set.title !== undefined) g.title = set.title;
+    if (set.instruction !== undefined) g.instruction = set.instruction;
+    if (set.status !== undefined) g.status = set.status;
+    if (set.step !== undefined) g.step = set.step;
+    if (set.steps !== undefined) g.steps = set.steps;
+    if (set.detail !== undefined) g.detail = set.detail;
+    g.rev++;
+    this.onChange?.();
+  }
+
+  private guideLog(text: string, kind: string) {
+    const at = new Date().toTimeString().slice(0, 8);
+    this.guide.log = [...(this.guide.log ?? []), { at, kind, text }].slice(-40);
+    this.guide.rev++;
+  }
+
+  private guideTool(a: Record<string, unknown>): CallToolResult {
+    const set: Partial<GuideState> & { clear?: boolean } = {};
+    if (a.clear === true) set.clear = true;
+    for (const k of ["title", "instruction", "status", "detail"] as const) if (typeof a[k] === "string") (set as Record<string, unknown>)[k] = a[k];
+    for (const k of ["step", "steps"] as const) if (typeof a[k] === "number") set[k] = a[k] as number;
+    if (Object.keys(set).length) this.setGuide(set);
+    if (typeof a.log === "string") this.guideLog(a.log, "agent");
+    return json(structuredClone(this.guide));
+  }
+
+  /** One step: the card goes waiting -> (the user acts) detected -> captured, or failed after the wait, like the real tool. */
+  private async awaitChange(a: Record<string, unknown>): Promise<CallToolResult> {
+    const experiment = String(a.experiment ?? "");
+    const label = String(a.label ?? "step");
+    if (!/^[\w.-]{1,64}$/.test(experiment)) return err("error", "experiment: letters, digits, '-', '_' or '.', up to 64 characters.");
+    const watch = Array.isArray(a.watch) ? (a.watch as string[]) : [];
+    if (!watch.length) return err("error", "Pass at least one watch spec (see experiment_presets).");
+    const timeoutMs = Math.min(120_000, Math.max(1000, Number(a.timeoutMs ?? 60_000)));
+    const step = typeof a.step === "number" ? a.step : null, steps = typeof a.steps === "number" ? a.steps : null;
+    this.setGuide({ title: `Experiment: ${experiment}`, instruction: typeof a.instruction === "string" ? a.instruction : `Do the '${label}' action now`, status: "waiting", step, steps, detail: `Watching ${watch.length} value(s) for up to ${Math.round(timeoutMs / 1000)} s` });
+    this.guideLog(`Claude: waiting for '${label}'`, "step");
+    const t0 = Date.now();
+    if (this.user === "host-timeout") {
+      await sleep(Math.min(timeoutMs, 4000));
+      throw new Error("MCP error -32001: Request timed out");
+    }
+    if (this.user === "nothing") {
+      await sleep(Math.min(timeoutMs, this.noActionMs));
+      this.setGuide({ status: "failed", detail: "Nothing lasting changed - Claude will ask again" });
+      this.guideLog(`No lasting change for '${label}'`, "warn");
+      return json({ experiment, label, changed: false, transientChanges: 3, note: `No lasting change within ${timeoutMs} ms (3 brief change(s) that reverted were ignored). Did the action happen in game (window focused, panel open), and do the watched values follow it? Run the step again.` } satisfies AwaitResult);
+    }
+    await Promise.race([sleep(this.actMs), new Promise<void>((r) => { this.actNow = r; })]);
+    this.actNow = undefined;
+    const changedAfterMs = Date.now() - t0;
+    this.setGuide({ status: "detected", detail: "Change seen - hold still" });
+    await sleep(600);
+    const changes = this.stepChanges(label, watch, this.records.get(experiment)?.steps.filter((s) => s.label === label).length ?? 0);
+    const record = this.records.get(experiment) ?? { experiment, steps: [] };
+    record.steps.push({ label, at: new Date().toISOString(), game: "poe1", changedAfterMs, watch, changes });
+    this.records.set(experiment, record);
+    this.recordUpdated.set(experiment, Date.now());
+    const repeats = record.steps.filter((s) => s.label === label).length;
+    const head = changes.find((c) => c.kind === "value") ?? changes[0];
+    const summary = head ? `${shortKey(head.key)}: ${head.from} -> ${head.to}${changes.length > 1 ? ` (+${changes.length - 1} more)` : ""}` : "captured";
+    this.setGuide({ status: "captured", detail: summary });
+    this.guideLog(`Captured '${label}': ${summary}`, "result");
+    const o: Extract<AwaitResult, { changed: true }> = { experiment, label, changed: true, step: record.steps.length, repeatsOfThisLabel: repeats, changedAfterMs, changes };
+    if (repeats >= 2) o.consistent = consistent(record, label);
+    return json(o);
+  }
+
+  /** Changes shaped like the real records, per preset label; the second repeat adds a "sometimes" side effect. */
+  private stepChanges(label: string, watch: string[], before: number): ExperimentChange[] {
+    const g = this.game;
+    const spec = (frag: string) => watch.find((w) => w.includes(frag)) ?? watch[0];
+    const val = (frag: string, from: number | string, to: number | string): ExperimentChange => ({ watch: spec(frag), kind: "value", key: `${spec(frag)} value`, from: String(from), to: String(to) });
+    const mem = watch.find((w) => w.startsWith("memory:"));
+    const bytes = (off: number, field: string, from: string, to: string, bits: number[]): ExperimentChange[] => mem ? [{ watch: mem, kind: "bytes", key: `${mem} +${off} ${field}`, off, size: from.split(" ").length, field, from, to, bitsFlipped: bits }] : [];
+    const out: ExperimentChange[] = [];
+    switch (label) {
+      case "to-inventory":
+        if (before % 2 === 1) out.push(val("VisibleStash.ServerInventory.ItemCount", g.stash, g.stash - 1));
+        out.push(val("PlayerInventories[0]", g.inv, g.inv + 1));
+        out.push(...bytes(176, "(unmapped)", hex2(g.stash), hex2(g.stash - 1), [0]));
+        g.inv++; g.stash--; break;
+      case "to-stash":
+        if (before % 2 === 1) out.push(val("VisibleStash.ServerInventory.ItemCount", g.stash, g.stash + 1));
+        out.push(val("PlayerInventories[0]", g.inv, g.inv - 1));
+        out.push(...bytes(176, "(unmapped)", hex2(g.stash), hex2(g.stash + 1), [0]));
+        g.inv--; g.stash++; break;
+      case "next-tab":
+        out.push(val("IndexVisibleStash", g.tab, g.tab + 1), val("VisibleStash.ItemCount", g.tabItems, 0), val("ServerInventoryId", g.invId, 0));
+        g.tab++; break;
+      case "prev-tab":
+        out.push(val("IndexVisibleStash", g.tab, g.tab - 1), val("VisibleStash.ItemCount", 0, g.tabItems), val("ServerInventoryId", 0, g.invId));
+        g.tab--; break;
+      case "hover":
+        out.push(val("UIHoverX", 0, 612.5), val("ItemHoverState", 0, 1), ...bytes(304, "(unmapped)", "00", "01", [0]));
+        g.hover = 1; break;
+      case "unhover":
+        out.push(val("UIHoverX", 612.5, 0), val("ItemHoverState", 1, 0), ...bytes(304, "(unmapped)", "01", "00", [0]));
+        g.hover = 0; break;
+      default:
+        out.push(val("", before, before + 1));
+    }
+    return out;
+  }
+
+  /** Simulate the agent running the switch-tab preset into a new record: the follow-along state, end to end. */
+  async agentRun(name = "stash-switch-tab-3") {
+    if (this.agentBusy) return;
+    this.agentBusy = true;
+    try {
+      const p = (presetsFixture as unknown as PresetsResult).presets.find((x) => x.id === "stash-switch-tab")!;
+      const plan = [...p.steps, ...p.steps];
+      this.setGuide({ title: `Experiment: ${name}`, status: "info", instruction: p.setup, detail: "Claude is setting up", step: null, steps: null });
+      await sleep(1500);
+      for (let i = 0; i < plan.length; i++) {
+        const s = plan[i];
+        const saved = { user: this.user, actMs: this.actMs };
+        this.user = "acts"; this.actMs = 3000;
+        try { await this.awaitChange({ experiment: name, label: s.label, instruction: s.instruction, watch: p.watch, step: i + 1, steps: plan.length, timeoutMs: 60_000 }); }
+        finally { this.user = saved.user; this.actMs = saved.actMs; }
+        await sleep(2200);
+      }
+      this.setGuide({ status: "done", instruction: "IndexVisibleStash, VisibleStash.ItemCount and ServerInventoryId follow the tab every time", detail: "Nothing to undo in game: you are back on the tab you started on", step: plan.length, steps: plan.length });
+      this.guideLog(`Claude: ${name} done (${plan.length} steps)`, "agent");
+    } finally {
+      this.agentBusy = false;
     }
   }
 
@@ -595,6 +777,26 @@ function resize(r: ReadResult, size: number): ReadResult {
   const slots = r.slots.filter((s) => s.off + 8 <= size);
   for (let off = slots.length ? slots[slots.length - 1].off + 8 : 0; off + 8 <= size; off += 8) slots.push({ off, hex: "0x0", kind: "zero" });
   return { ...r, size, slots, hex: toRows(b) };
+}
+
+/** Change keys present in every repeat of a label vs only some ("key (1/2)"), like ExperimentTools.Consistent. */
+function consistent(record: ExperimentRecord, label: string): { repeats: number; always: string[]; sometimes: string[] } {
+  const steps = record.steps.filter((s) => s.label === label);
+  const sets = steps.map((s) => new Set(s.changes.map((c) => c.key)));
+  const all = [...new Set(sets.flatMap((s) => [...s]))];
+  return { repeats: steps.length, always: all.filter((k) => sets.every((s) => s.has(k))), sometimes: all.filter((k) => !sets.every((s) => s.has(k))).map((k) => `${k} (${sets.filter((s) => s.has(k)).length}/${steps.length})`) };
+}
+
+/** "value:GameController.A.B.C value" -> "B.C" (the server's receipt wording). */
+function shortKey(key: string): string {
+  let k = key.includes(":") ? key.slice(key.indexOf(":") + 1) : key;
+  k = k.split(" ")[0];
+  const parts = k.split(".");
+  return parts.length <= 2 ? k : parts.slice(-2).join(".");
+}
+
+function hex2(v: number): string {
+  return `${(v & 0xff).toString(16).toUpperCase().padStart(2, "0")} ${((v >> 8) & 0xff).toString(16).toUpperCase().padStart(2, "0")}`;
 }
 
 function hash(s: string): number {

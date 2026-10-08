@@ -6,6 +6,7 @@ import { hexOff } from "./bytes";
 import { mix } from "./paint";
 import type { ExpState, MemoryStore, Snapshot } from "./store";
 import type { ByteChangeStep, CompareResult, CompareStep, LayoutField } from "./types";
+import { Run } from "./Run";
 
 // Experiments: named snapshots (memory_snapshot) compared in order (memory_compare). The timeline shows each step
 // (one in-game action) and what flipped; the matrix below has one row per (item, byte) that ever changed and one
@@ -13,7 +14,41 @@ import type { ByteChangeStep, CompareResult, CompareStep, LayoutField } from "./
 
 export interface ExperimentsHost { send?: (text: string) => void; ask?: (text: string) => void }
 
-export function Experiments({ store, snap, fullscreen, host }: { store: MemoryStore; snap: Snapshot; fullscreen: boolean; host: ExperimentsHost }) {
+/** The Experiments tab: the guided-experiment runner (default) or the snapshot timeline. */
+export function Experiments({ store, snap, fullscreen, host, now }: { store: MemoryStore; snap: Snapshot; fullscreen: boolean; host: ExperimentsHost; now: number }) {
+  const view = snap.exp.view;
+  const running = !!snap.run.waiting || !!snap.run.following;
+  const toggle = (
+    <div className="flex items-center gap-2">
+      <div className="flex overflow-hidden rounded-md border border-line" role="radiogroup" aria-label="Experiments view">
+        {([["run", "play", "Guided run", "One in-game action per step, captured and repeated: run a preset or follow Claude's run"], ["snapshots", "layers", "Snapshots", "Named snapshots compared in order: what one change flipped"]] as const).map(([id, icon, label, title]) => (
+          <button key={id} type="button" role="radio" aria-checked={view === id} onClick={() => store.setExpView(id)} title={title}
+            className={`flex h-6 items-center gap-1 px-2 text-[11px] font-medium ${view === id ? "bg-fg text-surface" : "text-fg-2 hover:bg-surface-3 hover:text-fg"}`}>
+            <Icon name={icon} className="size-3" />{label}
+            {id === "run" && running && view !== id && <span className="size-1.5 rounded-full bg-ring animate-pulse" title="A step is in progress" />}
+          </button>
+        ))}
+      </div>
+      {view === "run" && snap.run.phase !== "pick" && snap.run.experiment && <span className="truncate font-code text-[10.5px] text-fg-3" title="Experiment record">{snap.run.experiment}</span>}
+    </div>
+  );
+  if (view === "run") {
+    return (
+      <div className={fullscreen ? "flex min-h-0 flex-1 flex-col gap-2.5" : "flex flex-col gap-2.5"}>
+        {toggle}
+        <Run store={store} snap={snap} fullscreen={fullscreen} host={host} now={now} />
+      </div>
+    );
+  }
+  return (
+    <div className={fullscreen ? "flex min-h-0 flex-1 flex-col gap-2.5" : "flex flex-col gap-2.5"}>
+      {toggle}
+      <SnapshotExperiments store={store} snap={snap} fullscreen={fullscreen} host={host} />
+    </div>
+  );
+}
+
+function SnapshotExperiments({ store, snap, fullscreen, host }: { store: MemoryStore; snap: Snapshot; fullscreen: boolean; host: ExperimentsHost }) {
   const exp = snap.exp;
   const compare = exp.compare;
   // Field names for the changed bytes. memory_compare carries no struct, so: collection snapshots ("Name=x [i]"

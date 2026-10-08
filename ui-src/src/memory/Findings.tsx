@@ -48,7 +48,7 @@ export function Findings({ store, snap, fullscreen, host }: { store: MemoryStore
       {game && toCheck.length > 0 && fnd.status !== "toCheck" && (
         <div className="flex items-center gap-2 border-b border-line bg-info/5 px-3 py-1.5 text-[11px] text-fg-2">
           <Icon name="info" className="size-3.5 shrink-0 text-info" />
-          <span><span className="font-semibold text-fg">{toCheck.length}</span> finding{toCheck.length === 1 ? "" : "s"} verified on the other game but not on {gameName(game)}: a hypothesis here until checked.</span>
+          <span><span className="font-semibold text-fg">{toCheck.length}</span> finding{toCheck.length === 1 ? "" : "s"} verified on the other game but not on {gameName(game)}: a hypothesis on {gameName(game)} until checked.</span>
           <button type="button" onClick={() => store.setFindingsStatus("toCheck")} className="ml-auto shrink-0 text-[11px] font-medium text-info underline-offset-2 hover:underline">Show them</button>
         </div>
       )}
@@ -99,7 +99,7 @@ function Row({ f, store, fnd, game, host, struct }: { f: Finding; store: MemoryS
           <div className="flex items-center gap-1.5 truncate text-[10.5px] text-fg-3">
             <span className="truncate font-code">{subjectLabel(f.subject)}</span>
             <span className="truncate font-code opacity-70">{f.id}</span>
-            {onStruct && <span className="shrink-0 rounded px-1 text-[9.5px] font-semibold text-m-cand" style={{ background: mix("cand", 14) }}>on screen</span>}
+            {onStruct && <span className="shrink-0 rounded px-1 text-[9.5px] font-semibold text-m-cand" style={{ background: mix("cand", 14) }} title={`About ${struct}, the struct open in the Struct view (not the game screen). Expand for "show in struct".`}>this struct</span>}
           </div>
         </button>
         {GAMES.map((g) => <StatusCell key={g} f={f} g={g} current={game} />)}

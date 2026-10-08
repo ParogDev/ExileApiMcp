@@ -273,6 +273,87 @@ export interface VerifyResult {
   correlate?: LabelFinding;
 }
 
+// ── Guided experiments (mirrors Tools/ExperimentTools.cs and Tools/GuideTools.cs) ───
+
+/** One ready-made experiment from Knowledge/experiments.json. */
+export interface ExperimentPreset {
+  id: string;
+  title: string;
+  games: Game[];
+  question: string;
+  setup: string;
+  steps: { label: string; instruction: string }[];
+  watch: string[];
+}
+
+/** experiment_presets {game?}. */
+export interface PresetsResult {
+  presets: ExperimentPreset[];
+  /** Experiment records on disk, newest first. */
+  records: { name: string; updated: string }[];
+}
+
+/** One change await_change saw between the baseline and the settled state. */
+export interface ExperimentChange {
+  /** The watch spec it belongs to ("value:GameController...."). */
+  watch: string;
+  kind: "value" | "bytes" | "label" | "moved" | string;
+  /** "spec key" for values, "spec item X +off Field" for bytes. */
+  key: string;
+  /** Collection item ("Name#0") for label / bytes changes of a collection. */
+  item?: string | null;
+  off?: number;
+  size?: number;
+  /** HUD field name covering the bytes, "(unmapped)" when none. */
+  field?: string;
+  from: string;
+  to: string;
+  /** Flipped bits within the byte range (absent when > 16). */
+  bitsFlipped?: number[] | null;
+}
+
+/** Change keys seen in every repeat of a label (evidence) vs only some ("key (1/2)"). */
+export interface Consistent { repeats: number; always: string[]; sometimes: string[] }
+
+/** await_change: changed:true with the diff, or changed:false after the timeout. */
+export type AwaitResult =
+  | { experiment: string; label: string; changed: true; step: number; repeatsOfThisLabel: number; changedAfterMs: number; changes: ExperimentChange[]; consistent?: Consistent; transientChangesIgnored?: number }
+  | { experiment: string; label: string; changed: false; transientChanges: number; note: string };
+
+/** One step of an experiment record on disk. */
+export interface RecordStep {
+  label: string;
+  at: string;
+  game?: Game;
+  changedAfterMs: number;
+  watch: string[];
+  changes: ExperimentChange[];
+}
+
+export interface ExperimentRecord { experiment: string; steps: RecordStep[] }
+
+/** experiment_summary {experiment}. */
+export interface SummaryResult {
+  experiment: string;
+  labels: { label: string; repeats: number; consistent: Consistent }[];
+  record: ExperimentRecord;
+}
+
+/** The in-game agent guide card (guide with no arguments returns it). */
+export type GuideStatus = "idle" | "waiting" | "detected" | "settling" | "captured" | "failed" | "info" | "done";
+
+export interface GuideState {
+  ok?: boolean;
+  rev: number;
+  title?: string | null;
+  instruction?: string | null;
+  step?: number | null;
+  steps?: number | null;
+  status: GuideStatus | string;
+  detail?: string | null;
+  log?: { at: string; kind: "step" | "result" | "warn" | "agent" | string; text: string }[];
+}
+
 // ── Code access (find_field_access: static analysis of the Ghidra copy of the exe) ──
 
 export type AccessKind = "read" | "write" | "bit-test" | "set-bits" | "clear-bits" | "address-of";

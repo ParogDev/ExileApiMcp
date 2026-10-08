@@ -38,7 +38,9 @@ internal static class McpSetup
         per step, shown in the game itself (await_change with instruction drives the HUD's agent guide card: waiting ->
         captured / failed), repeat it 2-3 times, then experiment_summary - what changes every time is the evidence.
         Users find this engaging and it settles questions that static reading can't. Never send input yourself.
-        experiment_presets has ready-made stash experiments.
+        experiment_presets has ready-made stash experiments. Knowledge pack shared/working-with-users says how to word
+        an instruction and what goes on the card, in detail and in chat. The Memory View's Experiments tab
+        (show_memory_view) lets the user run a preset themselves or follow your run step by step.
         find_field_access explains a field from the game's code: the functions that read, write or bit-test it,
         decompiled from the Ghidra copy (static; never the running game). Needs Ghidra headless running.
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
@@ -95,7 +97,9 @@ internal static class McpSetup
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var name = request.Params?.Name ?? "?";
                 // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
-                if (name is not ("stats_ui_state" or "guide" or "await_change" or "bridge_status")
+                // Polls and the experiment tools stay out of it: await_change writes its own lines, and the Memory View's
+                // experiment runner re-reads the record and presets while it follows along.
+                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "bridge_status")
                     && request.Services?.GetService(typeof(BridgeRegistry)) is BridgeRegistry bridges)
                     _ = ExileApiMcp.Tools.GuideTools.LogAsync(bridges, null, $"Claude: {name}{CallHint(request.Params?.Arguments)}", "agent", CancellationToken.None);
                 try
