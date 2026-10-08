@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.14.0";
+    public const string Version = "3.15.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -33,6 +33,9 @@ internal static class McpSetup
         ranges and structure-looking data in them. watch_memory finds the bytes and bits that change when the user does
         something. Their 'ghidra' addresses go straight to the ghidra MCP (vtable -> xrefs -> constructor). Knowledge
         pack shared/memory-mapping has the method. show_memory_view opens it for the user. Read-only.
+        When the user must do something in game, say it in the game: pass instruction to await_change (it shows a sticky
+        card in the HUD's agent guide and follows the step) or call guide. Never send input yourself; one action per
+        step, repeated 2-3 times, then experiment_summary (experiment_presets has ready-made stash experiments).
         find_field_access explains a field from the game's code: the functions that read, write or bit-test it,
         decompiled from the Ghidra copy (static; never the running game). Needs Ghidra headless running.
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
@@ -58,6 +61,21 @@ internal static class McpSetup
         All tools are read-only toward the game; none send input.
         """;
 
+    /// <summary>The most telling argument of a call (path / expression / key...), shortened, for the guide log.</summary>
+    private static string CallHint(IDictionary<string, System.Text.Json.JsonElement>? args)
+    {
+        if (args == null) return "";
+        foreach (var k in new[] { "path", "expression", "key", "plugin", "id", "offset", "address", "name" })
+            if (args.TryGetValue(k, out var v) && v.ValueKind is System.Text.Json.JsonValueKind.String or System.Text.Json.JsonValueKind.Number)
+            {
+                var s = v.ToString();
+                if (s.StartsWith("GameController.", StringComparison.Ordinal)) s = s["GameController.".Length..];
+                if (s.Length > 60) s = "..." + s[^57..];
+                return $" {s}";
+            }
+        return "";
+    }
+
     public static IMcpServerBuilder AddExileApiMcp(this IServiceCollection services)
     {
         services.AddSingleton<BridgeRegistry>();
@@ -73,6 +91,10 @@ internal static class McpSetup
                 // the only record of what an MCP App actually called. Successful polls are skipped (1/s).
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var name = request.Params?.Name ?? "?";
+                // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
+                if (name is not ("stats_ui_state" or "guide" or "await_change" or "bridge_status")
+                    && request.Services?.GetService(typeof(BridgeRegistry)) is BridgeRegistry bridges)
+                    _ = ExileApiMcp.Tools.GuideTools.LogAsync(bridges, null, $"Claude: {name}{CallHint(request.Params?.Arguments)}", "agent", CancellationToken.None);
                 try
                 {
                     var result = await next(request, ct);

@@ -28,6 +28,7 @@
     <!-- Knowledge packs served by the knowledge tool / exile://knowledge/{game}/{topic}. -->
     <EmbeddedResource Include="Knowledge\**\*.md" LogicalName="knowledge/%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="Knowledge\findings.json" LogicalName="knowledge/findings.json" />
+    <EmbeddedResource Include="Knowledge\experiments.json" LogicalName="knowledge/experiments.json" />
     <!-- The UI's TypeScript sources and npm files are not part of the .NET build (the Web SDK would
          otherwise copy every *.json into the output). -->
     <Content Remove="ui-src\**;desktop-extension\**" />
