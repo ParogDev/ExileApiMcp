@@ -21,12 +21,28 @@ How to see what the HUD maps in a game struct, what it doesn't, and confirm it i
   - then call `get_xrefs_to?address=`, `decompile_function?address=` and `read_memory?address=&length=`.
   - Use bearer `GHIDRA_MCP_AUTH_TOKEN` on every call.
 
+## Getting to empirical truth (the method)
+Don't name a byte from one sample. Each step below produces counts and counterexamples:
+1. **Hypothesis** from one observation (`memory_layout`, `watch_memory`).
+2. **Population check:** `memory_correlate path=<collection> labels=[<known properties>]`.
+   - It tests every bit of the range against each label (non-zero, each of its bits, each common value, "function of the value") and finds where the label itself is stored.
+   - A finding needs ≥ 3 items on each side; single-item matches are coincidence-prone (text, pointers) and are only counted.
+   - Near-misses list their counterexamples, so look at those items.
+3. **One-variable experiment:** `memory_snapshot name=baseline`, the user changes exactly one thing, then `memory_snapshot name=after`, then `memory_compare names=[baseline, after]`. Change it back and snapshot again: the answer is the bit that flips on and back with nothing else.
+4. **Look for counterexamples** in states the population doesn't cover (e.g. several affinities on one tab), then repeat 2.
+5. **Confirm the meaning in Ghidra** where code tests the bit, and record it here.
+
 ## Worked example: PoE1 stash tab affinities (`ServerStashTabOffsets`)
-- **`Affinity` (+63, UInt32) is a bit mask, one bit per affinity type.** Read from tabs named after their affinity:
-  - Currency = bit 3, Unique = 4, Divination = 6, Essence = 8, Fragment = 9, Delve = 12, Blight = 13, Metamorph = 14, Delirium = 15, Flask = 17, Gem = 18.
-  - Bits 5, 7, 10 and 11 are in use but unnamed; one of them is Map and one is Mercenary.
-- **Each affinity belongs to one tab only.** Giving it to another tab clears it from the previous one: `watch_memory` saw bit 11 move from one tab to another.
-- **`Flags` (+61) gains bit 6 (0x02 to 0x42) when a tab gets an affinity.** Tabs with affinities read 0x42. The HUD doesn't name this bit.
+- **`Affinity` (+63, UInt32) is a bit mask; a tab can hold several** (1, 2 and 4 seen).
+- **Each affinity belongs to one tab only.** Ticking it elsewhere clears it from the previous tab, as `watch_memory` and the snapshots showed.
+- **The bit index is the game's tab-type id.**
+  - On all 9 tabs with a dedicated type, affinity bit = `TabType` value (population check): Currency 3, Unique 4, Divination 6, Essence 8, Delve 12, Blight 13, Metamorph 14, Delirium 15, Gem 18.
+  - From tabs named after their affinity: Fragment 9, Flask 17.
+  - The HUD's `InventoryTabType` enum names bits 7 and 16 "Quad" and "Folder", which are not affinities, and has no name for 11 or 21. Name those with the one-variable experiment.
+- **`Flags` (+61):**
+  - bit 6 = has an affinity (11 vs 60 tabs, 0 counterexamples, any number of affinities);
+  - bit 1 = tab has a type (`TabType` ≠ 0; 63 vs 8, 0 counterexamples).
+  - Neither is named by the HUD.
 - **How it was found:** `watch_memory path=...PlayerStashTabs[33] size=96 durationMs=60000` while the user ticked and confirmed affinities in the tab's settings. The change lands only after the confirm button (the server applies it).
 - **Pitfall: the tab's address can change.** The array was reallocated while the settings window was open. Watch by path, which is re-resolved on every sample, not by a stored address.
 
