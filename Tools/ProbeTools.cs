@@ -183,6 +183,38 @@ public static class ProbeTools
         return new JArray(hits.OfType<JObject>().GroupBy(h => h["offset"]!.Value<int>()).Select(g => g.Last()));
     }
 
+    [McpServerTool(Name = "memory_population", Title = "Raw bytes of every item in a collection", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("The same byte range from every item of a collection, with per-item labels, as hex - the raw data behind " +
+                 "memory_correlate, for viewing it as a grid (items x bytes) or checking a hypothesis by eye. Prefer " +
+                 "memory_correlate for conclusions.")]
+    public static async Task<CallToolResult> MemoryPopulation(BridgeRegistry bridges,
+        [Description("Walker path to a collection of memory objects")] string path,
+        [Description("Per-item properties to include (dotted property paths), e.g. [\"Name\",\"Affinity\",\"TabType\"]")] string[]? labels = null,
+        [Description("Start of the range inside each item, bytes")] int offset = 0,
+        [Description("Bytes per item (default: the struct size the HUD reads; max 1024)")] int size = 0,
+        [Description("Max items (default 200)")] int limit = 200,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var population = await Collect(bridges, game, path, offset, size, limit, labels ?? [], ct);
+        var items = new JArray(((JArray)population["items"]!).OfType<JObject>().Select(i => new JObject
+        {
+            ["index"] = i["index"], ["address"] = i["address"], ["labels"] = i["labels"],
+            ["hex"] = BitConverter.ToString(Convert.FromBase64String(i["data"]!.ToString())).Replace("-", " "),
+        }));
+        var o = new JObject
+        {
+            ["path"] = path, ["offset"] = offset, ["size"] = population["size"], ["struct"] = population["struct"],
+            ["count"] = items.Count, ["items"] = items,
+        };
+        if (population["truncated"] != null) o["truncated"] = population["truncated"];
+        var sb = new StringBuilder($"{items.Count} items of {path}, bytes +{offset}..+{offset + population["size"]!.Value<int>() - 1}\n");
+        foreach (var i in items.OfType<JObject>().Take(40))
+            sb.Append($"  [{i["index"]}] {i["labels"]?.ToString(Formatting.None)} {i["hex"]}\n");
+        if (items.Count > 40) sb.Append($"  ... {items.Count - 40} more (structuredContent has all)");
+        return Result(sb.ToString().TrimEnd(), o);
+    }
+
     // ── Snapshots ────────────────────────────────────────────────────
 
     [McpServerTool(Name = "memory_snapshot", Title = "Save a named memory snapshot", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
