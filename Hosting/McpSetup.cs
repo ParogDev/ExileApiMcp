@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.1.0";
+    public const string Version = "3.2.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -26,6 +26,12 @@ internal static class McpSetup
         is open, the user's selected and pinned stats arrive in your context, so "this stat" means the selection.
 
         eval_path / describe_type walk the HUD object model by reflection (namespaces differ per game).
+
+        Plugin development: hud_plugins says whether the HUD compiled and loaded each source plugin (with
+        compiler errors), hud_log shows the HUD's log since it started. Both read the HUD folders on disk, so
+        they work with the game closed. The HUD compiles source plugins when it starts (not on save), so
+        after an edit and a HUD restart, check hud_plugins instead of asking the user. Prompts
+        plugin_dev_loop and investigate_stat describe the full workflows.
         All tools are read-only toward the game; none send input.
         """;
 
@@ -40,6 +46,7 @@ internal static class McpSetup
             })
             .WithToolsFromAssembly()
             .WithResourcesFromAssembly()
+            .WithPromptsFromAssembly()
             .WithMcpApps();
     }
 }
