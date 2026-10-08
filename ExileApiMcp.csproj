@@ -10,6 +10,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- MCPEXP003: the MCP Apps extension is experimental in the 2.x SDK. -->
     <NoWarn>$(NoWarn);MCPEXP003</NoWarn>
+    <!-- Not an IIS app: no web.config in publish output (desktop-extension\pack.ps1 publishes). -->
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+    <IsWebConfigTransformDisabled>true</IsWebConfigTransformDisabled>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
@@ -26,8 +29,8 @@
     <EmbeddedResource Include="Knowledge\**\*.md" LogicalName="knowledge/%(RecursiveDir)%(Filename)%(Extension)" />
     <!-- The UI's TypeScript sources and npm files are not part of the .NET build (the Web SDK would
          otherwise copy every *.json into the output). -->
-    <Content Remove="ui-src\**" />
-    <None Remove="ui-src\**" />
-    <Compile Remove="ui-src\**" />
+    <Content Remove="ui-src\**;desktop-extension\**" />
+    <None Remove="ui-src\**;desktop-extension\**" />
+    <Compile Remove="ui-src\**;desktop-extension\**" />
   </ItemGroup>
 </Project>

@@ -53,6 +53,14 @@ Bridge folders default to `%USERPROFILE%\Documents\PoeHelper\claude-bridge` (PoE
 
 The legacy single-HUD settings `BRIDGE_DIR` (+ `BRIDGE_PORT`) still work. With them, the game is detected from the bridge.
 
+### Claude Desktop extension (one-click install)
+
+`desktop-extension\pack.ps1` builds `desktop-extension\dist\exileapi-desktop-<version>.mcpb`:
+- It bundles a framework-dependent publish of the server (needs the .NET 10 runtime) and runs the official `@anthropic-ai/mcpb` packer in a container.
+- Double-click the file, or use Claude Desktop → Settings → Extensions, to install it.
+- Desktop manages installed extensions itself (enable, disable, update), so the config-file caveats below don't apply.
+- The bundle is a snapshot: re-pack and reinstall after changing the server.
+
 ### Claude Desktop (stdio, renders the stats app)
 
 1. Add the same entry under `mcpServers` in `%APPDATA%\Claude\claude_desktop_config.json` (Settings → Developer → Edit config), with the absolute path to `run.cmd`.
