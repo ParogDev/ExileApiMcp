@@ -11,7 +11,9 @@ How stats are identified, how resistances are layered and capped, and how the sh
 - **A stat missing from the player's dictionary counts as 0.**
 
 ## Resistances
-- **Elemental caps are 75% by default.** `maximum_*_damage_resistance_%` stats raise them; PoE2 often doesn't expose these in the player's dictionary.
+- **Elemental caps are 75% by default**, as the stat `maximum_*_damage_resistance_%`.
+  - On PoE2 these stats are not in the player's stat vector or dictionary: the default comes from a stats-source layer. See `poe2/stats-layout` for where to read the real cap.
+  - Capped resistance = `min(max(uncapped, -200), cap)`, with overrides; the formula is in `poe2/stats-layout`.
 - **PoE2 shows three layers:** `base_*_resistance_%`, `*_resistance_%` and `uncapped_*_resistance_%`.
   - At low level all three can be equal.
   - Over-cap is `uncapped - cap`. Negative resistance is real, for example the act penalties.
