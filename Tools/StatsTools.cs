@@ -84,10 +84,12 @@ public static class StatsTools
     // ── Reading ──────────────────────────────────────────────────────
 
     [McpServerTool(Name = "stats_ui_state", Title = "Stats view state (poll)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
-    [McpAppUi(ResourceUri = PlayerStatsApp.ResourceUri, Visibility = [McpUiToolVisibility.App])]
+    // Visible to the model too: Claude Desktop's local bridge only routes tools whose visibility includes
+    // "model", so an app-only tool is unreachable from the panel there ("Unable to reach exileapi").
+    [McpAppUi(ResourceUri = PlayerStatsApp.ResourceUri, Visibility = [McpUiToolVisibility.Model, McpUiToolVisibility.App])]
     [McpMeta("ui/resourceUri", PlayerStatsApp.ResourceUri)]
-    [Description("Shared stats view state plus live vitals. With sinceRev equal to the current rev, returns only " +
-                 "{rev, unchanged:true, vitals} - cheap enough to poll every second.")]
+    [Description("Shared stats view state plus live vitals; the stats panel polls it. With sinceRev equal to the " +
+                 "current rev, returns only {rev, unchanged:true, vitals}. Agents usually want stats_page / get_stat instead.")]
     public static async Task<CallToolResult> StatsUiState(BridgeRegistry bridges,
         [Description("The rev you already have; omit to always get the full state")] long? sinceRev = null,
         [Description(G)] string? game = null, CancellationToken ct = default)
