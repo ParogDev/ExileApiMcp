@@ -33,9 +33,12 @@ internal static class McpSetup
         ranges and structure-looking data in them. watch_memory finds the bytes and bits that change when the user does
         something. Their 'ghidra' addresses go straight to the ghidra MCP (vtable -> xrefs -> constructor). Knowledge
         pack shared/memory-mapping has the method. show_memory_view opens it for the user. Read-only.
-        When the user must do something in game, say it in the game: pass instruction to await_change (it shows a sticky
-        card in the HUD's agent guide and follows the step) or call guide. Never send input yourself; one action per
-        step, repeated 2-3 times, then experiment_summary (experiment_presets has ready-made stash experiments).
+        Work WITH the user. When an answer depends on game state they can change (what a field means, whether a mapping
+        holds, what an action does), don't guess: run a guided experiment (prompt guided_experiment). Ask for one action
+        per step, shown in the game itself (await_change with instruction drives the HUD's agent guide card: waiting ->
+        captured / failed), repeat it 2-3 times, then experiment_summary - what changes every time is the evidence.
+        Users find this engaging and it settles questions that static reading can't. Never send input yourself.
+        experiment_presets has ready-made stash experiments.
         find_field_access explains a field from the game's code: the functions that read, write or bit-test it,
         decompiled from the Ghidra copy (static; never the running game). Needs Ghidra headless running.
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
