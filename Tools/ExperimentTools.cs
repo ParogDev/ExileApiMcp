@@ -83,7 +83,30 @@ public static class ExperimentTools
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
-        var o = await RunStepAsync(bridges, watch, label, experiment, Math.Clamp(timeoutMs, 1000, 120_000), settleMs, instruction, step, steps, game, null, ct);
+        // Same progress file as experiment_step_start, so apps and other clients can follow a blocking step too.
+        var limit = Math.Clamp(timeoutMs, 1000, 120_000);
+        var state = new JObject
+        {
+            ["experiment"] = experiment, ["label"] = label, ["instruction"] = instruction, ["step"] = step, ["steps"] = steps,
+            ["startedAt"] = DateTimeOffset.Now.ToString("O"), ["timeoutMs"] = limit, ["status"] = "starting", ["watch"] = new JArray(watch),
+            ["blocking"] = true,
+        };
+        if (Regex.IsMatch(experiment, @"^[\w.-]{1,64}$")) await WriteInFlight(experiment, state);
+        JObject o;
+        try
+        {
+            o = await RunStepAsync(bridges, watch, label, experiment, limit, settleMs, instruction, step, steps, game,
+                async s => { state["status"] = s; await WriteInFlight(experiment, state); }, ct);
+            state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : "failed";
+            state["result"] = o;
+        }
+        catch (OperationCanceledException) { state["status"] = "cancelled"; throw; }
+        catch (Exception ex) { state["status"] = "error"; state["error"] = ex.Message; throw; }
+        finally
+        {
+            state["finishedAt"] = DateTimeOffset.Now.ToString("O");
+            try { await WriteInFlight(experiment, state); } catch { }
+        }
         if (o["changed"]?.Value<bool>() != true) return ToolResults.Json(o);
         return new CallToolResult
         {
