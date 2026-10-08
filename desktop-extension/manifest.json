@@ -1,0 +1,22 @@
+{
+  "manifest_version": "0.3",
+  "name": "exileapi-desktop",
+  "display_name": "ExileApi MCP (Path of Exile HUD, extension)",
+  "version": "3.7.0",
+  "description": "Live Path of Exile 1 and 2 game state from the ExileApi / ExileCore2 HUD, with an interactive player-stats panel.",
+  "long_description": "Talks to the 'Whats An AI Bridge' plugin inside the PoE1 (ExileApi) or PoE2 (ExileCore2) HUD over loopback. Read-only toward the game: never sends input. Includes the player-stats MCP App (vitals, resistances against caps, pinned stats, searchable stat table) synced with the in-game panel, plus plugin-development tools (HUD API reference from DLL metadata, plugin compile status and in-place reload, HUD logs, knowledge packs).",
+  "author": { "name": "ParogDev", "url": "https://github.com/ParogDev" },
+  "repository": { "type": "git", "url": "https://github.com/ParogDev/ExileApiMcp" },
+  "homepage": "https://github.com/ParogDev/ExileApiMcp",
+  "license": "MIT",
+  "keywords": ["path of exile", "poe", "poe2", "exileapi", "hud", "mcp app"],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/ExileApiMcp.exe",
+    "mcp_config": {
+      "command": "${__dirname}/server/ExileApiMcp.exe",
+      "args": []
+    }
+  },
+  "compatibility": { "platforms": ["win32"] }
+}
