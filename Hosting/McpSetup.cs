@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.14.0";
+    public const string Version = "3.15.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -33,6 +33,9 @@ internal static class McpSetup
         ranges and structure-looking data in them. watch_memory finds the bytes and bits that change when the user does
         something. Their 'ghidra' addresses go straight to the ghidra MCP (vtable -> xrefs -> constructor). Knowledge
         pack shared/memory-mapping has the method. show_memory_view opens it for the user. Read-only.
+        When the user must do something in game, say it in the game: pass instruction to await_change (it shows a sticky
+        card in the HUD's agent guide and follows the step) or call guide. Never send input yourself; one action per
+        step, repeated 2-3 times, then experiment_summary (experiment_presets has ready-made stash experiments).
         find_field_access explains a field from the game's code: the functions that read, write or bit-test it,
         decompiled from the Ghidra copy (static; never the running game). Needs Ghidra headless running.
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
