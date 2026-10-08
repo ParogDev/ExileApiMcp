@@ -84,6 +84,17 @@ run.cmd --http [--port 50910]
 | Player stats | `show_player_stats` (opens the app), `stats_page`, `get_stat`, `stats_ui_state` (app polling) |
 | Shared stats view | `set_stat_pinned`, `set_stats_filter`, `select_stat`, `set_stats_view` |
 | Recording | `record_start`, `record_stop`, `record_status`, `snapshot`, `recording_list`, `recording_info`, `recording_frame`, `recording_range`, `recording_search`, `recording_summary` |
+| Plugin dev loop (offline) | `hud_plugins` (did each source plugin compile and load in the HUD's latest run; compiler errors; stale `Errors.txt` detection), `hud_log` (the latest run's log, deduplicated, filtered by level/plugin/text) |
+
+**Prompts:**
+- `plugin_dev_loop(plugin, game?)`: edit → restart → `hud_plugins` → `hud_log` → verify live.
+- `investigate_stat(key, game?)`: explain a stat from live evidence and point the user at it in the shared view.
+
+The dev-loop tools read the HUD folders on disk (next to the bridge folders), so they work with the game and HUD closed. Two things are rewritten to save tokens and keep machine-specific source locations out of agents' notes:
+- paths outside the HUD folder are shortened;
+- .NET runtime stack frames are collapsed.
+
+The HUD compiles source plugins **at startup** (or from the menu's Reload button), not on save.
 
 - **Stats** are keyed by Stats.dat key (e.g. `fire_damage_resistance_%`), which is stable across patches and between games, and include the in-game text and a category.
 - **The stats view state** (pins, filter, selection, sort) lives in the HUD plugin and is versioned by `rev`. The in-game panel, the app and agents all change the same state. Mutators accept an optional `expectedRev` and answer `rev_mismatch` if someone else changed it first.
