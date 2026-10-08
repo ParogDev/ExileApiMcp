@@ -32,6 +32,16 @@
       "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 6, "expectAll": ["0x3d) & 0x40", "0x3f,4"] }
     },
     {
+      "id": "ui.stash.currency-itemcount-broken",
+      "title": "HUD bug: on a Currency stash tab, StashElement.VisibleStash.ItemCount reads a pointer and ServerInventoryId reads 0",
+      "subject": "Inventory (StashElement.VisibleStash) on InvType CurrencyStash",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "VisibleStash.ItemCount = 4474396122048 (an address), ServerInventoryId = 0; ServerInventory.ItemCount = 45 is right", "evidence": "guided experiment stash-ctrl-click (4 steps): ItemCount never followed items moving; VisibleStash.ServerInventory.ItemCount did (45 -> 44 -> 45) and the main inventory count changed every time. On a Normal tab both read correctly (84 items, inventory 156). Use ServerInventory.ItemCount for special-layout tabs. Not yet checked: which other special tab types are affected" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "manual", "how": "Open a Currency stash tab; run_csharp: var s = GameController.IngameState.IngameUi.StashElement.VisibleStash; new { s.ItemCount, s.ServerInventoryId, server = s.ServerInventory?.ItemCount }. Broken if ItemCount is huge / ServerInventoryId 0 while server shows the real count. Repeat on other special tabs (Fragment, Essence, Map...)." }
+    },
+    {
       "id": "stash.flags.remove-only",
       "title": "Stash tab Flags bit 0 = remove-only tab",
       "subject": "ServerStashTab (ServerStashTabOffsets.Flags)",
