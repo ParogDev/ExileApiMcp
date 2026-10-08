@@ -15,7 +15,7 @@ Most ExileCore knowledge carries over; these differences don't. Confirm member n
   - `System.Numerics.Vector2/3` instead of SharpDX.
 - **`Tick()` returns `void`,** not `Job`.
 - **`Entity` exposes directly:** `Pos` (Vector3 world), `GridPos` (Vector2), `Buffs`, `Rarity`, `Path`/`Metadata`, `DistancePlayer`, and `Stats`.
-  - Property names lose PoE1's `Num` suffix: `GridPosNum`/`PosNum`/`BoundsNum` become `GridPos`/`Pos`/`Bounds`.
+  - On PoE1, `Pos`, `GridPos` and `BoundsCenterPos` are SharpDX vectors, and their `System.Numerics` twins carry a `Num` suffix (`PosNum`, `GridPosNum`, `BoundsCenterPosNum`). PoE2 has only the unsuffixed names, already Numerics. So PoE1 `PosNum` = PoE2 `Pos`; verified live, see `shared/cross-game`.
 - **`Entity.Stats` on PoE2 is the stat dictionary** (`Dictionary<GameStat,int>`). The Stats *component*, with `ActiveWeaponSetIndex` (weapon set 0/1), comes from `GetComponent<Stats>()`.
 - **Skill names:** `ActorSkill.InternalName`, and the display name via `GrantedEffect.ActiveSkill`. PoE1's `EffectsPerLevel.SkillGemWrapper` path doesn't exist.
 - **Graphics:**

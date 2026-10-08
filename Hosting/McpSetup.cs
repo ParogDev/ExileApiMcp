@@ -35,7 +35,8 @@ internal static class McpSetup
         get_map_image returns the area map as an image (player marked) - look at it for layout and pathing questions.
         hud_plugin_perf / hud_plugin_settings / plugin_bridge_methods read the running HUD by reflection: what each
         plugin costs per frame, how it is configured right now, and the cross-plugin API it exposes.
-        knowledge has short verified packs (dev loop, PoE2 API differences and decoy offsets, player stats):
+        knowledge has short verified packs (dev loop, data map, PoE1 vs PoE2 data differences, PoE2 API differences
+        and decoy offsets, player stats):
         read the relevant one before guessing how the HUD behaves.
         run_csharp runs a C# script inside the HUD when you need logic, not just a value (the user must enable
         it in the bridge settings). Inspect only: never send input or write memory.
