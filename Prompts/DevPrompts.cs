@@ -80,9 +80,15 @@ public static class DevPrompts
            watch_memory while they act.
         4. Counterexamples. Think of states the population lacks (several flags at once, empty, max) and test them
            the same way before generalising.
-        5. Confirm in code when it matters. Results carry 'ghidra' addresses. A vtable at +0 leads to the
-           constructor (ghidra get_xrefs_to, then decompile_function), which writes every member in order. Code that
-           tests the bit names its meaning.
+        5. Explain it from the code. find_field_access offset=<off> bit=<bit> path=<one object> lists the game
+           functions that read, write or bit-test the field (static, from Ghidra; never the running game), with
+           decompiled excerpts. Look for:
+           - serializers/deserializers: they name every member and its size, and show which flag gates which field;
+           - UI code that turns the value into text;
+           - writes: what sets it.
+           Unmapped offsets the code reads next to yours are new fields: probe them the same way. The tool needs
+           tools/ghidra-headless.ps1 running; the first query per struct takes minutes, then it is cached. A vtable
+           at +0 also leads to the constructor (ghidra get_xrefs_to, then decompile_function).
         6. Report the finding with its evidence (counts, which experiment, counterexamples tried) and add it to the
            knowledge pack shared/memory-mapping if it's new. Remind the user of any in-game changes to undo.
         """;

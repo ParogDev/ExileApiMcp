@@ -136,6 +136,26 @@ public static class FindingsTools
                 o["correlate"] = finding;
                 break;
             }
+            case "code":
+            {
+                using var offsetDoc = JsonDocument.Parse(check["offset"]!.ToString(Formatting.None));
+                var res = await CodeAccessTools.FindFieldAccess(bridges, offsetDoc.RootElement.Clone(), check["path"]?.ToString(),
+                    check["bit"]?.Value<int>(), null, 2, 6, g, ct);
+                var data = JObject.Parse(System.Text.Json.JsonSerializer.Serialize(res.StructuredContent));
+                var expectAll = (check["expectAll"] as JArray ?? []).Select(x => x.ToString()).ToList();
+                // Compare without whitespace: decompiler spacing varies between versions.
+                static string Squash(string s) => new(s.Where(c => !char.IsWhiteSpace(c)).ToArray());
+                var hit = (data["decompiled"] as JArray ?? []).OfType<JObject>()
+                    .FirstOrDefault(d => expectAll.All(e => Squash(d["excerpt"]?.ToString() ?? "").Contains(Squash(e), StringComparison.OrdinalIgnoreCase)));
+                verdict = hit != null ? "pass" : "fail";
+                where = hit != null ? $"{hit["function"]} in {data["program"]}" : "";
+                evidence = hit != null
+                    ? $"find_field_access: {hit["function"]} contains {string.Join(" and ", expectAll.Select(e => $"'{e}'"))}"
+                    : $"no decompiled excerpt of the struct's code contains {string.Join(" and ", expectAll.Select(e => $"'{e}'"))} " +
+                      $"({(data["functions"] as JArray)?.Count ?? 0} functions found): offsets or code changed, or the struct differs on this game";
+                o["functions"] = data["functions"];
+                break;
+            }
             case "eval":
             {
                 var expr = check["expressionByGame"]?[g]?.ToString() ?? check["expression"]?.ToString()

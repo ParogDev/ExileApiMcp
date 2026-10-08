@@ -33,6 +33,8 @@ internal static class McpSetup
         ranges and structure-looking data in them. watch_memory finds the bytes and bits that change when the user does
         something. Their 'ghidra' addresses go straight to the ghidra MCP (vtable -> xrefs -> constructor). Knowledge
         pack shared/memory-mapping has the method. show_memory_view opens it for the user. Read-only.
+        find_field_access explains a field from the game's code: the functions that read, write or bit-test it,
+        decompiled from the Ghidra copy (static; never the running game). Needs Ghidra headless running.
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
         watch_object samples a path over time and reports only the fields that changed: run it while the user
         does something in game to find which field reflects it.
