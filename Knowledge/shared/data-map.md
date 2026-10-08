@@ -4,9 +4,10 @@ How to find where a value lives in the live object model and turn it into plugin
 
 ## Workflow
 1. **`explore_object path=GameController`**, then follow paths. One call gives one level as `name: type = preview` lines. `depth=2` expands nested objects (back-references such as `Owner`, and memory plumbing such as `M`, are listed but not expanded).
-2. **`eval_path`** gives a full value, serialized 2 levels deep. A result over 64 KB fails (e.g. `GameController.IngameState`), so explore those instead.
-3. **`watch_object`** finds the field that reflects an in-game event: run it while the user does the thing.
-4. **Code:** the structured result of `explore_object` carries each node's null-safe C# (`GameController?.Player?.GetComponent<Life>()?.CurHP`) and its namespace (for the `using`). Copy it rather than guessing member names. `hud_type` shows declarations, including non-public ones.
+2. **`find_in_object`** finds a value by what you see in game. For example, `value=356` (the life shown) points at `Stats["MaximumLife"]`, `Life.CurHP`, `Life.MaxHP` and `Life.Health.Current`; `name=resist` lists every resistance member. Several hits for one number? Change it in game and use `watch_object`.
+3. **`eval_path`** gives a full value, serialized 2 levels deep. A result over 64 KB fails (e.g. `GameController.IngameState`), so explore those instead.
+4. **`watch_object`** finds the field that reflects an in-game event: run it while the user does the thing.
+5. **Code:** the structured result of `explore_object` carries each node's null-safe C# (`GameController?.Player?.GetComponent<Life>()?.CurHP`) and its namespace (for the `using`). Copy it rather than guessing member names. `hud_type` shows declarations, including non-public ones.
 
 ## Entry points
 | Path | What |

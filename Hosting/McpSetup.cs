@@ -27,7 +27,8 @@ internal static class McpSetup
 
         explore_object maps live HUD data: start at 'GameController' and follow paths. Each line is
         name: type = preview, and entities list their components. Read the C# accessor for plugin code from its
-        result rather than guessing member names. show_data_explorer opens the same tree for the user.
+        result rather than guessing member names. find_in_object answers "where does this value live?" (value=356) or
+        "which members mention X?" (name=resist). show_data_explorer opens the same tree for the user.
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
         watch_object samples a path over time and reports only the fields that changed: run it while the user
         does something in game to find which field reflects it.
