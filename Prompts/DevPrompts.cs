@@ -99,23 +99,33 @@ public static class DevPrompts
         [Description("What you want to find out, e.g. 'which memory follows switching stash tabs'")] string question,
         [Description("'poe1' or 'poe2' (optional)")] string? game = null) => $"""
         Find out "{question}"{GameText(game)} together with the user. They act in game and you observe; you never send input.
+        The user reads the HUD's agent guide card, not the chat: knowledge shared/working-with-users is the contract for
+        what you put on it. Read it once.
 
-        1. Plan, short. Pick what to watch: value:<walker path> for HUD values, memory:<path>[:size] for an object's
-           bytes (field names come from the HUD's struct, unmapped bytes show as such), collection:<path>[:Label] for
-           every item of a list. Prefer the narrowest objects; whole UI elements flicker. Check experiment_presets for
-           a ready-made one. Pick the actions: one per step, each with its undo (on/off, next/prev, to/from).
-        2. Tell the user in one or two chat lines what the experiment is for and what they will do, then start step 1.
-           Ask them first if the setup needs something (e.g. stash open on a tab with items).
-        3. Each step: await_change experiment=<name> label=<action> instruction="<the action, under ~70 characters>"
-           step=n steps=m watch=[...]. The instruction appears in game on the guide card (DO THIS NOW). The card turns
-           green with what changed, or red if nothing lasting did. In chat, say only what was captured and what's next.
+        1. Plan, short. Check experiment_presets for a ready-made one. Otherwise pick what to watch: value:<walker path>
+           for HUD values, memory:<path>[:size] for an object's bytes (field names from the HUD's struct), collection:
+           <path>[:Label] for every item of a list. Narrow objects only; whole UI elements flicker. Pick the actions: one
+           per step, each with its undo (on/off, next/prev, to/from), with short kebab-case labels (next-tab, to-stash).
+           Read each watched path once (eval_path / memory_layout) so a bad path never costs the user a step.
+        2. Setup: if the experiment needs a window open or an item ready, put it on the card (guide status=info
+           instruction="Open your stash on a tab with items" title="Experiment: <name>") and in chat. Then one or two
+           chat lines: what the experiment shows and what they will do, how many times. Then start step 1 at once.
+        3. Each step: await_change experiment=<name> label=<action> instruction="<one action, imperative, ~70 chars,
+           with the key and the mouse target>" step=n steps=m watch=[...] timeoutMs=45000-60000. Count repeats as steps.
+           The card shows DO THIS NOW, then CAPTURED with what changed, or TRY AGAIN. In chat, one line per capture;
+           never narrate the waiting or repeat the instruction. Call the next await_change right after a capture.
         4. Repeat each action 2-3 times. experiment_summary shows what changed EVERY time (the evidence) vs sometimes
            (side effects, or watches you added later). Item-dependent effects (stacks, slots) show up as "sometimes":
-           ask what the user did when a result is surprising.
-        5. Watch for surprises: a HUD value that doesn't follow the action, or reads nonsense (a pointer where a count
+           ask what the user did when a result is surprising. Stop when the evidence is clear.
+        5. On changed:false, check the cheap causes (panel open? window focused? does the value follow the action at
+           all?) and narrow the watch if transientChanges is high; then the same label once more. A second miss means the
+           watch is wrong, not the user: say so and change it.
+        6. Watch for surprises: a HUD value that doesn't follow the action, or reads nonsense (a pointer where a count
            should be), is a mapping bug. Confirm it with a reliable neighbour (e.g. ServerInventory vs the UI element).
-        6. Finish: guide status=done with a one-line result, record new facts in findings.json (with the experiment as
-           evidence) and tell the user anything they changed in game that they may want to undo.
+        7. Finish: guide status=done title="Experiment: <name>" instruction="<one-line result>". In chat: the result in
+           one line, the evidence in one more, and the list of in-game changes to undo (an item left in the inventory,
+           affinities moved, the stash on another tab), or "nothing to undo". Record new facts in findings.json with the
+           experiment as evidence. The user can follow the whole run in the Memory View's Experiments tab (show_memory_view).
         """;
 
     private static string GameText(string? game) => string.IsNullOrWhiteSpace(game) ? "" : $" ({game})";

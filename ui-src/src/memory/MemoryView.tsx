@@ -21,7 +21,7 @@ import { Findings } from "./Findings";
 const MODES: { id: Mode; label: string; icon: "layers" | "grid" | "diff" | "sparkle"; title: string }[] = [
   { id: "struct", label: "Struct", icon: "layers", title: "One object: the HUD's struct over live bytes" },
   { id: "population", label: "Population", icon: "grid", title: "Every item of a collection: which bits a known property explains" },
-  { id: "experiments", label: "Experiments", icon: "diff", title: "Snapshots compared step by step: what one in-game action flipped" },
+  { id: "experiments", label: "Experiments", icon: "diff", title: "Guided experiments run with the user step by step, and snapshots compared in order" },
   { id: "findings", label: "Findings", icon: "sparkle", title: "What is known, per game, and whether it still holds" },
 ];
 
@@ -139,7 +139,7 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
           <Stat tone="gap" label={`${layout.gaps.length} unmapped`} detail={`${unmappedBytes(region)} B`} />
           <Stat tone="cand" label={`${layout.candidates.length} candidates`} detail={layout.candidates.length ? "structure the HUD skips" : "none found"} strong={layout.candidates.length > 0} />
           {(() => { const bad = layout.fields.filter((f) => f.check === "suspicious" || f.check === "invalid").length; const odd = layout.fields.filter((f) => f.check === "unusual").length; return bad || odd ? <Stat tone={bad ? "danger" : "warning"} label={bad ? `${bad} suspicious` : `${odd} unusual`} detail={bad && odd ? `+${odd} unusual` : "re-check the mapping"} strong /> : <Stat tone="ok" label="checks pass" />; })()}
-          {sf && sf.all.length > 0 && <Stat tone="cand" label={`${sf.all.length} finding${sf.all.length === 1 ? "" : "s"}`} detail={`${sf.all.filter((f) => game && f.games[game]?.status === "verified").length} verified here`} strong onClick={() => store.setMode("findings")} />}
+          {sf && sf.all.length > 0 && <Stat tone="cand" label={`${sf.all.length} finding${sf.all.length === 1 ? "" : "s"}`} detail={`${sf.all.filter((f) => game && f.games[game]?.status === "verified").length} verified on ${game === "poe2" ? "PoE 2" : "PoE 1"}`} strong onClick={() => store.setMode("findings")} />}
           {region.size > layout.structSize && <Stat tone="gap" label={`+${region.size - layout.structSize} B past end`} />}
         </>
       ) : read ? (
@@ -231,7 +231,7 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
   );
 
   const other = mode === "population" ? <Population store={store} snap={snap} fullscreen={fullscreen} host={textHost} />
-    : mode === "experiments" ? <Experiments store={store} snap={snap} fullscreen={fullscreen} host={textHost} />
+    : mode === "experiments" ? <Experiments store={store} snap={snap} fullscreen={fullscreen} host={textHost} now={now} />
     : mode === "findings" ? <Findings store={store} snap={snap} fullscreen={fullscreen} host={textHost} /> : null;
 
   return (
@@ -244,9 +244,10 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
         {layout && <span className="hidden truncate font-code text-[11px] text-fg-3 xs:inline" title={`${layout.struct}${layout.source ? ` — ${layout.source}` : ""}${layout.object ? `\n${layout.object}` : ""}`}>{typeLabel(layout.struct)}</span>}
         {read && !layout && <span className="hidden truncate font-code text-[11px] text-fg-3 xs:inline" title={read.region}>raw · {read.module?.name}</span>}
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          <span className={`hidden items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium xs:flex ${offline ? "border-danger/30 bg-danger/10 text-danger" : snap.conn === "live" ? "border-success/30 bg-success/10 text-success" : "border-line text-fg-3"}`} role="status">
+          <span className={`hidden items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium xs:flex ${offline ? "border-danger/30 bg-danger/10 text-danger" : snap.conn === "live" ? "border-success/30 bg-success/10 text-success" : "border-line text-fg-3"}`} role="status"
+            title={offline ? "The HUD bridge is unreachable" : snap.conn === "live" ? "The HUD bridge answers; this is the connection, not a live re-read (that's the Live toggle)" : "Waiting for the first answer from the HUD bridge"}>
             {offline ? <Icon name="offline" className="size-3" /> : <span className={`size-1.5 rounded-full ${snap.conn === "live" ? "bg-success" : "bg-fg-3"}`} />}
-            {offline ? "Offline" : snap.conn === "live" ? "Live" : "Connecting"}
+            {offline ? "Offline" : snap.conn === "live" ? "Connected" : "Connecting"}
           </span>
           <button
             type="button"

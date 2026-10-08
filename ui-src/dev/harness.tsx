@@ -47,6 +47,10 @@ const APPS: Record<AppName, { title: string; html: string; scenarios: string[]; 
       if (params.get("address")) a.address = params.get("address");
       else a.path = params.get("path") ?? "GameController.Player.GetComponent<Life>()";
       if (params.get("type")) a.type = params.get("type");
+      // Runner hints (the real show_memory_view has no such arguments yet): open a tab, a preset's setup, or a record's summary.
+      if (params.get("mode")) a.mode = params.get("mode");
+      if (params.get("preset")) a.preset = params.get("preset");
+      if (params.get("experiment")) a.experiment = params.get("experiment");
       return a;
     },
   },
@@ -55,6 +59,13 @@ const APP = APPS[appName];
 const server: FakeHost = appName === "explorer" ? new FakeExplorer() : appName === "memory" ? new FakeMemory() : new FakeServer();
 server.scenario = params.get("scenario") ?? "live";
 server.latencyMs = Number(params.get("latency") ?? (appName === "stats" ? 40 : 60));
+// memory runner: user=acts|nothing|host-timeout|never (never = waits until harness.server.act()); run=follow simulates Claude running one.
+if (server instanceof FakeMemory) {
+  const u = params.get("user");
+  if (u === "nothing" || u === "host-timeout" || u === "acts") server.user = u;
+  if (u === "never") server.actMs = 10 * 60_000;
+  if (params.get("run") === "follow") setTimeout(() => void server.agentRun(), 1500);
+}
 
 // Roughly Claude-like host variables; "none" tests the app's own fallbacks.
 const CLAUDE_VARS: McpUiStyles = {
@@ -213,6 +224,17 @@ function Harness() {
               <Btn onClick={() => { server.scanMs = server.scanMs ? 0 : 4000; force((n) => n + 1); }}>{server.scanMs ? "code scans instant" : "code scans slow (4 s/offset)"}</Btn>
             </div>
             <p className="mt-1 text-fg-3">Life and the stash tab are real captures; any other address reads as a synthesised object. Paths below Life (e.g. .CurHP) fail with no_address, GameController with no_struct, 0x0 with unreadable. Code lookups: stash Flags (+61) and Affinity (+63) are real Ghidra results and pre-cached; other offsets are synthesised and "scan" first. Scenario ghidra-down fails them.</p>
+          </Field>
+        )}
+        {server instanceof FakeMemory && (
+          <Field label="Guided experiments (the fake user)">
+            <div className="flex flex-wrap gap-1">
+              <Btn onClick={() => server.act()}>user acts now</Btn>
+              <Btn onClick={() => { server.user = server.user === "acts" ? "nothing" : "acts"; force((n) => n + 1); }}>{server.user === "nothing" ? "user acts (after 2.5 s)" : "user does nothing (fails)"}</Btn>
+              <Btn onClick={() => { server.user = server.user === "host-timeout" ? "acts" : "host-timeout"; force((n) => n + 1); }}>{server.user === "host-timeout" ? "host waits" : "host times out"}</Btn>
+              <Btn onClick={() => void server.agentRun()}>simulate Claude running one</Btn>
+            </div>
+            <p className="mt-1 text-fg-3">Records stash-ctrl-click (4 steps) and stash-switch-tab (2) are real PoE1 runs; new steps are synthesised in their shape (the 2nd repeat adds a "sometimes" change). The fake guide card follows waiting → detected → captured / failed. URL: mode=experiments, preset=stash-ctrl-click, experiment=stash-ctrl-click (summary), user=nothing|never|host-timeout, run=follow.</p>
           </Field>
         )}
         {server instanceof FakeServer && (

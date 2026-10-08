@@ -45,7 +45,8 @@ public static class KnowledgeTools
 
     [McpServerTool(Name = "knowledge", Title = "HUD dev knowledge packs", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Verified facts for ExileApi (PoE1) / ExileCore2 (PoE2) plugin development: how the HUD compiles and reloads " +
-                 "plugins, PoE2 API differences, obfuscated PoE2 offsets, player-stat identity and resistance layers. " +
+                 "plugins, PoE2 API differences, obfuscated PoE2 offsets, player-stat identity and resistance layers, and " +
+                 "how to ask the user for in-game help (shared/working-with-users). " +
                  "No arguments lists the packs; topic reads one (e.g. 'poe2/api-differences' or 'dev-loop'); search finds " +
                  "lines across packs. Read the relevant pack before guessing how the HUD behaves.")]
     public static CallToolResult Knowledge(

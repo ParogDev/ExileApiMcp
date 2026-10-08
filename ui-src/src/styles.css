@@ -143,6 +143,13 @@ html, body {
 @keyframes m-sampling { 50% { opacity: 0.55; } }
 .m-sampling { animation: m-sampling 1.2s ease-in-out infinite; }
 
+/* Guided experiment card while the user must act: the frame pulses like the in-game card does. */
+@keyframes guide-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--pulse, var(--color-ring)) 45%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in oklab, var(--pulse, var(--color-ring)) 0%, transparent); }
+}
+.guide-pulse { animation: guide-pulse 1.4s ease-in-out infinite; }
+
 /* Code blocks: wrap long accessors instead of forcing a horizontal scroll at 380 px. */
 .code-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 
@@ -151,7 +158,8 @@ html, body {
 .breathe { animation: breathe 1.2s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
-  .flash-up, .flash-down, .pulse-ring, .slide-up, .fade-in, .spin, .shimmer, .breathe, .m-flash, .m-sampling { animation: none; }
+  .flash-up, .flash-down, .pulse-ring, .slide-up, .fade-in, .spin, .shimmer, .breathe, .m-flash, .m-sampling, .guide-pulse { animation: none; }
+  .guide-pulse { box-shadow: 0 0 0 3px color-mix(in oklab, var(--pulse, var(--color-ring)) 35%, transparent); }
   .m-flash { background-color: color-mix(in oklab, var(--color-m-change) 40%, transparent); }
   .flash-up { background: color-mix(in oklab, var(--color-success) 18%, transparent); }
   .flash-down { background: color-mix(in oklab, var(--color-danger) 18%, transparent); }
