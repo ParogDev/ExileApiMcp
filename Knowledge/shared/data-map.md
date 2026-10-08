@@ -1,6 +1,6 @@
 # Mapping HUD data (both HUDs)
 
-How to find where a value lives in the live object model and turn it into plugin code. Paths verified on PoE2 (ExileCore2), 2026-10-08. PoE1 names mostly match, but check with `explore_object` before relying on them.
+How to find where a value lives in the live object model and turn it into plugin code. Paths verified on both HUDs, 2026-10-08. The entry points below are the same on PoE1. Where they differ (vector types, `PosNum`, UI panels, Life extras), see `shared/cross-game`.
 
 ## Workflow
 1. **`explore_object path=GameController`**, then follow paths. One call gives one level as `name: type = preview` lines. `depth=2` expands nested objects (back-references such as `Owner`, and memory plumbing such as `M`, are listed but not expanded).
