@@ -33,6 +33,22 @@ export interface Toast {
   text: string;
 }
 
+/** One vitals poll, kept for the sparklines. */
+export interface VitalSample {
+  at: number;
+  hp: number;
+  es: number;
+  mana: number;
+}
+
+export type ViewField = "selection" | "pins" | "filter" | "sort";
+
+/** A view change that arrived from another surface (the HUD panel or an agent), not from this app. */
+export interface RemoteChange {
+  at: number;
+  fields: ViewField[];
+}
+
 export interface Snapshot {
   game?: Game;
   inGame?: boolean;
@@ -41,6 +57,12 @@ export interface Snapshot {
   /** confirmed + the user's in-flight changes: what the UI renders. */
   view?: ViewState;
   vitals?: Vitals;
+  /** Recent vitals polls, oldest first (bounded). */
+  vitalsHistory: VitalSample[];
+  /** Last view change that came from the HUD or an agent, for the "synced from HUD" cue. */
+  remote?: RemoteChange;
+  /** Where the current selection came from: this app, or another surface. */
+  selectionSource: "local" | "remote";
   stats: StatItem[];
   statsLoaded: boolean;
   /** Last value change per stat key since the panel opened (for the delta column and flash). */
@@ -66,9 +88,13 @@ type Overlay = { id: number; apply: (s: ViewState) => ViewState };
 
 const PAGE_SIZE = 200;
 const MAX_BACKOFF_MS = 15_000;
+const HISTORY_SAMPLES = 90;
 
 export class StatsStore {
-  private snap: Snapshot = { stats: [], statsLoaded: false, changes: {}, conn: "connecting", pending: 0, toasts: [], calls: {} };
+  private snap: Snapshot = {
+    stats: [], statsLoaded: false, changes: {}, conn: "connecting", pending: 0, toasts: [], calls: {},
+    vitalsHistory: [], selectionSource: "local",
+  };
   private listeners = new Set<() => void>();
   private overlays: Overlay[] = [];
   private nextId = 1;
@@ -164,20 +190,34 @@ export class StatsStore {
       if (res.isError) throw new Error(errorText(res));
       const r = res.data as UiStateResult;
       this.failures = 0;
+      const at = this.now();
       const patch: Partial<Snapshot> = {
-        conn: "live", error: undefined, lastOkAt: this.now(), latencyMs: this.now() - t0,
+        conn: "live", error: undefined, lastOkAt: at, latencyMs: at - t0,
         vitals: r.vitals ?? this.snap.vitals, inGame: r.inGame ?? this.snap.inGame,
       };
+      if (r.vitals) {
+        const sample = { at, hp: r.vitals.hp, es: r.vitals.es, mana: r.vitals.mana };
+        patch.vitalsHistory = [...this.snap.vitalsHistory.slice(-(HISTORY_SAMPLES - 1)), sample];
+      }
       if (r.game && this.snap.game && r.game !== this.snap.game) {
         // The other game's HUD answered (one game at a time): start over.
         this.overlays = [];
-        Object.assign(patch, { game: r.game, confirmed: r.state, stats: [], statsLoaded: false, changes: {} });
+        Object.assign(patch, { game: r.game, confirmed: r.state, stats: [], statsLoaded: false, changes: {}, vitalsHistory: [], remote: undefined });
         this.set(patch);
         void this.refreshStats();
       } else {
         if (r.game) patch.game = r.game;
         // A mutation that landed while this poll was in flight carries newer state; keep it.
-        if (r.state && !r.unchanged && epoch === this.stateEpoch) patch.confirmed = r.state;
+        if (r.state && !r.unchanged && epoch === this.stateEpoch) {
+          patch.confirmed = r.state;
+          // Anything that differs from what we last confirmed was changed elsewhere (HUD or agent):
+          // our own writes reconcile through mutate(), never through a poll.
+          const fields = this.snap.confirmed ? diffView(this.snap.confirmed, r.state) : [];
+          if (fields.length) {
+            patch.remote = { at, fields };
+            if (fields.includes("selection")) patch.selectionSource = "remote";
+          }
+        }
         this.set(patch);
       }
     } catch (e) {
@@ -255,6 +295,7 @@ export class StatsStore {
   }
 
   select(key: string | null) {
+    this.set({ selectionSource: "local" });
     return this.mutate("select_stat", key ? { key } : {}, (s) => ({ ...s, selectedStatKey: key }));
   }
 
@@ -323,6 +364,16 @@ export function sortStats(stats: StatItem[], sortBy: SortBy, desc: boolean): Sta
     return (CATEGORY_ORDER[a.category] - CATEGORY_ORDER[b.category]) * dir || a.key.localeCompare(b.key);
   };
   return [...stats].sort(cmp);
+}
+
+/** Which parts of the shared view differ between two states. */
+export function diffView(a: ViewState, b: ViewState): ViewField[] {
+  const fields: ViewField[] = [];
+  if ((a.selectedStatKey ?? null) !== (b.selectedStatKey ?? null)) fields.push("selection");
+  if (a.pinnedStatKeys.join("\n") !== b.pinnedStatKeys.join("\n")) fields.push("pins");
+  if (a.filter !== b.filter || a.category !== b.category) fields.push("filter");
+  if (a.sortBy !== b.sortBy || a.sortDesc !== b.sortDesc) fields.push("sort");
+  return fields;
 }
 
 export function countByCategory(stats: StatItem[]): Record<CategoryFilter, number> {

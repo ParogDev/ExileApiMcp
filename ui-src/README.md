@@ -48,18 +48,26 @@ After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuil
 | File | Role |
 |---|---|
 | `src/main.tsx` | ext-apps wiring: `useApp`, host theme/fonts, tool calls through the host, capability checks (`updateModelContext`, `message`, fullscreen) |
-| `src/sync.ts` | `StatsStore`, framework-free: polling, optimistic overlays, backoff, deltas. Shared with the harness |
-| `src/PlayerStats.tsx` | Layout, banners, model-context updates |
-| `src/components.tsx`, `StatTable.tsx`, `StatDetail.tsx` | Vitals, resistance bars, pinned cards, stat table, inline detail row |
-| `src/styles.css` | Host CSS variables mapped to semantic Tailwind tokens (`bg-surface`, `text-fg-2`, `border-line`…), with fallbacks |
+| `src/sync.ts` | `StatsStore`, framework-free: polling, optimistic overlays, backoff, value deltas, vitals history, and which view changes came from elsewhere (`remote`, `selectionSource`). Shared with the harness |
+| `src/PlayerStats.tsx` | Top bar (game, level, weapon set, sync pill), banners, inline vs fullscreen layout, model-context updates, "Ask Claude" prompt |
+| `src/components.tsx` | Sync pill + popover, vitals tiles (segmented bars, sparkline trace), resistance tiles (cap tick, over-cap hatch), pin chips, banners, toasts, skeletons, empty states |
+| `src/StatTable.tsx` | Search / category / "changed" / raw-keys toolbar, sortable single-line rows with flash and Δ, keyboard navigation, and the detail sheet host |
+| `src/StatDetail.tsx` | One stat in depth: value, key + copy, Stats.dat record details, resistance layers (base / total / uncapped / cap), pin, Ask Claude |
+| `src/icons.tsx`, `src/format.ts` | Inline SVG icon set; labels, units, resistance helpers |
+| `src/styles.css` | Host CSS variables mapped to semantic Tailwind tokens (`bg-surface`, `text-fg-2`, `border-line`…), with fallbacks; game hues; animations (all disabled under `prefers-reduced-motion`) |
 | `dev/` | Harness host and fake server |
+
+**Layout.** Glanceable card first, depth on demand. Inline (380-760 px): top bar, vitals tiles, four resistance tiles, pin chips, then a ~17 rem stat list; selecting a stat opens a sheet over the bottom of the list, so nothing above moves. Fullscreen: a sidebar (vitals, resistances, pins, detail panel) next to a list that fills the height. The `xs` breakpoint (30 rem) and `sm` (40 rem) add the raw key next to the in-game text and widen the tiles.
 
 - **State:** the HUD plugin owns the shared view (pins, filter, category, selection, sort) and versions it with `rev`.
   - The app polls `stats_ui_state(sinceRev)` every second. When idle the answer is `{unchanged:true}` plus vitals.
   - It refreshes the full stat list every 3 s with `stats_page`, pageSize 200, and filters and sorts locally. Typing never waits on a round trip, and the shared filter syncs after a 350 ms pause.
   - Polling pauses while the panel is hidden and backs off to 15 s while the bridge is down.
 - **Writes are optimistic.** Each change is an overlay on the last confirmed state until its mutator answers with the new `{rev, state}`. On `ok:false` or an error, the overlay is dropped and a toast says why. A poll that started before a mutation landed can't roll the state back.
+- **Changes from elsewhere.** A poll whose state differs from the last confirmed one was changed by the HUD panel or an agent (the app's own writes reconcile through the mutator's reply, never through a poll). The sync pill shows "Synced pins/selection/…" for 3 s, a remotely selected row scrolls to the centre and pulses, and the detail carries a "selected elsewhere" badge.
 - **Model context.** When the selection or pins change, the app tells the model through `ui/update-model-context`, debounced and deduplicated. "This stat" in the next prompt then needs no tool call.
+- **Local-only preferences:** the raw-keys toggle (persisted in `localStorage` when the sandbox allows it) and the "changed since the panel opened" quick filter. Everything else in the toolbar is shared state.
+- **Keyboard:** `/` focuses search; in the list, arrows / Home / End move the selection, Enter pins, Escape clears, and typing starts a search.
 - **Theme:** only semantic tokens, never raw colours, except the fixed game hues (life, mana, ES, elements). These are tuned to read in light and dark.
 
 ## Conventions

@@ -2,15 +2,21 @@
 
 /*
  * Theme: the host sends MCP Apps style variables (--color-background-primary, --font-sans, ...)
- * via hostContext.styles; useHostStyles() writes them onto :root. Hosts that send none get the
- * fallbacks below, which follow data-theme (set by applyDocumentTheme) or the OS scheme.
- * Components only use the semantic tokens (bg-surface, text-fg-2, border-line, ...).
+ * via hostContext.styles; useHostStyleVariables() writes them onto :root and sets color-scheme
+ * from the host theme, so light-dark() resolves the same way the host does. Hosts that send
+ * nothing get the fallbacks below (Claude-like neutrals). Components only use the semantic
+ * tokens (bg-surface, text-fg-2, border-line, ...) plus the fixed game hues.
  */
 :root {
   color-scheme: light dark;
 }
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
+
+@theme {
+  /* Inline panels are 380-760 px wide; "xs" splits the compact and roomy layouts. */
+  --breakpoint-xs: 30rem;
+}
 
 @theme inline {
   --color-surface: var(--color-background-primary, light-dark(#ffffff, #1f1f1e));
@@ -55,18 +61,63 @@ html, body {
 /* Numbers line up in columns and don't jitter while values tick. */
 .tnum { font-variant-numeric: tabular-nums; }
 
-@keyframes flash-up { from { background: color-mix(in oklab, var(--color-success) 22%, transparent); } }
-@keyframes flash-down { from { background: color-mix(in oklab, var(--color-danger) 22%, transparent); } }
-.flash-up { animation: flash-up 1.4s ease-out; }
-.flash-down { animation: flash-down 1.4s ease-out; }
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-2) transparent;
+}
+
+/* Segmented meter: paints gaps over a plain fill so the bar reads as 12 cells. */
+.seg-gaps {
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 calc(100% / 12 - 2px),
+    var(--seg-bg, var(--color-surface-2)) calc(100% / 12 - 2px) calc(100% / 12)
+  );
+}
 
 /* Over-cap part of a resistance bar: hatched "ghost" segment. */
 .ghost-hatch {
   background-image: repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 5px);
-  opacity: 0.45;
+  opacity: 0.5;
 }
 
+/* Value changes: a row flashes once, then the delta column fades out over 30 s. */
+@keyframes flash-up { from { background: color-mix(in oklab, var(--color-success) 28%, transparent); } }
+@keyframes flash-down { from { background: color-mix(in oklab, var(--color-danger) 28%, transparent); } }
+.flash-up { animation: flash-up 1.6s ease-out; }
+.flash-down { animation: flash-down 1.6s ease-out; }
+
+/* Something selected this row from elsewhere (HUD panel or Claude): draw the eye to it. */
+@keyframes pulse-ring {
+  0% { box-shadow: inset 2px 0 0 var(--color-ring), 0 0 0 0 color-mix(in oklab, var(--color-ring) 55%, transparent); }
+  100% { box-shadow: inset 2px 0 0 var(--color-ring), 0 0 0 10px transparent; }
+}
+.pulse-ring { animation: pulse-ring 1.2s ease-out 2; }
+
+@keyframes slide-up { from { transform: translateY(8px); opacity: 0; } }
+.slide-up { animation: slide-up 0.18s ease-out; }
+
+@keyframes fade-in { from { opacity: 0; } }
+.fade-in { animation: fade-in 0.2s ease-out; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1.1s linear infinite; }
+
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.shimmer {
+  background: linear-gradient(90deg, var(--color-surface-3) 25%, var(--color-surface-2) 50%, var(--color-surface-3) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+/* Low life: the fill breathes. */
+@keyframes breathe { 50% { opacity: 0.55; } }
+.breathe { animation: breathe 1.2s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
-  .flash-up, .flash-down { animation: none; }
+  .flash-up, .flash-down, .pulse-ring, .slide-up, .fade-in, .spin, .shimmer, .breathe { animation: none; }
+  .flash-up { background: color-mix(in oklab, var(--color-success) 18%, transparent); }
+  .flash-down { background: color-mix(in oklab, var(--color-danger) 18%, transparent); }
+  .pulse-ring { box-shadow: inset 2px 0 0 var(--color-ring), 0 0 0 2px color-mix(in oklab, var(--color-ring) 55%, transparent); }
   * { transition: none !important; }
 }
