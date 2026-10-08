@@ -23,7 +23,7 @@ public static class PlayerStatsApp
     [Description("Interactive player stats panel, synced with the in-game HUD panel.")]
     public static string GetUi() => LoadEmbedded("ui/player-stats.html") ?? Placeholder;
 
-    private static string? LoadEmbedded(string name)
+    internal static string? LoadEmbedded(string name)
     {
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name);
         if (stream == null) return null;
