@@ -140,7 +140,7 @@ public static class FindingsTools
             {
                 using var offsetDoc = JsonDocument.Parse(check["offset"]!.ToString(Formatting.None));
                 var res = await CodeAccessTools.FindFieldAccess(bridges, offsetDoc.RootElement.Clone(), check["path"]?.ToString(),
-                    check["bit"]?.Value<int>(), null, 2, 6, g, ct);
+                    check["bit"]?.Value<int>(), knownOffsets: null, minKnown: 2, decompile: 6, game: g, ct: ct);
                 var data = JObject.Parse(System.Text.Json.JsonSerializer.Serialize(res.StructuredContent));
                 var expectAll = (check["expectAll"] as JArray ?? []).Select(x => x.ToString()).ToList();
                 // Compare without whitespace: decompiler spacing varies between versions.

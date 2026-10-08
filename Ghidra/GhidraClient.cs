@@ -69,21 +69,42 @@ internal sealed class GhidraClient
         return ($"/{game}/{label}/PathOfExile_{game}_{label}.exe", label);
     }
 
-    /// <summary>Program-wide instruction search by operand substring, cached on disk per program.</summary>
-    public async Task<JArray> SearchOperandAsync(string operandPattern, CancellationToken ct)
+    /// <summary>
+    /// Program-wide instruction search by operand substring, cached on disk per program. Null when the pattern is too
+    /// common to be useful (the search hit its 50000 cap); that verdict is cached too.
+    /// </summary>
+    public async Task<JArray?> SearchOperandAsync(string operandPattern, CancellationToken ct)
     {
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ExileApiMcp", "ghidra-cache", Program);
         Directory.CreateDirectory(dir);
         var file = Path.Combine(dir, "ops-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(operandPattern)))[..16] + ".json");
-        if (File.Exists(file)) return JArray.Parse(await File.ReadAllTextAsync(file, ct));
+        if (File.Exists(file))
+        {
+            var cached = JToken.Parse(await File.ReadAllTextAsync(file, ct));
+            return cached is JArray a ? a : null; // {"tooCommon": true}
+        }
         var r = await GetJsonAsync($"search_instructions?operand_pattern={Uri.EscapeDataString(operandPattern)}&limit=50000", ct);
+        if (r["truncated"]?.Value<bool>() == true)
+        {
+            await File.WriteAllTextAsync(file, """{"tooCommon":true}""", ct);
+            return null;
+        }
         var matches = r["matches"] as JArray ?? [];
-        if (r["truncated"]?.Value<bool>() != true) await File.WriteAllTextAsync(file, matches.ToString(Formatting.None), ct);
+        await File.WriteAllTextAsync(file, matches.ToString(Formatting.None), ct);
         return matches;
     }
 
-    public async Task<string> DecompileAsync(string address, CancellationToken ct) =>
-        await GetAsync($"decompile_function?address={Uri.EscapeDataString(address)}&timeout=60", ct);
+    /// <summary>Decompiled pseudocode of the function containing an address, cached on disk per program (it never changes).</summary>
+    public async Task<string> DecompileAsync(string address, CancellationToken ct)
+    {
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ExileApiMcp", "ghidra-cache", Program);
+        Directory.CreateDirectory(dir);
+        var file = Path.Combine(dir, "dec-" + new string(address.Where(char.IsLetterOrDigit).ToArray()) + ".c");
+        if (File.Exists(file)) return await File.ReadAllTextAsync(file, ct);
+        var code = await GetAsync($"decompile_function?address={Uri.EscapeDataString(address)}&timeout=60", ct);
+        if (code.Contains('(') && !code.StartsWith("{\"error", StringComparison.Ordinal)) await File.WriteAllTextAsync(file, code, ct);
+        return code;
+    }
 
     public async Task<JObject?> TryGetJsonAsync(string path, CancellationToken ct)
     {

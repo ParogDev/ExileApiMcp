@@ -36,7 +36,8 @@ public static partial class CodeAccessTools
         [Description("Bit within the byte at offset (0-7) to focus on, e.g. 6 for Flags bit 6")] int? bit = null,
         [Description("Known field offsets of the same struct (instead of path), e.g. [52,56,63]")] int[]? knownOffsets = null,
         [Description("Known offsets that must be accessed through the same base register (default 2)")] int minKnown = 2,
-        [Description("Functions to decompile (0-6, default 3)")] int decompile = 3,
+        [Description("Functions to decompile (0-6, default 3); bit-testing functions first (they explain flags)")] int decompile = 3,
+        [Description("Decompile exactly these functions (names from a previous result, e.g. [\"FUN_141d4d020\"]) instead of picking")] string[]? decompileFunctions = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
@@ -65,20 +66,28 @@ public static partial class CodeAccessTools
             game = bridge.Game;
         }
         if (known.Count < minKnown) throw new McpException($"Need at least {minKnown} known offsets of the struct: pass path (an object of this struct) or knownOffsets.");
-        // The known fields nearest the target: code that touches the target usually touches its neighbours.
-        var anchors = known.OrderBy(k => Math.Abs(k.Key - target)).Take(6).ToDictionary(k => k.Key, k => k.Value);
-
         var ghidra = await GhidraClient.ForGameAsync(game, ct);
-        var targetHits = Parse(await ghidra.SearchOperandAsync($"+ 0x{target:x}]", ct), target);
+        var targetMatches = await ghidra.SearchOperandAsync($"+ 0x{target:x}]", ct)
+            ?? throw new McpException($"+0x{target:X} is used by over 50000 instructions program-wide: too common to search by displacement. Try a neighbouring field.");
+        var targetHits = Parse(targetMatches, target);
+
+        // Anchors: the known fields nearest the target (code that touches the target usually touches its neighbours),
+        // skipping displacements too common to identify anything (e.g. +0x30, +0x38: over 50000 uses each).
+        var anchors = new Dictionary<int, string>();
         var byKey = new Dictionary<(string fn, string reg), HashSet<int>>();
         var anchorInfo = new JArray();
-        foreach (var (off, name) in anchors)
+        foreach (var (off, name) in known.OrderBy(k => Math.Abs(k.Key - target)).Take(12))
         {
-            var hits = Parse(await ghidra.SearchOperandAsync($"+ 0x{off:x}]", ct), off);
+            if (anchors.Count >= 6) break;
+            var matches = await ghidra.SearchOperandAsync($"+ 0x{off:x}]", ct);
+            if (matches == null) { anchorInfo.Add(new JObject { ["offset"] = off, ["field"] = name, ["skipped"] = "too common (50000+ uses)" }); continue; }
+            var hits = Parse(matches, off);
+            anchors[off] = name;
             anchorInfo.Add(new JObject { ["offset"] = off, ["field"] = name, ["accesses"] = hits.Count });
             foreach (var h in hits)
                 (byKey.TryGetValue((h.Function, h.Base), out var set) ? set : byKey[(h.Function, h.Base)] = []).Add(off);
         }
+        if (anchors.Count < minKnown) throw new McpException($"Only {anchors.Count} of the struct's known fields are distinctive enough to fingerprint its code; pass more knownOffsets or lower minKnown.");
 
         var scored = targetHits
             .Select(h => (h, known: byKey.TryGetValue((h.Function, h.Base), out var s) ? s : []))
@@ -100,8 +109,12 @@ public static partial class CodeAccessTools
         // Decompile the best functions (bit-matching first) and keep the lines around the target offset.
         var decompiled = new JArray();
         var hexToken = new Regex($@"0x{target:x}\b", RegexOptions.IgnoreCase);
-        foreach (var x in anchored.OrderByDescending(x => x.bitMatch).ThenByDescending(x => x.known.Count)
-                                  .GroupBy(x => x.h.Function).Select(g => g.First()).Take(Math.Clamp(decompile, 0, 6)))
+        var picks = decompileFunctions is { Length: > 0 }
+            ? anchored.Where(x => decompileFunctions.Contains(x.h.Function, StringComparer.OrdinalIgnoreCase)).GroupBy(x => x.h.Function).Select(g => g.First())
+            // Bit-matching first, then any bit-testing function (flag handling: serializers, UI), then the best-anchored.
+            : anchored.OrderByDescending(x => x.bitMatch).ThenByDescending(x => x.h.Kind == "bit-test").ThenByDescending(x => x.known.Count)
+                      .GroupBy(x => x.h.Function).Select(g => g.First()).Take(Math.Clamp(decompile, 0, 6));
+        foreach (var x in picks)
         {
             string code;
             try { code = await ghidra.DecompileAsync(x.h.Address, ct); }
@@ -124,7 +137,9 @@ public static partial class CodeAccessTools
         var result = new JObject
         {
             ["game"] = game, ["program"] = ghidra.Program, ["struct"] = structName, ["path"] = path,
-            ["target"] = new JObject { ["offset"] = target, ["hex"] = $"0x{target:X}", ["bit"] = bit },
+            ["target"] = bit == null
+                ? new JObject { ["offset"] = target, ["hex"] = $"0x{target:X}" }
+                : new JObject { ["offset"] = target, ["hex"] = $"0x{target:X}", ["bit"] = bit },
             ["anchors"] = anchorInfo, ["minKnown"] = minKnown,
             ["programWideAccesses"] = targetHits.Count,
             ["functions"] = new JArray(anchored.GroupBy(x => x.h.Function).Select(g => new JObject
@@ -227,7 +242,9 @@ public static partial class CodeAccessTools
         if (t["bit"]?.Type == JTokenType.Integer) sb.Append($" bit {t["bit"]}");
         sb.AppendLine($" in {r["program"]} (static, Ghidra)");
         sb.AppendLine($"Fingerprint: functions touching >= {r["minKnown"]} of: " +
-                      string.Join(", ", ((JArray)r["anchors"]!).Select(a => $"+{a["offset"]} {a["field"]}")));
+                      string.Join(", ", ((JArray)r["anchors"]!).Where(a => a["skipped"] == null).Select(a => $"+{a["offset"]} {a["field"]}")));
+        var skipped = ((JArray)r["anchors"]!).Where(a => a["skipped"] != null).Select(a => $"+{a["offset"]} {a["field"]}").ToList();
+        if (skipped.Count > 0) sb.AppendLine($"(too common to fingerprint with: {string.Join(", ", skipped)})");
         var fns = (JArray)r["functions"]!;
         sb.AppendLine($"{fns.Count} function(s) of this struct access the field; {r["programWideAccesses"]} instructions program-wide use the displacement.");
         foreach (var a in ((JArray)r["accesses"]!).OfType<JObject>().Take(25))
