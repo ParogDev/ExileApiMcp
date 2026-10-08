@@ -61,7 +61,7 @@ Don't name a byte from one sample. Each step below produces counts and counterex
   - **Bits 19 and 20 are unused.**
   - **Don't name bits from the HUD's `InventoryTabType` enum.** It matches only where a dedicated tab type exists: bit 7 is "Quad" there (Settlers in game), 14 is "Metamorph" (the game's Ultimatum affinity; ticking Ultimatum took bit 14 from a Metamorph-type tab), and 16 is "Folder" (Breach).
 - **A Normal (non-premium, `TabType` 0) tab can hold affinities:** one held 7 at once.
-- **Unexplained:** unmapped bytes +40 and +62 changed on a tab whose affinity didn't change, during the first experiment step. Something else is stored there.
+- **Explained later:** unmapped bytes +40 and +62 changed on a tab whose affinity didn't change during the first experiment step. That was the tab's inventory being loaded: +40 = inventory id, and +62 bit 1 = Flags bit 9.
 - **What the code says** (`find_field_access offset=61 bit=6`, found in 158 s on first run, cached since):
   - The tab's network serializer `FUN_141d4d020` and deserializer `FUN_141d4d1f0` treat **Flags as 2 bytes (+61..+62)**. The HUD maps 1 byte, so the "unexplained" +62 changes were Flags' high byte.
   - They gate optional members on Flags bits:
@@ -75,8 +75,10 @@ Don't name a byte from one sample. Each step below produces counts and counterex
     - Evidence: all 27 Map pages point to the Map stash tab (index 23); the conversion code `FUN_14025ac30` picks the parent link by bit 5.
     - Child tabs exist only after their stash has been opened.
   - **Flags bit 0 = remove-only** (4 of 4 "(Remove-only)" tabs, no others).
-  - **Flags bit 9 (byte +62 bit 1):** set on the tabs opened or changed this session. Probably client-side "loaded" state; unconfirmed.
-  - **+0 (8 bytes):** only on child tabs, with a different value per Map page. Its meaning is still open.
+  - **+40 = the id of the server inventory holding the tab's items; Flags bit 9 (byte +62 bit 1) = that inventory is loaded.**
+    - Evidence: +40 ≠ 0 exactly when bit 9 is set (12/12, 0 counterexamples). The values are consecutive (0x9B-0xA6), assigned as tabs were opened, and each matches a `ServerData.PlayerInventories` `Id` of the right type (Currency, Gem, FlaskStash, MapStashInv for Map pages...).
+    - Use: stash tab → its live items. The HUD's stash-tab struct doesn't expose this.
+  - **+0 (8 bytes):** only on child tabs, a different value per Map page. Unchanged by viewing the page or moving a map out of it, so it's not view state and not derived from contents. Most likely a stable server-side page id.
   - **+60 (1 byte, gated by bit 4):** copied into the client's tab info but unused on 92 tabs (personal and guild). Possibly stash-folder data, since the HUD's tab-type enum has a Folder type; untested.
   - The client conversion loops over **22 affinity bits** (0-21).
 - **`Flags` (+61):**
