@@ -88,7 +88,7 @@ run.cmd --http [--port 50910]
 |---|---|
 | Status | `bridge_status` |
 | Game state | `get_player`, `get_area`, `get_entities`, `deep_scan`, `get_npc_dialog`, `get_map_data`, `get_ui_panels`, `get_stash`, `get_all`, `get_player_stats_raw` |
-| Introspection | `eval_path`, `describe_type` |
+| Introspection | `eval_path`, `describe_type`, `watch_object` (samples a path for a few seconds and reports only the leaves that changed, with counts and first/last values; noisy timers flagged) |
 | Player stats | `show_player_stats` (opens the app), `stats_page`, `get_stat`, `stats_ui_state` (app polling) |
 | Shared stats view | `set_stat_pinned`, `set_stats_filter`, `select_stat`, `set_stats_view` |
 | Recording | `record_start`, `record_stop`, `record_status`, `snapshot`, `recording_list`, `recording_info`, `recording_frame`, `recording_range`, `recording_search`, `recording_summary` |

@@ -1,4 +1,4 @@
-using ExileApiMcp.Bridge;
+﻿using ExileApiMcp.Bridge;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Extensions.Apps;
 using ModelContextProtocol.Protocol;
@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.9.0";
+    public const string Version = "3.10.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -26,6 +26,8 @@ internal static class McpSetup
         is open, the user's selected and pinned stats arrive in your context, so "this stat" means the selection.
 
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
+        watch_object samples a path over time and reports only the fields that changed: run it while the user
+        does something in game to find which field reflects it.
         get_map_image returns the area map as an image (player marked) - look at it for layout and pathing questions.
         hud_plugin_perf / hud_plugin_settings / plugin_bridge_methods read the running HUD by reflection: what each
         plugin costs per frame, how it is configured right now, and the cross-plugin API it exposes.
