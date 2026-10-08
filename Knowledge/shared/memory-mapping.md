@@ -25,6 +25,8 @@ How to see what the HUD maps in a game struct, what it doesn't, and confirm it i
 Most questions about a struct are settled without the user. Use these in this order:
 1. **`game_data`:** the game's own tables name ids, enums and bits, and say how they link. Row n is usually id n; foreign keys show as `File[row]`.
    - Stash examples: `StashTabAffinityId.dat` names all 22 affinity bits, and matched every experiment. `StashType.dat` names the 25 tab types; the HUD enum is outdated. `StashTabAffinities.dat` gives the UI order, and `StashTabAffinityByItemClassCategory.dat` maps item class → affinity.
+   - **Unknown ids → `find_in_game_data`:** collect the field over a population and pass the values. Every loaded table is scanned, and the column holding (nearly) all of them names them. Unpack tagged values first.
+     - Example: Map stash page +0 is `kind | value << 5`. Kind 0 values are `BaseItemTypes.dat` +140 (MapKeyTier1-16, Nightmare, Shaper Guardian), kind 1 values are a unique map key (`MapStashUniqueMapInfo.dat` +32), and kind 3 is a `MapStashSpecialSubstashGroup.dat` row. Findings `stash.child.page-key`.
    - Pointers into data rows also show as `data-row` in `memory_layout` (e.g. `Base` +24 → `ItemVisualIdentity.dat[...]`).
 2. **`code_struct_layout`** on the struct's network (de)serializer or constructor (found with `find_field_access`): every member with its size and the flag that gates it, diffed with the HUD's struct.
    - For a stash tab, the deserializer `FUN_141d4d1f0` yields +0 (8 B, bit 5), +40 (inventory id), +58 (2 B), +60 (1 B, bit 4) as UNMAPPED, and Flags as 2 B vs the HUD's 1 B, with no experiment.
