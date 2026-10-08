@@ -13,12 +13,13 @@ public static class MapTools
 {
     [McpServerTool(Name = "get_map_image", Title = "Area map (image)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("The current area's terrain map as a PNG image you can look at, with the player marked (red dot in a gold ring). " +
-                 "Comes from the Radar plugin (must be loaded). Light lines are walls / edges of walkable terrain. Pixel = (grid - originGrid) * scale, " +
+                 "Source (in 'source'): Radar's map when its build exposes one (PoE2), else the game's pathfinding grid drawn by the bridge " +
+                 "(any game, no plugin needed); 'legend' says how to read it. Pixel = (grid - originGrid) * scale, " +
                  "so entity GridPos values from get_entities map onto it. Use for layout questions, pathing, or checking what a map plugin should draw.")]
     public static async Task<CallToolResult> GetMapImage(BridgeRegistry bridges,
         [Description("Crop to this many grid cells around the player (0 = whole area, trimmed to the terrain)")] int cropRadius = 0,
         [Description("Longest side of the image in pixels (64-2048, default 1024)")] int maxSize = 1024,
-        [Description("Draw Radar's routes to its configured targets")] bool includeRoutes = false,
+        [Description("Draw Radar's routes to its configured targets (Radar-sourced maps only)")] bool includeRoutes = false,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
