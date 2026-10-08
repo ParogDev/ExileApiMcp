@@ -1,249 +1,95 @@
 # ExileApiMcp
 
-MCP server that exposes live Path of Exile game state as [Model Context Protocol](https://modelcontextprotocol.io/) tools. It connects to the [What's an AI Bridge?](https://github.com/ParogDev/WhatsAnAiBridge) ExileApi plugin over TCP and makes game data queryable from Claude Code, VS Code Copilot, or any MCP-compatible AI client.
+MCP server that exposes live **Path of Exile 1 and 2** game state as [Model Context Protocol](https://modelcontextprotocol.io/) tools, for developing and debugging HUD plugins with an AI assistant. It talks to the [What's an AI Bridge?](https://github.com/ParogDev/WhatsAnAiBridge) plugin running inside the PoE1 HUD (ExileApi / ExileCore) or the PoE2 HUD (ExileCore2).
 
-> **What does this actually do?** When you're developing ExileApi plugins with an AI assistant, the AI can't see your game. This MCP server gives it eyes -- it can check your character's health, see nearby monsters, inspect UI panels, and explore the full ExileApi object graph in real time. Instead of you copy-pasting game data, the AI queries it directly.
+> **What does it do?** Your AI assistant can't see your game. With this server it can read your character's stats, nearby monsters, UI panels and stash. It can walk the HUD's object model by reflection, record gameplay, and point you at things in a shared stats panel that the in-game HUD and Claude both show.
 
-## How It Works
-
-```
-Path of Exile (ExileApi HUD)
-         |
-  [What's an AI Bridge?]   <-- in-game plugin, runs on game thread
-    TCP JSON-RPC 2.0 on localhost:50900
-         |
-  [ExileApiMcp]             <-- this project, standalone console app
-    MCP server (stdio transport)
-         |
-  Claude Code / VS Code / any MCP client
-```
-
-1. The **What's an AI Bridge?** plugin runs inside ExileApi and serves game state over a local TCP connection
-2. **ExileApiMcp** (this project) connects to that plugin and translates requests into MCP tools
-3. Your AI assistant calls those tools to read live game data
-
-The two-process split means you can restart the MCP server without reloading the game, and the game stays responsive because queries are processed under a time budget on the main thread.
-
-## Prerequisites
-
-| Requirement | Details |
-|------------|---------|
-| **ExileApi HUD** | Installed and running. ExileApi is a third-party overlay framework for Path of Exile |
-| **What's an AI Bridge?** | [Plugin](https://github.com/ParogDev/WhatsAnAiBridge) installed in ExileApi's `Plugins/Source/` folder and enabled |
-| **.NET 10 SDK** | [Download here](https://dotnet.microsoft.com/download/dotnet/10.0) -- this is currently a preview SDK. Install the SDK (not just the runtime) |
-| **An MCP-compatible client** | [Claude Code](https://docs.anthropic.com/en/docs/claude-code), VS Code with Copilot, or any client supporting the [MCP standard](https://modelcontextprotocol.io/) |
-
-## Setup
-
-### Quick Setup (Claude Code)
-
-If you're using [Claude Code](https://docs.anthropic.com/en/docs/claude-code), open this directory and run:
+## How it works
 
 ```
-/setup-mcp
+ PoE1 HUD (ExileApi)              PoE2 HUD (ExileCore2)
+   What's an AI Bridge?             What's an AI Bridge?
+   PoeHelper\claude-bridge          halp2\claude-bridge
+        \  JSON-RPC over 127.0.0.1, per-launch token  /
+                      ExileApiMcp (this project)
+                stdio (default)  |  --http (127.0.0.1, bearer token)
+                      Claude Code / Claude Desktop / any MCP client
 ```
 
-This will detect your bridge directory, create `.mcp.json`, build, and tell you when to restart. Skip to [Available Tools](#available-tools) once it's done.
+- **One server, both games.** Tools take an optional `game` argument (`poe1` | `poe2`). Without it, the one HUD that is running is used. `bridge_status` shows which bridges are up and what each game's HUD *cannot* provide; those fields are omitted, never faked.
+- **MCP spec 2026-07-28, stateless** (C# SDK 2.2). Over HTTP, current clients use no sessions. Older clients that still send `initialize` get a session (dual-era).
+- **MCP App.** `show_player_stats` opens an interactive stats panel in clients that render MCP Apps (Claude Desktop chat, with the server configured locally over stdio). Other clients get a text summary.
 
-> **Don't have the skill?** Paste this into Claude Code instead:
->
-> *Build this project with `dotnet build`, find my ExileApi bridge directory (look for a `claude-bridge` folder containing `bridge-port.txt` in my Documents), and create a `.mcp.json` in my current directory that points to this project and the bridge directory. Then tell me to restart Claude Code.*
+## Requirements
 
-### Manual Setup
+| | |
+|---|---|
+| HUD | PoE1 ExileApi and/or PoE2 ExileCore2, with **What's an AI Bridge?** enabled |
+| .NET | .NET 10 SDK (to build and run) |
+| Client | Any MCP client: Claude Code, Claude Desktop, VS Code, … |
 
-#### Step 1: Verify the plugin is running
+## Configure
 
-Launch ExileApi with Path of Exile running. In the ExileApi plugin list, make sure **What's an AI Bridge?** is enabled. You should see a small status indicator on screen:
-- **Green dot** = TCP server is up and idle
-- **Yellow dot** = processing a query  
-- **Grey dot** = TCP server is disabled (check plugin settings)
-
-The plugin writes two files to its bridge directory (default: `<ExileApi install>/claude-bridge/`):
-- `bridge-port.txt` -- the TCP port it's listening on
-- `bridge-token.txt` -- a random auth token (regenerated each plugin start)
-
-#### Step 2: Clone this repo
-
-```bash
-git clone https://github.com/ParogDev/ExileApiMcp.git
-```
-
-#### Step 3: Test the connection (optional)
-
-You can verify everything works before configuring your AI client:
-
-```bash
-cd ExileApiMcp
-dotnet run
-```
-
-If the plugin is running, you'll see:
-```
-[ExileApiMcp] Connecting to plugin on 127.0.0.1:50900
-[ExileApiMcp] Bridge directory: C:\Users\You\Documents\PoeHelper\claude-bridge
-[BridgeClient] Connected to plugin on port 50900
-```
-
-If the plugin is **not** running, you'll see connection retries -- this is normal:
-```
-[BridgeClient] Connection failed: Connection refused, retrying in 1s
-[BridgeClient] Connection failed: Connection refused, retrying in 1.5s
-```
-
-Press `Ctrl+C` to stop. The MCP server will reconnect automatically when configured as a client tool.
-
-#### Step 4: Configure your MCP client
-
-#### Claude Code
-
-Create or edit `.mcp.json` in your project root:
+### Claude Code (stdio) - `.mcp.json`
 
 ```json
 {
   "mcpServers": {
     "exileapi": {
       "command": "dotnet",
-      "args": ["run", "--project", "C:\\path\\to\\ExileApiMcp"],
-      "env": {
-        "BRIDGE_DIR": "C:\\path\\to\\ExileApi\\claude-bridge"
-      }
+      "args": ["run", "--project", "path/to/ExileApiMcp"]
     }
   }
 }
 ```
 
-Replace the paths with your actual locations. Keep the double backslashes (`\\`) -- JSON requires backslashes to be escaped:
-- `C:\\path\\to\\ExileApiMcp` -- where you cloned this repo
-- `C:\\path\\to\\ExileApi\\claude-bridge` -- your ExileApi install's `claude-bridge` folder
+Bridge folders default to `%USERPROFILE%\Documents\PoeHelper\claude-bridge` (PoE1) and `%USERPROFILE%\Documents\halp2\claude-bridge` (PoE2). Override them with `POE1_BRIDGE_DIR` / `POE2_BRIDGE_DIR` in `env`.
 
-Then restart Claude Code. The MCP tools will appear automatically. You can verify with `/mcp` in Claude Code.
+The legacy single-HUD settings `BRIDGE_DIR` (+ `BRIDGE_PORT`) still work. With them, the game is detected from the bridge.
 
-#### VS Code (Copilot)
+### Claude Desktop (stdio, renders the stats app)
 
-Add to your workspace `.vscode/mcp.json`:
+Add the same entry to `claude_desktop_config.json` (Settings → Developer → Edit config). Claude Desktop renders MCP Apps for local servers configured this way; servers added by URL are reached from the cloud and can't see `127.0.0.1`.
 
-```json
-{
-  "servers": {
-    "exileapi": {
-      "command": "dotnet",
-      "args": ["run", "--project", "C:\\path\\to\\ExileApiMcp"],
-      "env": {
-        "BRIDGE_DIR": "C:\\path\\to\\ExileApi\\claude-bridge"
-      }
-    }
-  }
-}
+### HTTP (local agents, MCP Inspector, ext-apps basic-host)
+
+```
+dotnet run --project path/to/ExileApiMcp -- --http [--port 50910]
 ```
 
-#### Environment Variables
+- Listens on `http://127.0.0.1:50910/mcp` only.
+- Requires `Authorization: Bearer <token>`. The token is created on first run in `%LOCALAPPDATA%\ExileApiMcp\http-token.txt`; set `MCP_HTTP_TOKEN` to use your own.
+- For Claude Code:
+  ```json
+  { "mcpServers": { "exileapi-http": { "type": "http", "url": "http://127.0.0.1:50910/mcp",
+      "headers": { "Authorization": "Bearer ${EXILEAPI_MCP_TOKEN}" } } } }
+  ```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BRIDGE_DIR` | `~/Documents/PoeHelper/claude-bridge` | Directory containing `bridge-port.txt` and `bridge-token.txt` |
-| `BRIDGE_PORT` | `50900` | Fallback port (only used if `bridge-port.txt` doesn't exist) |
+## Tools
 
-## Available Tools
+| Group | Tools |
+|---|---|
+| Status | `bridge_status` |
+| Game state | `get_player`, `get_area`, `get_entities`, `deep_scan`, `get_npc_dialog`, `get_map_data`, `get_ui_panels`, `get_stash`, `get_all`, `get_player_stats_raw` |
+| Introspection | `eval_path`, `describe_type` |
+| Player stats | `show_player_stats` (opens the app), `stats_page`, `get_stat`, `stats_ui_state` (app polling) |
+| Shared stats view | `set_stat_pinned`, `set_stats_filter`, `select_stat`, `set_stats_view` |
+| Recording | `record_start`, `record_stop`, `record_status`, `snapshot`, `recording_list`, `recording_info`, `recording_frame`, `recording_range`, `recording_search`, `recording_summary` |
 
-Once connected, your AI assistant can call these tools directly.
+- **Stats** are keyed by Stats.dat key (e.g. `fire_damage_resistance_%`), which is stable across patches and between games, and include the in-game text and a category.
+- **The stats view state** (pins, filter, selection, sort) lives in the HUD plugin and is versioned by `rev`. The in-game panel, the app and agents all change the same state. Mutators accept an optional `expectedRev` and answer `rev_mismatch` if someone else changed it first.
+- **Recordings** are addressed by file name, so playback calls are stateless.
+- **All tools are read-only toward the game** and never send input. Tools that change state are annotated (`readOnlyHint: false`) and only affect the shared stats view or recordings.
 
-### Game State
+## Security
 
-| Tool | Description |
-|------|-------------|
-| `get_all` | Combined snapshot: player + area + entities + NPC dialog + map data |
-| `get_player` | HP/ES/Mana, position, buffs, skills |
-| `get_area` | Zone name, level, act |
-| `get_entities` | Nearby entities sorted by distance, with range and type filters |
-| `get_npc_dialog` | NPC dialog visibility, lines, lore talk flag |
-| `get_map_data` | Map stats, quest flags, dialog depth |
-| `get_ui_panels` | Visible UI panels with hierarchical child text |
-| `get_stash` | Stash tabs with name, type, color, flags, affinity |
-| `get_player_stats` | Full untruncated GameStat dictionary (500+ entries) |
-| `deep_scan` | Deep component dump for entities matching a path filter |
-| `get_bridge_status` | Connection health: connected clients, pending requests |
+The bridge and this server listen on loopback only. Any local account can reach loopback, so **tokens are the boundary**:
+- **Bridge:** every request carries the HUD's per-launch token from `bridge-token.txt`.
+- **HTTP transport:**
+  - Host header allowlist (blocks DNS rebinding; 421)
+  - Origin check (403)
+  - bearer token (401)
+  - global rate limit
+  - no CORS
 
-### Reflection
-
-These tools let the AI explore the ExileApi object graph without writing plugin code:
-
-| Tool | Description |
-|------|-------------|
-| `eval_path` | Walk the object graph by dotted path (e.g. `GameController.Player.GetComponent<Life>().CurHP`) |
-| `describe_type` | List public properties and methods at a path to discover what data is available |
-
-### Recording
-
-Capture gameplay snapshots for offline analysis (useful for debugging without the game running):
-
-| Tool | Description |
-|------|-------------|
-| `record_start` | Start recording at a configurable interval (default 200ms) |
-| `record_stop` | Stop recording and get stats |
-| `record_status` | Check if recording is active |
-| `snapshot` | Capture a single frame immediately |
-| `recording_list` | List saved `.jsonl` recording files |
-| `recording_load` | Load a recording for playback |
-| `recording_frame` | Read a specific frame by index |
-| `recording_search` | Find frames containing a substring |
-| `recording_summary` | Unique entity paths, buff names, frame count, time range |
-
-## Troubleshooting
-
-### Tools hang or time out
-
-The MCP server can't reach the plugin. Check:
-- Is ExileApi running with Path of Exile?
-- Is the **What's an AI Bridge?** plugin enabled? (check ExileApi's plugin list)
-- Does `bridge-port.txt` exist in your `BRIDGE_DIR`? If not, the plugin hasn't started its TCP server
-- Is another process using port 50900? The plugin will write the actual port to `bridge-port.txt`
-
-### Tools return stale or empty data
-
-The plugin runs on the game's main thread. If ExileApi is **not in the foreground**, the game thread may be throttled or paused, which means the plugin can't process queries and game state may not update.
-
-Fix: either keep ExileApi in the foreground while querying, or enable **Core > Force Foreground** in ExileApi's settings so the HUD keeps processing even when alt-tabbed.
-
-### "Not connected to plugin" errors
-
-The MCP server started but lost its connection. This happens when:
-- ExileApi was closed or crashed
-- The plugin was disabled/reloaded
-- The game disconnected
-
-The server will reconnect automatically on the next tool call.
-
-### Token errors / auth failures
-
-The plugin generates a new auth token every time it starts. If you see auth errors:
-- The plugin was restarted after the MCP server connected
-- The MCP server will re-read the token on reconnection -- just retry the tool call
-
-### MCP server won't start
-
-- Make sure you have the **.NET 10 SDK** (not just the runtime): `dotnet --list-sdks`
-- Run `dotnet restore` in the ExileApiMcp directory to fetch NuGet packages
-- Check that the path in your MCP config points to the directory containing `ExileApiMcp.csproj`
-
-### Claude Code shows "Failed to reconnect to exileapi"
-
-This usually means the MCP server process crashed or the config path is wrong. Check:
-- The `--project` path in your `.mcp.json` is correct
-- Run `dotnet build` in the ExileApiMcp directory to check for build errors
-- Try `/mcp` in Claude Code to see connection status
-
-## Quick Start Prompt
-
-Once everything is set up, give your AI this prompt to verify the connection and start exploring:
-
-> I have ExileApiMcp configured as an MCP server. It connects to Path of Exile via the ExileApi HUD overlay. Use the `get_bridge_status` tool to check the connection, then `get_all` to see my current game state. If tools hang or return errors, the HUD might not be in the foreground -- remind me to enable "Force Foreground" in ExileApi's Core settings.
-
-From there, the AI can query your character, inspect nearby entities, explore the object graph, and help you build plugins with live data.
-
-## Authentication
-
-The plugin generates a 256-bit random token on each startup, written to `bridge-token.txt`. The MCP server reads this file automatically. Tokens are regenerated every time the plugin starts, so stale tokens are never reused. All communication stays on `127.0.0.1` (localhost only).
-
-## About
-
-Part of the [WhatsA plugin family](https://github.com/ParogDev/WhatsAnAiBridge#whatsa-plugin-family) for ExileApi. Built with AI-assisted development using Claude Code.
+The server adds no network egress, and the MCP App loads no external origins.

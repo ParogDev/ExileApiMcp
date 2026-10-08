@@ -1,66 +1,72 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using ExileApiMcp;
-using ExileApiMcp.Tools;
-using ModelContextProtocol.Server;
+using System.Net;
+using System.Threading.RateLimiting;
+using ExileApiMcp.Hosting;
+using ModelContextProtocol.AspNetCore;
 
-// Read config from environment or defaults
-var port = int.TryParse(Environment.GetEnvironmentVariable("BRIDGE_PORT"), out var p) ? p : 50900;
-var bridgeDir = Environment.GetEnvironmentVariable("BRIDGE_DIR")
-    ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "PoeHelper", "claude-bridge");
+// ExileApi MCP server - one executable, two transports:
+//   (default) stdio : launched by the client (Claude Code .mcp.json, Claude Desktop config).
+//                     Claude Desktop renders the MCP App UI only for local servers over stdio.
+//   --http          : stateless Streamable HTTP (MCP 2026-07-28) on 127.0.0.1:<port>/mcp, with
+//                     Host/Origin checks and a bearer token (see Hosting/LocalHttpSecurity.cs).
+//                     Options: --port N (default 50910, or MCP_HTTP_PORT).
 
-// Check for port file (ephemeral port support)
-var portFilePath = Path.Combine(bridgeDir, "bridge-port.txt");
-if (File.Exists(portFilePath) && int.TryParse(File.ReadAllText(portFilePath).Trim(), out var filePort))
-    port = filePort;
+if (args.Contains("--http"))
+    await RunHttpAsync(args);
+else
+    await RunStdioAsync(args);
 
-Console.Error.WriteLine($"[ExileApiMcp] Connecting to plugin on 127.0.0.1:{port}");
-Console.Error.WriteLine($"[ExileApiMcp] Bridge directory: {bridgeDir}");
-
-var builder = Host.CreateApplicationBuilder(args);
-
-// Log to stderr only -- stdout is reserved for MCP protocol
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole(options =>
+static async Task RunStdioAsync(string[] args)
 {
-    options.LogToStandardErrorThreshold = LogLevel.Warning;
-});
+    var builder = Host.CreateApplicationBuilder(args);
+    // stdout carries the protocol: every log line goes to stderr.
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+    builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
-// Register BridgeClient as singleton -- connect eagerly
-var client = new BridgeClient(port, bridgeDir);
-builder.Services.AddSingleton(client);
+    builder.Services.AddExileApiMcp().WithStdioServerTransport();
+    await builder.Build().RunAsync();
+}
 
-// Register MCP server with stdio transport and tool classes
-builder.Services
-    .AddMcpServer(options =>
-    {
-        options.ServerInfo = new()
-        {
-            Name = "ExileApi MCP",
-            Version = "2.0.0",
-        };
-    })
-    .WithStdioServerTransport()
-    .WithTools<GameStateTools>()
-    .WithTools<RecordingTools>()
-    .WithTools<EvalTools>();
-
-var host = builder.Build();
-
-// Connect to plugin in background (don't block MCP server startup)
-_ = Task.Run(async () =>
+static async Task RunHttpAsync(string[] args)
 {
-    try
-    {
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await client.ConnectAsync(cts.Token);
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"[ExileApiMcp] Initial connection failed: {ex.Message}");
-        Console.Error.WriteLine("[ExileApiMcp] Tools will attempt reconnection on first use");
-    }
-});
+    var port = PortFromArgs(args)
+               ?? (int.TryParse(Environment.GetEnvironmentVariable("MCP_HTTP_PORT"), out var envPort) ? envPort : 50910);
 
-await host.RunAsync();
+    var builder = WebApplication.CreateBuilder(args);
+    builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, port)); // never 0.0.0.0
+    builder.Logging.SetMinimumLevel(LogLevel.Warning);
+
+    builder.Services.AddRateLimiter(o =>
+    {
+        o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(_ =>
+            RateLimitPartition.GetFixedWindowLimiter("all", _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 600, // ~10/s: app polling (1/s) + agent calls with plenty of headroom
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
+    });
+
+    builder.Services.AddExileApiMcp().WithHttpTransport(o =>
+    {
+        // Stateless for 2026-07-28 clients; sessions only for older clients that still send
+        // initialize (dual-era), so current Claude clients work either way.
+        o.SessionMode = HttpServerSessionMode.StatefulForInitializeClients;
+    });
+
+    var app = builder.Build();
+    var token = LocalHttpSecurity.LoadOrCreateToken();
+    app.UseLocalHttpSecurity(token);
+    app.UseRateLimiter();
+    app.MapMcp("/mcp");
+
+    Console.Error.WriteLine($"[ExileApiMcp] HTTP on http://127.0.0.1:{port}/mcp (bearer token: {LocalHttpSecurity.TokenFilePath})");
+    await app.RunAsync();
+}
+
+static int? PortFromArgs(string[] args)
+{
+    var i = Array.IndexOf(args, "--port");
+    return i >= 0 && i + 1 < args.Length && int.TryParse(args[i + 1], out var p) ? p : null;
+}
