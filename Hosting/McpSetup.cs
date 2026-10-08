@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.10.0";
+    public const string Version = "3.10.1";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -56,6 +56,25 @@ internal static class McpSetup
                 o.ServerInfo = new Implementation { Name = "ExileApi MCP", Title = "Path of Exile HUD", Version = Version };
                 o.ServerInstructions = Instructions;
             })
+            .WithRequestFilters(f => f.AddCallToolFilter(next => async (request, ct) =>
+            {
+                // One stderr line per call, which clients such as Claude Desktop keep in their per-server log:
+                // the only record of what an MCP App actually called. Successful polls are skipped (1/s).
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var name = request.Params?.Name ?? "?";
+                try
+                {
+                    var result = await next(request, ct);
+                    if (result.IsError == true || name != "stats_ui_state")
+                        Console.Error.WriteLine($"[call] {name} {sw.ElapsedMilliseconds}ms{(result.IsError == true ? " isError" : "")}");
+                    return result;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[call] {name} {sw.ElapsedMilliseconds}ms failed: {ex.Message}");
+                    throw;
+                }
+            }))
             .WithToolsFromAssembly()
             .WithResourcesFromAssembly()
             .WithPromptsFromAssembly()
