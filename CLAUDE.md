@@ -13,6 +13,7 @@ MCP server (C# SDK 2.2, spec 2026-07-28) exposing live PoE1/PoE2 HUD state throu
 | `Bridge/BridgeRegistry.cs` | poe1/poe2 bridges, `game` resolution, bridge errors -> McpException |
 | `Tools/*.cs` | static tool classes; inject `BridgeRegistry`; annotate ReadOnly/Destructive/Idempotent/OpenWorld |
 | `Hud/HudInstall.cs` | A HUD folder on disk: Serilog log parsing (latest run), source plugins, path redaction, stack compaction |
+| `Hud/HudTypes.cs`, `Tools/HudTypeTools.cs` | `hud_find_types`, `hud_type`: HUD DLL metadata via MetadataLoadContext (cached per HUD folder, rebuilt when ExileCore*/GameOffsets* change) |
 | `Tools/HudDevTools.cs` | `hud_plugins`, `hud_log`: offline dev-loop tools (no bridge) |
 | `Prompts/DevPrompts.cs` | Workflow prompts (`plugin_dev_loop`, `investigate_stat`). Keep them in step with the tools they name |
 | `Apps/PlayerStatsApp.cs` | `ui://exile/player-stats` resource; HTML embedded from `ui/player-stats.html` |

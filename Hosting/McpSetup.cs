@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.2.0";
+    public const string Version = "3.3.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -25,7 +25,10 @@ internal static class McpSetup
         show_player_stats opens that view as an interactive panel where the client supports MCP Apps; while it
         is open, the user's selected and pinned stats arrive in your context, so "this stat" means the selection.
 
-        eval_path / describe_type walk the HUD object model by reflection (namespaces differ per game).
+        eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
+        hud_find_types / hud_type are the offline API reference: every type and member (non-public too) of
+        the HUD's DLLs, with the game and HUD closed. Start there before guessing a member name; on PoE2
+        it is the only API reference (no source). GameOffsets2 offsets are decoys (flagged "suspect").
 
         Plugin development: hud_plugins says whether the HUD compiled and loaded each source plugin (with
         compiler errors), hud_log shows the HUD's log since it started. Both read the HUD folders on disk, so
