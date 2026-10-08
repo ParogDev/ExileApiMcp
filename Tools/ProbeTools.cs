@@ -155,8 +155,8 @@ public static class ProbeTools
             list.Add((label, values.Select(v => v!.Value<bool>()).ToArray()));
         else
             list.Add(($"{label} is empty", values.Select(v => string.IsNullOrEmpty(v?.ToString())).ToArray()));
-        // Common values (categorical): "== X" for values held by 2+ items.
-        foreach (var g in values.GroupBy(v => v?.ToString() ?? "null").Where(g => g.Count() >= 2).Take(20))
+        // Common values (categorical): "== X" for values held by 2+ items. "== 0" would only repeat "!= 0" inverted.
+        foreach (var g in values.GroupBy(v => v?.ToString() ?? "null").Where(g => g.Count() >= 2 && !(nums.All(n => n != null) && g.Key == "0")).Take(20))
             list.Add(($"{label} == {g.Key}", values.Select(v => (v?.ToString() ?? "null") == g.Key).ToArray()));
         return list;
     }
@@ -333,7 +333,13 @@ public static class ProbeTools
             }
         }
         sb.Append("Bits are numbered within each byte (0 = lowest); a field bit N lives in byte off + N/8 of the field.");
-        return Result(sb.ToString(), new JObject { ["snapshots"] = new JArray(names), ["steps"] = steps });
+        // Per-snapshot metadata, so viewers can name bytes (struct) and items (labels) without other calls.
+        var meta = new JArray(snaps.Select(s => new JObject
+        {
+            ["name"] = s["name"], ["path"] = s["path"], ["kind"] = s["kind"], ["struct"] = s["struct"], ["offset"] = s["offset"],
+            ["size"] = s["size"], ["labels"] = s["labels"], ["game"] = s["game"], ["takenAt"] = s["takenAt"],
+        }));
+        return Result(sb.ToString(), new JObject { ["snapshots"] = new JArray(names), ["snapshotInfo"] = meta, ["steps"] = steps });
     }
 
     /// <summary>Matching regions of two snapshots: by the first label (e.g. Name) for collections, else by index.</summary>
