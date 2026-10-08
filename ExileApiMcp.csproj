@@ -16,6 +16,8 @@
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <PackageReference Include="ModelContextProtocol.Extensions.Apps" Version="2.2.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <!-- Offline type metadata of the HUD DLLs (hud_find_types / hud_type): reads, never executes. -->
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.12" />
   </ItemGroup>
   <ItemGroup>
     <!-- MCP App UI bundles (single-file HTML built from ui-src in a container; see ui-src/README.md). -->

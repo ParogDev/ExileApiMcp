@@ -84,6 +84,7 @@ run.cmd --http [--port 50910]
 | Player stats | `show_player_stats` (opens the app), `stats_page`, `get_stat`, `stats_ui_state` (app polling) |
 | Shared stats view | `set_stat_pinned`, `set_stats_filter`, `select_stat`, `set_stats_view` |
 | Recording | `record_start`, `record_stop`, `record_status`, `snapshot`, `recording_list`, `recording_info`, `recording_frame`, `recording_range`, `recording_search`, `recording_summary` |
+| HUD API reference (offline) | `hud_find_types` (types by name, or which type has a member), `hud_type` (fields with `[FieldOffset]`, properties, method signatures, enum values; optionally non-public and inherited) |
 | Plugin dev loop (offline) | `hud_plugins` (did each source plugin compile and load in the HUD's latest run; compiler errors; stale `Errors.txt` detection), `hud_log` (the latest run's log, deduplicated, filtered by level/plugin/text) |
 
 **Prompts:**
@@ -95,6 +96,12 @@ The dev-loop tools read the HUD folders on disk (next to the bridge folders), so
 - .NET runtime stack frames are collapsed.
 
 The HUD compiles source plugins **at startup** (or from the menu's Reload button), not on save.
+
+**API reference tools.**
+- **What they read:** `hud_find_types` and `hud_type` read the HUD's DLL metadata with `MetadataLoadContext`. Nothing is loaded for execution, and the game and HUD can be closed.
+- **Why it matters for PoE2:** ExileCore2 ships without source, so this is its API reference.
+- **Beyond the live walker:** unlike `describe_type`, they see non-public members and types not reachable from `GameController`.
+- **Decoy offsets:** offsets that can't be real, such as GameOffsets2's obfuscated decoys, are flagged `suspect`.
 
 - **Stats** are keyed by Stats.dat key (e.g. `fire_damage_resistance_%`), which is stable across patches and between games, and include the in-game text and a category.
 - **The stats view state** (pins, filter, selection, sort) lives in the HUD plugin and is versioned by `rev`. The in-game panel, the app and agents all change the same state. Mutators accept an optional `expectedRev` and answer `rev_mismatch` if someone else changed it first.

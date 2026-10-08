@@ -122,7 +122,7 @@ public static class HudDevTools
 
     // ── Helpers ──────────────────────────────────────────────────────
 
-    private static List<HudInstall> Installs(BridgeRegistry bridges, string? game)
+    internal static List<HudInstall> Installs(BridgeRegistry bridges, string? game)
     {
         var g = game?.Trim().ToLowerInvariant();
         if (g is not (null or "" or "poe1" or "poe2"))
