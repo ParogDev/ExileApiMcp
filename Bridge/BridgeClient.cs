@@ -71,6 +71,10 @@ public sealed class BridgeClient : IDisposable
     private async Task ConnectAsync(CancellationToken ct)
     {
         var tokenPath = Path.Combine(BridgeDir, "bridge-token.txt");
+        // A HUD that is (re)starting writes the token a few seconds in: give it the connect budget.
+        var tokenDeadline = DateTime.UtcNow + ConnectBudget;
+        while (!File.Exists(tokenPath) && DateTime.UtcNow < tokenDeadline)
+            await Task.Delay(250, ct);
         if (!File.Exists(tokenPath))
             throw new BridgeUnavailableException(Game,
                 $"no bridge token in {BridgeDir} - is the HUD running with 'Whats An AI Bridge' enabled?");
