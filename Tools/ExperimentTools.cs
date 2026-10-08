@@ -42,8 +42,14 @@ public static class ExperimentTools
         var presets = new JArray((Presets.Value["experiments"] as JArray ?? []).OfType<JObject>()
             .Where(p => game == null || p["games"] is not JArray g || g.Any(x => x.ToString() == game)));
         Directory.CreateDirectory(Dir);
-        var records = new JArray(new DirectoryInfo(Dir).GetFiles("*.json").OrderByDescending(f => f.LastWriteTime).Take(30)
-            .Select(f => new JObject { ["name"] = Path.GetFileNameWithoutExtension(f.Name), ["updated"] = f.LastWriteTime.ToString("O") }));
+        var records = new JArray(new DirectoryInfo(Dir).GetFiles("*.json").Where(f => !f.Name.EndsWith(".inflight.json", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(f => f.LastWriteTime).Take(30)
+            .Select(f =>
+            {
+                int count = 0;
+                try { count = JObject.Parse(File.ReadAllText(f.FullName))["steps"]?.Count() ?? 0; } catch { }
+                return new JObject { ["name"] = Path.GetFileNameWithoutExtension(f.Name), ["updated"] = f.LastWriteTime.ToString("O"), ["steps"] = count };
+            }));
         var sb = new StringBuilder();
         foreach (var p in presets.OfType<JObject>())
         {
@@ -77,9 +83,26 @@ public static class ExperimentTools
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
+        var o = await RunStepAsync(bridges, watch, label, experiment, Math.Clamp(timeoutMs, 1000, 120_000), settleMs, instruction, step, steps, game, null, ct);
+        if (o["changed"]?.Value<bool>() != true) return ToolResults.Json(o);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = StepOutline(o) }],
+            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(o.ToString(Formatting.None)),
+        };
+    }
+
+    /// <summary>
+    /// One guided step: baseline, wait for a lasting change, settle, diff, record. Drives the in-game guide card and
+    /// reports progress through <paramref name="onStatus"/> (waiting / detected / settling) for the non-blocking API.
+    /// </summary>
+    internal static async Task<JObject> RunStepAsync(BridgeRegistry bridges, string[] watch, string label, string experiment,
+        int timeoutMs, int settleMs, string? instruction, int? step, int? steps, string? game, Func<string, Task>? onStatus, CancellationToken ct)
+    {
+        onStatus ??= _ => Task.CompletedTask;
         if (watch.Length == 0) throw new McpException("Pass at least one watch spec (see experiment_presets).");
         if (!Regex.IsMatch(experiment, @"^[\w.-]{1,64}$")) throw new McpException("experiment: letters, digits, '-', '_' or '.', up to 64 characters.");
-        timeoutMs = Math.Clamp(timeoutMs, 1000, 120_000);
+        timeoutMs = Math.Clamp(timeoutMs, 1000, 600_000);
         settleMs = Math.Clamp(settleMs, 100, 5000);
         var specs = watch.Select(Spec.Parse).ToList();
         var (bridge, _) = await bridges.QueryAsync(game, "hello", ct);
@@ -96,6 +119,7 @@ public static class ExperimentTools
             ["step"] = step, ["steps"] = steps, ["detail"] = $"Watching {watch.Length} value(s) for up to {timeoutMs / 1000} s",
         }, ct);
         await GuideTools.LogAsync(bridges, game, $"Claude: waiting for '{label}'", "step", ct);
+        await onStatus("waiting");
         Dictionary<string, string>? current = before, last = before;
         long changedAt = -1, stableSince = -1;
         int transients = 0;
@@ -109,6 +133,7 @@ public static class ExperimentTools
                 {
                     changedAt = sw.ElapsedMilliseconds; stableSince = changedAt; last = current;
                     await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "detected", ["detail"] = "Change seen - hold still" }, ct);
+                    await onStatus("detected");
                 }
                 continue;
             }
@@ -119,6 +144,7 @@ public static class ExperimentTools
             {
                 transients++; changedAt = -1;
                 await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "waiting", ["detail"] = "That changed back - still waiting for the action" }, ct);
+                await onStatus("waiting");
                 continue;
             }
             break;
@@ -130,16 +156,16 @@ public static class ExperimentTools
             await GuideTools.LogAsync(bridges, game, $"No lasting change for '{label}'", "warn", ct);
         }
         if (changedAt < 0)
-            return ToolResults.Json(new JObject { ["experiment"] = experiment, ["label"] = label, ["changed"] = false,
+            return new JObject { ["experiment"] = experiment, ["label"] = label, ["changed"] = false,
                 ["transientChanges"] = transients,
                 ["note"] = $"No lasting change within {timeoutMs} ms" + (transients > 0 ? $" ({transients} brief change(s) that reverted were ignored)" : "") +
-                           ". Did the action happen in game (window focused, panel open), and do the watched values follow it? Run the step again." });
+                           ". Did the action happen in game (window focused, panel open), and do the watched values follow it? Run the step again." };
 
         var after = last!;
         var changes = Diff(specs, before, after);
         var stepRecord = new JObject
         {
-            ["label"] = label, ["at"] = DateTimeOffset.Now.ToString("O"), ["game"] = game,
+            ["label"] = label, ["instruction"] = instruction, ["at"] = DateTimeOffset.Now.ToString("O"), ["game"] = game,
             ["changedAfterMs"] = changedAt, ["watch"] = new JArray(watch), ["changes"] = changes,
         };
         var record = await AppendStep(experiment, stepRecord, ct);
@@ -156,11 +182,121 @@ public static class ExperimentTools
         await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "captured", ["detail"] = summary }, ct);
         await GuideTools.LogAsync(bridges, game, $"Captured '{label}': {summary}", "result", ct);
         if (repeats >= 2) o["consistent"] = Consistent(record, label);
-        return new CallToolResult
+        return o;
+    }
+
+    // ── Non-blocking steps ───────────────────────────────────────────
+    // A step can wait minutes for the user; hosts time out tool calls far sooner. experiment_step_start runs the step in
+    // the server process and writes its progress to <experiment>.inflight.json, so the app, an agent or another client
+    // can follow it with experiment_status. Only the cancellation handle lives in memory (per process).
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, CancellationTokenSource> InFlight = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string InFlightFile(string experiment) => Path.Combine(Dir, experiment + ".inflight.json");
+
+    private static async Task WriteInFlight(string experiment, JObject state)
+    {
+        Directory.CreateDirectory(Dir);
+        state["updatedAt"] = DateTimeOffset.Now.ToString("O");
+        var tmp = InFlightFile(experiment) + ".tmp";
+        await File.WriteAllTextAsync(tmp, state.ToString(Formatting.None));
+        File.Move(tmp, InFlightFile(experiment), overwrite: true);
+    }
+
+    [McpServerTool(Name = "experiment_step_start", Title = "Start a guided step (non-blocking)", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Like await_change, but returns at once: the step runs in the server (up to 10 minutes) and experiment_status " +
+                 "reports its progress (waiting -> detected -> captured | failed | cancelled) and result. Use it when the wait may " +
+                 "outlast a tool call (MCP Apps, long pauses), or to keep working while the user acts. One step per experiment " +
+                 "at a time; experiment_step_cancel stops it. The in-game guide card follows the step as with await_change.")]
+    public static async Task<CallToolResult> ExperimentStepStart(BridgeRegistry bridges,
+        [Description("Watch specs: value:<path> | memory:<path>[:size] | collection:<path>[:Label1,Label2]")] string[] watch,
+        [Description("Step label, e.g. 'next-tab'")] string label,
+        [Description("Experiment record name")] string experiment,
+        [Description("What the user should do, shown in the in-game guide panel")] string? instruction = null,
+        [Description("Max wait for the change, ms (1000-600000, default 120000)")] int timeoutMs = 120_000,
+        [Description("Settle time, ms (100-5000, default 500)")] int settleMs = 500,
+        [Description("Step number, for the guide panel")] int? step = null,
+        [Description("Total steps, for the guide panel")] int? steps = null,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null)
+    {
+        if (!Regex.IsMatch(experiment, @"^[\w.-]{1,64}$")) throw new McpException("experiment: letters, digits, '-', '_' or '.', up to 64 characters.");
+        timeoutMs = Math.Clamp(timeoutMs, 1000, 600_000);
+        var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(timeoutMs + 30_000));
+        if (!InFlight.TryAdd(experiment, cts))
+            throw new McpException($"A step of '{experiment}' is already running: experiment_status to follow it, experiment_step_cancel to stop it.");
+        var started = DateTimeOffset.Now;
+        var state = new JObject
         {
-            Content = [new TextContentBlock { Text = StepOutline(o) }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(o.ToString(Formatting.None)),
+            ["experiment"] = experiment, ["label"] = label, ["instruction"] = instruction, ["step"] = step, ["steps"] = steps,
+            ["startedAt"] = started.ToString("O"), ["timeoutMs"] = timeoutMs, ["status"] = "starting", ["watch"] = new JArray(watch),
         };
+        await WriteInFlight(experiment, state);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // RunStepAsync clamps to 120 s for blocking callers; the non-blocking path passes its own cap.
+                var o = await RunStepAsync(bridges, watch, label, experiment, timeoutMs, settleMs, instruction, step, steps, game,
+                    async s => { state["status"] = s; await WriteInFlight(experiment, state); }, cts.Token);
+                state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : "failed";
+                state["result"] = o;
+            }
+            catch (OperationCanceledException) { state["status"] = "cancelled"; }
+            catch (Exception ex) { state["status"] = "error"; state["error"] = ex.Message; }
+            finally
+            {
+                state["finishedAt"] = DateTimeOffset.Now.ToString("O");
+                try { await WriteInFlight(experiment, state); } catch { }
+                if (state["status"]?.ToString() == "cancelled")
+                    await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "info", ["detail"] = "Step cancelled" }, CancellationToken.None);
+                InFlight.TryRemove(experiment, out _);
+                cts.Dispose();
+            }
+        });
+        return ToolResults.Json(new JObject
+        {
+            ["started"] = true, ["experiment"] = experiment, ["label"] = label, ["startedAt"] = state["startedAt"], ["timeoutMs"] = timeoutMs,
+            ["next"] = "Poll experiment_status (every 1-3 s) until status is captured, failed, cancelled or error.",
+        });
+    }
+
+    [McpServerTool(Name = "experiment_status", Title = "Progress of a guided experiment", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("The current or last step started with experiment_step_start (status waiting | detected | captured | failed | " +
+                 "cancelled | error, elapsed time, and the result once finished) plus how many steps the record holds. Cheap: " +
+                 "reads two small files.")]
+    public static CallToolResult ExperimentStatus([Description("Experiment record name")] string experiment)
+    {
+        Directory.CreateDirectory(Dir);
+        var o = new JObject { ["experiment"] = experiment };
+        var f = InFlightFile(experiment);
+        if (File.Exists(f))
+        {
+            var s = JObject.Parse(File.ReadAllText(f));
+            var finished = s["finishedAt"] != null;
+            if (!finished && DateTimeOffset.TryParse(s["startedAt"]?.ToString(), out var st))
+            {
+                s["elapsedMs"] = (long)(DateTimeOffset.Now - st).TotalMilliseconds;
+                // A step whose server process died never finishes: call it stale after its timeout plus a margin.
+                if (!InFlight.ContainsKey(experiment) && s["elapsedMs"]!.Value<long>() > (s["timeoutMs"]?.Value<long>() ?? 120_000) + 60_000)
+                    s["status"] = "stale";
+            }
+            o["step"] = s;
+            o["running"] = !finished && s["status"]?.ToString() != "stale";
+        }
+        else o["running"] = false;
+        var rec = Path.Combine(Dir, experiment + ".json");
+        o["recordedSteps"] = File.Exists(rec) ? JObject.Parse(File.ReadAllText(rec))["steps"]?.Count() ?? 0 : 0;
+        return ToolResults.Json(o);
+    }
+
+    [McpServerTool(Name = "experiment_step_cancel", Title = "Cancel a running guided step", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Stop the step started with experiment_step_start for this experiment (nothing is recorded).")]
+    public static CallToolResult ExperimentStepCancel([Description("Experiment record name")] string experiment)
+    {
+        var running = InFlight.TryGetValue(experiment, out var cts);
+        if (running) cts!.Cancel();
+        return ToolResults.Json(new JObject { ["experiment"] = experiment, ["cancelled"] = running,
+            ["note"] = running ? "Cancelling; experiment_status shows 'cancelled' shortly." : "No step of this experiment is running in this server process." });
     }
 
     [McpServerTool(Name = "experiment_summary", Title = "Summarise a guided experiment", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]

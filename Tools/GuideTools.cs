@@ -46,6 +46,14 @@ public static class GuideTools
         return ToolResults.Json(state);
     }
 
+    [McpServerTool(Name = "guide_state", Title = "What the in-game guide shows", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Read the in-game agent guide without changing it: the current instruction card (title, instruction, step, " +
+                 "status, detail) and the last log lines. Cheap; MCP Apps poll it to mirror the card.")]
+    public static async Task<CallToolResult> GuideState(BridgeRegistry bridges,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default) =>
+        ToolResults.Json((await bridges.CallAsync(game, "guide.state", null, ct)).Result);
+
     /// <summary>Best-effort guide update from other tools (never throws).</summary>
     internal static async Task SetAsync(BridgeRegistry bridges, string? game, JObject set, CancellationToken ct)
     {

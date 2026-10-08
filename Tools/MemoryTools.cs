@@ -192,22 +192,36 @@ public static class MemoryTools
     [McpMeta("ui/resourceUri", MemoryViewApp.ResourceUri)]
     [Description("Open the interactive memory view (clients that support MCP Apps) at an object or address: the struct the " +
                  "HUD maps laid over live bytes, mapped vs unmapped ranges, structure candidates in the gaps, pointer following, " +
-                 "live change highlighting and bit views, Ghidra addresses. Other clients get the memory_layout outline.")]
-    public static Task<CallToolResult> ShowMemoryView(BridgeRegistry bridges,
+                 "live change highlighting and bit views, Ghidra addresses. mode opens another tab: population, experiments " +
+                 "(guided-experiment runner; with preset to start from one, or experiment to show a record's summary), findings. " +
+                 "Other clients get the memory_layout outline.")]
+    public static async Task<CallToolResult> ShowMemoryView(BridgeRegistry bridges,
         [Description(Target)] string? path = null,
         [Description(AddressDesc)] JsonElement? address = null,
         [Description("Struct type to overlay (default: the HUD's own for the object)")] string? type = null,
+        [Description("Tab to open: struct (default) | population | experiments | findings")] string? mode = null,
+        [Description("With mode=experiments: preset id to open in the runner (see experiment_presets)")] string? preset = null,
+        [Description("With mode=experiments: experiment record to show (its summary)")] string? experiment = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         // Hosts may send explicit nulls ("address": null): treat them as absent.
         if (address is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined }) address = null;
         if (string.IsNullOrWhiteSpace(path)) path = null;
-        return path == null && address == null
-            ? MemoryLayout(bridges, "GameController.Player.GetComponent<Life>()", null, null, 64, game, ct)
+        if (mode is not (null or "struct" or "population" or "experiments" or "findings"))
+            throw new McpException("mode: struct | population | experiments | findings.");
+        // The app reads mode/preset/experiment from the tool input; the result is the struct view's starting data.
+        var result = path == null && address == null
+            ? await MemoryLayout(bridges, "GameController.Player.GetComponent<Life>()", null, null, 64, game, ct)
             : address != null && type == null
-                ? MemoryRead(bridges, path, address, 0, 256, game, ct)
-                : MemoryLayout(bridges, path, address, type, 64, game, ct);
+                ? await MemoryRead(bridges, path, address, 0, 256, game, ct)
+                : await MemoryLayout(bridges, path, address, type, 64, game, ct);
+        if (mode is "experiments" or "population" or "findings")
+            result.Content.Insert(0, new TextContentBlock
+            {
+                Text = $"Opened the memory view on its {mode} tab" + (preset != null ? $" (preset {preset})" : "") + (experiment != null ? $" (record {experiment})" : "") + ".",
+            });
+        return result;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
