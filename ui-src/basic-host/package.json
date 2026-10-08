@@ -1,0 +1,21 @@
+{
+  "name": "exileapi-basic-host",
+  "private": true,
+  "type": "module",
+  "description": "ext-apps basic-host (copied from the pinned ext-apps commit in the Dockerfile) with pinned, registry-only deps.",
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.1.0",
+    "@modelcontextprotocol/core": "2.1.0",
+    "@modelcontextprotocol/ext-apps": "2.0.1",
+    "cors": "2.8.6",
+    "express": "5.2.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "4.7.0",
+    "vite": "6.4.3",
+    "vite-plugin-singlefile": "2.3.3"
+  }
+}

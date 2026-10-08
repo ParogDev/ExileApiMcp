@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.0.0";
+    public const string Version = "3.1.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -22,6 +22,8 @@ internal static class McpSetup
         patches and games. The stats *view* (pins, filter, selection, sort) is shared with the user: the
         in-game HUD panel and the interactive app show the same state, so set_stat_pinned / select_stat /
         set_stats_filter are visible to the user - use them to point at what you are discussing.
+        show_player_stats opens that view as an interactive panel where the client supports MCP Apps; while it
+        is open, the user's selected and pinned stats arrive in your context, so "this stat" means the selection.
 
         eval_path / describe_type walk the HUD object model by reflection (namespaces differ per game).
         All tools are read-only toward the game; none send input.
