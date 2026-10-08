@@ -15,7 +15,7 @@ namespace ExileApiMcp.Tools;
 /// the HUD -> hud_plugins (compiled?) -> hud_log (runtime errors?) -> live tools.
 /// </summary>
 [McpServerToolType]
-public static class HudDevTools
+public static partial class HudDevTools
 {
     private const string GameOpt = "'poe1' or 'poe2'; omit for every HUD installed";
     private const int MaxText = 3000;
@@ -118,6 +118,86 @@ public static class HudDevTools
             });
         }
         return ToolResults.Json(new JObject { ["huds"] = result });
+    }
+
+    [McpServerTool(Name = "reload_plugin", Title = "Recompile a HUD plugin in place", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Recompile and reload one source plugin in the running HUD, like its Reload button in the HUD menu - " +
+                 "no HUD restart. Waits for the result (the HUD pauses while compiling, usually 1-10 s) and returns ok/error " +
+                 "plus any errors the plugin logged right after loading. Use after editing a plugin. The bridge plugin " +
+                 "itself can't be reloaded this way (restart the HUD), and a brand-new plugin folder needs a restart too.")]
+    public static async Task<CallToolResult> ReloadPlugin(BridgeRegistry bridges,
+        [Description("Plugin folder or display name, e.g. 'Whats A Mirage'")] string plugin,
+        [Description("Wait for the compile to finish (default true); false returns as soon as it is queued")] bool wait = true,
+        [Description("Reload even when the HUD setting 'Avoid locking plugin dlls' is off (only safe when the code is unchanged)")] bool force = false,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var started = DateTime.UtcNow;
+        var (bridge, queued) = await bridges.CallAsync(game, "hud.reload_plugin", new JObject { ["name"] = plugin, ["force"] = force }, ct);
+        if (queued["queued"]?.Value<bool>() != true || !wait) return ToolResults.Json(queued);
+        var folder = queued["plugin"]?.Value<string>() ?? plugin;
+
+        JToken? last = null;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(120);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(400, ct);
+            JToken status;
+            try { (_, status) = await bridges.CallAsync(bridge.Game == "auto" ? game : bridge.Game, "hud.reload_status", null, ct); }
+            catch (McpException) { continue; } // the bridge can be briefly unreachable while the HUD compiles
+            var l = status["last"];
+            if (l?["plugin"]?.Value<string>() == folder && l["finishedAt"] != null
+                && l["startedAt"]?.Value<DateTime>().ToUniversalTime() >= started.AddSeconds(-2))
+            {
+                last = l;
+                break;
+            }
+        }
+        if (last == null)
+            return ToolResults.Json(new JObject { ["plugin"] = folder, ["error"] = "timeout", ["message"] = "No result after 120 s; check hud_log and hud.reload_status." });
+
+        var result = new JObject { ["plugin"] = folder, ["ok"] = last["ok"], ["durationMs"] = last["durationMs"] };
+        var hud = Installs(bridges, bridge.Game == "auto" ? game : bridge.Game).FirstOrDefault();
+        if (last["error"] is { } err && hud != null) result["error"] = Clip(hud.ForAgent(err.ToString()));
+        else if (last["error"] != null) result["error"] = last["error"];
+
+        // Give the plugin a moment to initialise, then report what it logged since the reload started.
+        if (hud != null)
+        {
+            await Task.Delay(750, ct);
+            var src = hud.SourcePlugins().FirstOrDefault(p => string.Equals(p.Folder, folder, StringComparison.OrdinalIgnoreCase));
+            var names = src != null ? Names(src).ToList() : [folder];
+            var since = new DateTimeOffset(last["startedAt"]!.Value<DateTime>().ToUniversalTime());
+            var logged = (hud.LatestRun()?.Entries ?? [])
+                .Where(e => e.Time >= since && HudInstall.LevelRank(e.Level) >= 3 && IsFrom(e.Message, names))
+                .Select(e => new JObject { ["level"] = e.Level, ["message"] = Clip(hud.ForAgent(e.Message)) })
+                .Take(10).ToList();
+            result["loggedSinceReload"] = new JArray(logged);
+        }
+        if (result["ok"]?.Value<bool>() == false)
+        {
+            result["error"] ??= "reload failed";
+            // The HUD unloads the old assembly before compiling, so a failed reload leaves the plugin off.
+            result["note"] = "The plugin stays unloaded until it compiles: fix the diagnostics and call reload_plugin again.";
+            var diags = new JArray();
+            var text = string.Join("\n", (result["loggedSinceReload"] as JArray ?? []).Select(x => x["message"]?.ToString()));
+            foreach (System.Text.RegularExpressions.Match m in CompilerDiagnostic().Matches(text))
+            {
+                if (diags.Count >= 30) break;
+                var file = m.Groups["path"].Value;
+                var src = hud?.SourcePlugins().FirstOrDefault(p => file.StartsWith(p.Path + "\\", StringComparison.OrdinalIgnoreCase));
+                diags.Add(new JObject
+                {
+                    ["file"] = src != null ? file[(src.Path.Length + 1)..] : file,
+                    ["line"] = int.Parse(m.Groups["line"].Value),
+                    ["col"] = int.Parse(m.Groups["col"].Value),
+                    ["code"] = m.Groups["code"].Value,
+                    ["message"] = m.Groups["msg"].Value.Trim(),
+                });
+            }
+            if (diags.Count > 0) result["diagnostics"] = diags;
+        }
+        return ToolResults.Json(result);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
@@ -227,4 +307,11 @@ public static class HudDevTools
     }
 
     private static string Clip(string s) => s.Length <= MaxText ? s : s[..MaxText] + $" ...[+{s.Length - MaxText} chars]";
+}
+
+public static partial class HudDevTools
+{
+    // "[2026-10-08 5:02:15 AM, C:\...\File.cs(2, 47)] CS1525: Invalid expression term '}'"
+    [System.Text.RegularExpressions.GeneratedRegex(@"\[[^,\]\n]+, (?<path>[A-Za-z]:\\[^\]\n]+?)\((?<line>\d+), (?<col>\d+)\)\] (?<code>(?:CS|MSB|NU)\d+): (?<msg>[^\n]*)")]
+    private static partial System.Text.RegularExpressions.Regex CompilerDiagnostic();
 }

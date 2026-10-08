@@ -85,6 +85,7 @@ run.cmd --http [--port 50910]
 | Shared stats view | `set_stat_pinned`, `set_stats_filter`, `select_stat`, `set_stats_view` |
 | Recording | `record_start`, `record_stop`, `record_status`, `snapshot`, `recording_list`, `recording_info`, `recording_frame`, `recording_range`, `recording_search`, `recording_summary` |
 | HUD API reference (offline) | `hud_find_types` (types by name, or which type has a member), `hud_type` (fields with `[FieldOffset]`, properties, method signatures, enum values; optionally non-public and inherited) |
+| Plugin dev loop (live) | `reload_plugin` recompiles one source plugin in the running HUD, like its menu Reload button, and returns `ok`, compiler `diagnostics` (file/line/col/code) and whatever the plugin logged on load |
 | Plugin dev loop (offline) | `hud_plugins` (did each source plugin compile and load in the HUD's latest run; compiler errors; stale `Errors.txt` detection), `hud_log` (the latest run's log, deduplicated, filtered by level/plugin/text) |
 
 **Prompts:**
@@ -95,7 +96,12 @@ The dev-loop tools read the HUD folders on disk (next to the bridge folders), so
 - paths outside the HUD folder are shortened;
 - .NET runtime stack frames are collapsed.
 
-The HUD compiles source plugins **at startup** (or from the menu's Reload button), not on save.
+The HUD compiles source plugins **at startup** (or from the menu's Reload button), not on save. `reload_plugin` does the Reload-button step for you, without a HUD restart.
+
+> **Turn on "Avoid locking plugin dlls"** (HUD menu → Core → Plugin Settings) in each HUD and restart it once.
+> - It's off by default. While it's off, a loaded plugin's DLL stays locked, so recompiling changed code fails, and the plugin stays unloaded until a restart.
+> - While it's off, `reload_plugin` refuses with `dll_locked` and says so; `force=true` reloads unchanged code anyway.
+> - Reloads aren't possible for the bridge plugin itself (restart the HUD), and a brand-new plugin folder also needs a restart.
 
 **API reference tools.**
 - **What they read:** `hud_find_types` and `hud_type` read the HUD's DLL metadata with `MetadataLoadContext`. Nothing is loaded for execution, and the game and HUD can be closed.

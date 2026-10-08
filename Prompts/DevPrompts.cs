@@ -21,17 +21,18 @@ public static class DevPrompts
 
         1. Baseline: call hud_plugins with plugin="{plugin}" to see its status in the HUD's latest run, and
            hud_log with plugin="{plugin}" for runtime errors it already logs. An Errors.txt marked stale is history.
-        2. Edit the source. The HUD does NOT recompile on save: source plugins are compiled when the HUD starts
-           (or from the plugin's Reload button in the HUD menu). So restart the HUD (in the scaffolding repo:
-           tools/restart-hud.ps1 -Game poe1|poe2) or ask the user to press Reload. Before that, a local
-           `dotnet build` of the plugin catches compile errors in seconds without touching the HUD.
-        3. Check the compile: call hud_plugins again. Expect status "loaded" (or "cached" when nothing
-           changed) with a newer "at" than step 1.
-           On "failed", fix what "error" says (compiler diagnostics with file and line) and repeat.
-        4. Check runtime: hud_log level="error" plugin="{plugin}". New errors after "at" came from your change.
+        2. Edit the source. The HUD does NOT recompile on save. Call reload_plugin plugin="{plugin}": it
+           recompiles and reloads just this plugin in the running HUD (like its menu Reload button) and returns
+           ok/error plus whatever the plugin logged on load. A local `dotnet build` of the plugin first catches
+           compile errors without pausing the HUD. Only a brand-new plugin folder or a change to the bridge
+           plugin itself needs a full HUD restart (scaffolding repo: tools/restart-hud.ps1 -Game poe1|poe2).
+        3. On error, fix what "error" says (compiler diagnostics with file and line) and reload again.
+           hud_plugins shows the same status from disk if the bridge is down.
+        4. Check runtime: reload_plugin's loggedSinceReload, then hud_log level="error" plugin="{plugin}" after
+           exercising the feature in game.
         5. Verify behaviour live, cheapest first: the get_* tools for state, eval_path for one value,
-           describe_type to discover members (namespaces differ: ExileCore on poe1, ExileCore2 on poe2),
-           deep_scan only when you need whole entities.
+           describe_type / hud_type to discover members (hud_type works offline and sees non-public members;
+           namespaces differ: ExileCore on poe1, ExileCore2 on poe2), deep_scan only when you need whole entities.
         6. When the change involves player stats, use select_stat / set_stat_pinned so the user sees in the
            HUD panel exactly the values you are reasoning about.
         Report what you verified and how (which tool showed what), not just that it should work.

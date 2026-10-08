@@ -76,7 +76,16 @@ public sealed class BridgeRegistry : IDisposable
         try
         {
             await bridge.EnsureConnectedAsync(ct);
-            return (bridge, await bridge.SendRequestAsync(method, parameters, ct));
+            try
+            {
+                return (bridge, await bridge.SendRequestAsync(method, parameters, ct));
+            }
+            catch (BridgeNotSentException)
+            {
+                // Stale connection (e.g. the HUD restarted): the request never left, so reconnect and resend once.
+                await bridge.EnsureConnectedAsync(ct);
+                return (bridge, await bridge.SendRequestAsync(method, parameters, ct));
+            }
         }
         catch (BridgeException ex)
         {
