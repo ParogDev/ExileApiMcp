@@ -58,6 +58,21 @@ internal static class McpSetup
         All tools are read-only toward the game; none send input.
         """;
 
+    /// <summary>The most telling argument of a call (path / expression / key...), shortened, for the guide log.</summary>
+    private static string CallHint(IDictionary<string, System.Text.Json.JsonElement>? args)
+    {
+        if (args == null) return "";
+        foreach (var k in new[] { "path", "expression", "key", "plugin", "id", "offset", "address", "name" })
+            if (args.TryGetValue(k, out var v) && v.ValueKind is System.Text.Json.JsonValueKind.String or System.Text.Json.JsonValueKind.Number)
+            {
+                var s = v.ToString();
+                if (s.StartsWith("GameController.", StringComparison.Ordinal)) s = s["GameController.".Length..];
+                if (s.Length > 60) s = "..." + s[^57..];
+                return $" {s}";
+            }
+        return "";
+    }
+
     public static IMcpServerBuilder AddExileApiMcp(this IServiceCollection services)
     {
         services.AddSingleton<BridgeRegistry>();
@@ -73,6 +88,10 @@ internal static class McpSetup
                 // the only record of what an MCP App actually called. Successful polls are skipped (1/s).
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var name = request.Params?.Name ?? "?";
+                // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
+                if (name is not ("stats_ui_state" or "guide" or "await_change" or "bridge_status")
+                    && request.Services?.GetService(typeof(BridgeRegistry)) is BridgeRegistry bridges)
+                    _ = ExileApiMcp.Tools.GuideTools.LogAsync(bridges, null, $"Claude: {name}{CallHint(request.Params?.Arguments)}", "agent", CancellationToken.None);
                 try
                 {
                     var result = await next(request, ct);

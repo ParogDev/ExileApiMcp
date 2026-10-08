@@ -106,7 +106,7 @@ public static class WatchTools
         return ToolResults.Json(o);
     }
 
-    private static void Flatten(JToken? token, string path, Dictionary<string, string> into)
+    internal static void Flatten(JToken? token, string path, Dictionary<string, string> into)
     {
         switch (token)
         {
