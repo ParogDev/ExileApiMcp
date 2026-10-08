@@ -62,6 +62,14 @@ Don't name a byte from one sample. Each step below produces counts and counterex
   - **Don't name bits from the HUD's `InventoryTabType` enum.** It matches only where a dedicated tab type exists: bit 7 is "Quad" there (Settlers in game), 14 is "Metamorph" (the game's Ultimatum affinity; ticking Ultimatum took bit 14 from a Metamorph-type tab), and 16 is "Folder" (Breach).
 - **A Normal (non-premium, `TabType` 0) tab can hold affinities:** one held 7 at once.
 - **Unexplained:** unmapped bytes +40 and +62 changed on a tab whose affinity didn't change, during the first experiment step. Something else is stored there.
+- **What the code says** (`find_field_access offset=61 bit=6`, found in 158 s on first run, cached since):
+  - The tab's network serializer `FUN_141d4d020` and deserializer `FUN_141d4d1f0` treat **Flags as 2 bytes (+61..+62)**. The HUD maps 1 byte, so the "unexplained" +62 changes were Flags' high byte.
+  - They gate optional members on Flags bits:
+    - **bit 6 → Affinity** (4 bytes at +63);
+    - **bit 5 → an 8-byte value at +0** (zeroed when clear);
+    - **bit 4 → a byte at +60**.
+    - The values at +0 and +60 are unmapped by the HUD; their meaning is still unknown.
+  - UI code `FUN_140a8e150` tests bit 6 to render the affinity line in bold, and tests bit 0 as well.
 - **`Flags` (+61):**
   - bit 6 = has an affinity (11 vs 60 tabs, 0 counterexamples, any number of affinities). It was also seen clearing when a tab's last affinity was taken;
   - bit 1 = tab has a type (`TabType` ≠ 0; 63 vs 8, 0 counterexamples).

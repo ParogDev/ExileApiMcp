@@ -5,6 +5,7 @@
 import type { Toast } from "../sync";
 import { addrPlus, bytesFromHex, isPathText, parseAddress, pathLabel, regionFromLayout, regionFromRead, shortAddr, type Region } from "./bytes";
 import type { ChangedRange, CompareResult, CorrelateResult, FindingStatus, FindingsResult, Game, LayoutResult, MemoryError, PopulationResult, ReadResult, SnapshotList, SnapshotSaved, VerifyResult, WatchResult, WhereResult } from "./types";
+import { asFieldAccess, classifyCodeError, codeKey, type CodeQuery } from "./codeModel";
 
 export type CallTool = (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; isError: boolean; text?: string }>;
 
@@ -138,6 +139,12 @@ export interface Snapshot {
   views: readonly View[];
   index: number;
   selection?: Selection;
+  /** Bit picked in the inspector's bit grid, numbered from the selection's first byte (0 = bit 0 of byte `off`). */
+  bitSel?: number;
+  /** Bits the code panel is pointing at (same numbering), lit in the bit grid while hovering an instruction. */
+  bitHover?: number[];
+  /** find_field_access lookups this session, by struct, offset and bit. Cached results stay for later selections. */
+  code: ReadonlyMap<string, CodeQuery>;
   hover?: { off: number; size: number };
   watch?: WatchState;
   /** Byte offset -> what the last watch saw there (for the current watch's view). */
@@ -158,7 +165,7 @@ export class MemoryStore {
     pop: { path: "", labels: [], loading: false, correlating: false },
     exp: { listing: false, selected: [], comparing: false, step: 0, saving: false },
     fnd: { loading: false, filter: "", status: "all", verifying: new Set(), verified: new Map(), open: new Set() },
-    views: [], index: -1, changes: new Map(), live: false, liveFlash: new Map(), conn: "idle", calls: 0, toasts: [],
+    views: [], index: -1, code: new Map(), changes: new Map(), live: false, liveFlash: new Map(), conn: "idle", calls: 0, toasts: [],
   };
   private listeners = new Set<() => void>();
   private gameArg?: Game;
@@ -252,7 +259,7 @@ export class MemoryStore {
 
   private push(v: View) {
     const views = [...this.snap.views.slice(0, this.snap.index + 1), v].slice(-40);
-    this.set({ views, index: views.length - 1, selection: undefined, hover: undefined, changes: new Map(), liveFlash: new Map(), where: undefined, watch: this.snap.watch?.status === "running" ? this.snap.watch : undefined });
+    this.set({ views, index: views.length - 1, selection: undefined, bitSel: undefined, bitHover: undefined, hover: undefined, changes: new Map(), liveFlash: new Map(), where: undefined, watch: this.snap.watch?.status === "running" ? this.snap.watch : undefined });
   }
 
   private replace(v: View) {
@@ -319,7 +326,7 @@ export class MemoryStore {
   forward() { if (this.snap.index < this.snap.views.length - 1) this.goTo(this.snap.index + 1); }
   goTo(index: number) {
     if (index < 0 || index >= this.snap.views.length || index === this.snap.index) return;
-    this.set({ index, selection: undefined, hover: undefined, changes: new Map(), liveFlash: new Map(), where: undefined, watch: this.snap.watch?.status === "running" ? this.snap.watch : undefined });
+    this.set({ index, selection: undefined, bitSel: undefined, bitHover: undefined, hover: undefined, changes: new Map(), liveFlash: new Map(), where: undefined, watch: this.snap.watch?.status === "running" ? this.snap.watch : undefined });
     const v = this.current;
     if (v && !v.data && !v.loading) void this.load(v);
   }
@@ -371,7 +378,29 @@ export class MemoryStore {
   select(sel: Selection | undefined) {
     const cur = this.snap.selection;
     if (sel && cur && cur.off === sel.off && cur.size === sel.size && cur.segId === sel.segId) return;
-    this.set({ selection: sel, where: undefined });
+    this.set({ selection: sel, bitSel: undefined, bitHover: undefined, where: undefined });
+  }
+
+  /** Select an exact byte range (what a piece of code reads), as the covering segment when one matches it. */
+  selectBytes(off: number, size: number) {
+    const v = this.current;
+    if (!v?.region) return;
+    const k = v.region.cover[off];
+    const seg = k >= 0 ? v.region.segs[k] : undefined;
+    if (seg && seg.off === off && seg.size === size && seg.kind !== "gap" && seg.kind !== "zeros") this.select({ off, size, segId: seg.id });
+    else this.select({ off, size: Math.max(1, Math.min(size, 64, v.region.size - off)) });
+  }
+
+  /** Pick (or clear) a bit in the bit grid, numbered from the selection's first byte. */
+  pickBit(bit: number | undefined) {
+    if (bit === this.snap.bitSel) return;
+    this.set({ bitSel: bit });
+  }
+
+  hoverBits(bits: number[] | undefined) {
+    const cur = this.snap.bitHover;
+    if (bits?.join() === cur?.join()) return;
+    this.set({ bitHover: bits });
   }
 
   /** Select the segment covering a byte, or an ad-hoc 8-byte-aligned range inside a gap. */
@@ -481,6 +510,86 @@ export class MemoryStore {
     } finally {
       this.liveBusy = false;
     }
+  }
+
+  // ── Code access (find_field_access) ──────────────────────────────
+
+  /** Key the session's code lookups by: the struct type when known, else the object's path or address. */
+  structKeyOf(v: View | undefined): string {
+    if (!v) return "?";
+    const layout = v.data && "fields" in v.data ? (v.data as LayoutResult) : undefined;
+    return layout?.struct ?? v.target.type ?? v.target.path?.replace(/\[\d+\]$/, "") ?? v.target.address ?? "?";
+  }
+
+  /** The lookup a selection maps to: the byte the picked bit lives in (or the selection start) and the bit within it. */
+  codeTarget(sel: Selection, bitSel: number | undefined): { offset: number; bit?: number } {
+    if (bitSel === undefined) return { offset: sel.off };
+    return { offset: sel.off + Math.floor(bitSel / 8), bit: bitSel % 8 };
+  }
+
+  codeQueryFor(v: View | undefined, sel: Selection | undefined, bitSel: number | undefined): CodeQuery | undefined {
+    if (!v || !sel) return undefined;
+    const t = this.codeTarget(sel, bitSel);
+    return this.snap.code.get(codeKey(this.structKeyOf(v), t.offset, t.bit));
+  }
+
+  /**
+   * find_field_access for the current selection (and picked bit). Static analysis in Ghidra: ~30 s per searched
+   * offset the first time, instant from the server's cache afterwards. The call can't be aborted through the host;
+   * cancel stops waiting, and the result is kept quietly when it lands so the next click is instant.
+   */
+  async findCode(opts: { minKnown?: number; decompile?: number; knownOffsets?: number[] } = {}) {
+    const v = this.current, sel = this.snap.selection;
+    if (!v?.region || !sel) return;
+    const structKey = this.structKeyOf(v);
+    const t = this.codeTarget(sel, this.snap.bitSel);
+    const key = codeKey(structKey, t.offset, t.bit);
+    const prev = this.snap.code.get(key);
+    if (prev?.status === "running") return;
+    const layout = v.data && "fields" in v.data ? (v.data as LayoutResult) : undefined;
+    const args: Record<string, unknown> = { offset: t.offset };
+    if (t.bit !== undefined) args.bit = t.bit;
+    if (v.target.path) args.path = v.target.path;
+    const known = opts.knownOffsets ?? (!v.target.path && layout ? layout.fields.map((f) => f.off).filter((o) => o >= 8 && (o < t.offset || o > t.offset)) : undefined);
+    if (known?.length) args.knownOffsets = [...new Set(known)].sort((a, b) => a - b);
+    if (opts.minKnown !== undefined) args.minKnown = opts.minKnown;
+    if (opts.decompile !== undefined) args.decompile = opts.decompile;
+    const expectCached = [...this.snap.code.values()].some((q) => q.structKey === structKey && q.status === "done" && (q.offset === t.offset || q.result?.anchors.some((a) => a.offset === t.offset)));
+    const q: CodeQuery = { key, structKey, offset: t.offset, bit: t.bit, args, status: "running", startedAt: Date.now(), expectCached };
+    this.setCode(q);
+    const r = await this.tool("find_field_access", args);
+    const cur = this.snap.code.get(key);
+    if (!cur || cur.startedAt !== q.startedAt) return;
+    const finishedAt = Date.now();
+    if ("error" in r) {
+      const kind = classifyCodeError(r.error);
+      this.setCode({ ...cur, status: "error", finishedAt, error: { kind, message: r.error.message ?? r.error.error } });
+      return;
+    }
+    const result = asFieldAccess(r.data);
+    if (!result) { this.setCode({ ...cur, status: "error", finishedAt, error: { kind: "error", message: "Unexpected result shape from find_field_access." } }); return; }
+    this.setCode({ ...cur, status: "done", finishedAt, result, error: undefined });
+    if (cur.status === "cancelled") this.toast("info", `Code for +${t.offset} arrived and is cached; select it again to see it`);
+  }
+
+  /** Stop waiting for a lookup. The scan finishes on the server and is cached; the result is kept when it lands. */
+  cancelCode(key: string) {
+    const q = this.snap.code.get(key);
+    if (q?.status === "running") this.setCode({ ...q, status: "cancelled" });
+  }
+
+  /** Forget a lookup's result in the UI (the server keeps its cache), so it can be re-run with other options. */
+  forgetCode(key: string) {
+    if (!this.snap.code.has(key)) return;
+    const code = new Map(this.snap.code);
+    code.delete(key);
+    this.set({ code });
+  }
+
+  private setCode(q: CodeQuery) {
+    const code = new Map(this.snap.code);
+    code.set(q.key, q);
+    this.set({ code });
   }
 
   // ── Where ────────────────────────────────────────────────────────

@@ -6,20 +6,30 @@ import type { IconName } from "../icons";
 import type { Seg } from "./bytes";
 import type { Check, SlotKind } from "./types";
 
-export type Tone = "field" | "cand" | "ptr" | "num" | "str" | "change" | "warning" | "danger" | "none";
+export type Tone = "field" | "cand" | "ptr" | "num" | "str" | "change" | "warning" | "danger" | "success" | "none";
 
 const VAR: Record<Exclude<Tone, "none">, string> = {
   field: "var(--color-m-field)", cand: "var(--color-m-cand)", ptr: "var(--color-m-ptr)",
   num: "var(--color-k-num)", str: "var(--color-k-str)", change: "var(--color-m-change)", warning: "var(--color-warning)", danger: "var(--color-danger)",
+  success: "var(--color-success)",
 };
 
 export const TONE_TEXT: Record<Tone, string> = {
   field: "text-m-field", cand: "text-m-cand", ptr: "text-m-ptr", num: "text-k-num", str: "text-k-str", change: "text-m-change",
-  warning: "text-warning", danger: "text-danger", none: "text-fg-3",
+  warning: "text-warning", danger: "text-danger", success: "text-success", none: "text-fg-3",
 };
 export const TONE_BG: Record<Tone, string> = {
   field: "bg-m-field", cand: "bg-m-cand", ptr: "bg-m-ptr", num: "bg-k-num", str: "bg-k-str", change: "bg-m-change",
-  warning: "bg-warning", danger: "bg-danger", none: "bg-fg-3",
+  warning: "bg-warning", danger: "bg-danger", success: "bg-success", none: "bg-fg-3",
+};
+
+/**
+ * What an instruction does to a field, one colour each so a function's instruction list can be read at a glance:
+ * read = teal, write = magenta (it changes the bytes), bit test = amber, set bits = green, clear bits = red,
+ * address-of = neutral (the field is handed to a helper).
+ */
+export const ACCESS_TONE: Record<string, Tone> = {
+  read: "ptr", write: "change", "bit-test": "warning", "set-bits": "success", "clear-bits": "danger", "address-of": "none",
 };
 
 /** CSS colour: the tone at `pct` % over transparent. */

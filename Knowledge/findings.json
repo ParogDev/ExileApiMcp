@@ -1,5 +1,5 @@
 {
-  "about": "Verified facts about game data and memory, with their status PER GAME and a check that re-runs them. A finding verified on one game is a hypothesis on the other: run verify_finding there and record the result here (status, date, where, evidence). Statuses: verified | differs | unverified | n/a. Check kinds: correlate (memory_correlate finds a bit equal to `expect` with 0 counterexamples), stored (the label's value is stored in the range), eval (eval_path value matches `expect`), manual (an experiment: follow `how`).",
+  "about": "Verified facts about game data and memory, with their status PER GAME and a check that re-runs them. A finding verified on one game is a hypothesis on the other: run verify_finding there and record the result here (status, date, where, evidence). Statuses: verified | differs | unverified | n/a. Check kinds: correlate (memory_correlate finds a bit equal to `expect` with 0 counterexamples), stored (the label's value is stored in the range), eval (eval_path value matches `expect`), code (find_field_access: a decompiled excerpt of the struct's code contains every `expectAll` string - needs Ghidra and a snapshot of that game's exe), manual (an experiment: follow `how`).",
   "findings": [
     {
       "id": "stash.flags.has-affinity",
@@ -20,6 +20,36 @@
         "poe2": { "status": "unverified" }
       },
       "check": { "kind": "correlate", "path": "GameController.IngameState.ServerData.PlayerStashTabs", "label": "TabType", "expect": "TabType != 0" }
+    },
+    {
+      "id": "stash.flags.gates-affinity",
+      "title": "Stash tab Flags is a 16-bit field at +61; bit 6 gates the 4-byte Affinity at +63 in the tab's network (de)serializer",
+      "subject": "ServerStashTab (ServerStashTabOffsets.Flags, Affinity)",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 (2 bytes); bit 6 -> +63 (4 bytes)", "evidence": "find_field_access: serializer FUN_141d4d020 / deserializer FUN_141d4d1f0 read and write 2 bytes at +0x3D and 'if (flags & 0x40) read 4 bytes at +0x3F'; UI FUN_140a8e150 tests 0x40 to show the affinity in bold. The HUD maps Flags as 1 byte, so +62 is its high byte" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 6, "expectAll": ["0x3d) & 0x40", "0x3f,4"] }
+    },
+    {
+      "id": "stash.field.0x00-gated-bit5",
+      "title": "Stash tab +0 holds an 8-byte value (unmapped by the HUD), present when Flags bit 5 is set, zero otherwise",
+      "subject": "ServerStashTab",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+0 (8 bytes), gated by Flags bit 5", "evidence": "find_field_access: the deserializer zeroes *param_2 unless (flags & 0x20), the serializer writes 8 bytes from +0 when it is set. Meaning still unknown: probe with a tab where bit 5 is set" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 5, "expectAll": ["0x3d) & 0x20"] }
+    },
+    {
+      "id": "stash.field.0x3c-gated-bit4",
+      "title": "Stash tab +60 holds a 1-byte value (unmapped by the HUD), present when Flags bit 4 is set",
+      "subject": "ServerStashTab",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+60 (1 byte), gated by Flags bit 4", "evidence": "find_field_access: (de)serializer reads or writes 1 byte at +0x3C only if (flags & 0x10). Meaning still unknown" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 4, "expectAll": ["0x3d) & 0x10", "0x3c"] }
     },
     {
       "id": "stash.affinity.offset",

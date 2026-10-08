@@ -8,6 +8,7 @@ import { followTarget, vectorSummary } from "./StructMap";
 import type { MemoryStore, Selection, Snapshot, View } from "./store";
 import type { ChangedRange } from "./types";
 import { marksIn, type StructFindings } from "./findingsModel";
+import { marksIn as codeMarksIn, type CodeMarks } from "./codeModel";
 import { MarkChip } from "./StructMap";
 
 export interface InspectorHost {
@@ -16,11 +17,13 @@ export interface InspectorHost {
 }
 
 /** The selected bytes in depth: identity, address, value, every reading of the same bytes, bits, and the actions. */
-export function Inspector({ store, snap, view, region, sel, host, variant, sf }: {
-  store: MemoryStore; snap: Snapshot; view: View; region: Region; sel: Selection; host: InspectorHost; variant: "card" | "panel"; sf?: StructFindings;
+export function Inspector({ store, snap, view, region, sel, host, variant, sf, cm }: {
+  store: MemoryStore; snap: Snapshot; view: View; region: Region; sel: Selection; host: InspectorHost; variant: "card" | "panel"; sf?: StructFindings; cm?: CodeMarks;
 }) {
   const seg = sel.segId ? region.segs.find((s) => s.id === sel.segId) : undefined;
   const marks = marksIn(sf, sel.off, sel.size);
+  // Bytes the game's code uses, learnt from lookups of *other* offsets (a looked-up offset has its own Code card).
+  const codeHere = codeMarksIn(cm, sel.off, sel.size).filter((m) => !m.isTarget);
   const fieldLeaf = seg?.field?.name.split(".").pop();
   const bitNames = fieldLeaf ? sf?.bitNames.get(fieldLeaf) : undefined;
   const tablesFor = fieldLeaf ? (sf?.tables.filter((t) => t.field === fieldLeaf) ?? []) : [];
@@ -76,7 +79,7 @@ export function Inspector({ store, snap, view, region, sel, host, variant, sf }:
   // Bits: integers up to 8 bytes; shown by default for flag-like values, changed bits, or small ad-hoc ranges.
   const bitsPossible = sel.size <= 8 && (seg?.field ? isIntegerType(seg.field.type) : seg?.slot ? seg.slot.kind === "int" || seg.slot.kind === "zero" : true);
   const serverBits = seg?.field?.bits ?? seg?.slot?.bits;
-  const bitsDefault = bitsPossible && (!!serverBits?.length || flipped.length > 0 || foundBits.size > 0 || !seg || seg.kind === "gap" || (seg.field !== undefined && seg.field.size <= 4 && seg.field.type !== "Single"));
+  const bitsDefault = bitsPossible && (!!serverBits?.length || flipped.length > 0 || foundBits.size > 0 || snap.bitSel !== undefined || !seg || seg.kind === "gap" || (seg.field !== undefined && seg.field.size <= 4 && seg.field.type !== "Single"));
   const bitsOpen = showBits ?? bitsDefault;
   const set = bitsPossible ? setBits(region.bytes, sel.off, sel.size) : [];
 
@@ -175,8 +178,16 @@ export function Inspector({ store, snap, view, region, sel, host, variant, sf }:
         </div>
       )}
 
+      {codeHere.length > 0 && (
+        <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[10.5px] text-fg-2">
+          <span className="inline-flex items-center gap-1 rounded border border-dashed px-1 font-medium text-m-cand" style={{ borderColor: mix("cand", 55), background: mix("cand", 8) }}><Icon name="code" className="size-2.5" />used by code</span>
+          <span>{codeHere.map((m) => `${m.fns.slice(0, 2).join(", ")}${m.fns.length > 2 ? ` +${m.fns.length - 2}` : ""}${m.widths.length ? ` (${m.widths.map((w) => `${w} B`).join(" / ")})` : ""}`).join("; ")}{seg?.kind === "gap" ? ": the HUD's struct doesn't map this, the game's code uses it." : "."} Details in the Code card.</span>
+        </p>
+      )}
+
       {bitsPossible && bitsOpen && <BitGrid bytes={region.bytes} off={sel.off} size={sel.size} set={set} flipped={flipped} tone={tone === "none" ? "field" : tone} names={foundBits}
-        namesFrom={tablesFor.length ? `${tablesFor.map((t) => `${t.finding.id} (${t.status === "verified" ? "verified" : `${t.status} here`})`).join(", ")}` : undefined} />}
+        namesFrom={tablesFor.length ? `${tablesFor.map((t) => `${t.finding.id} (${t.status === "verified" ? "verified" : `${t.status} here`})`).join(", ")}` : undefined}
+        picked={snap.bitSel} lit={snap.bitHover} onPick={(b) => store.pickBit(b)} />}
 
       {interps.length > 0 && (
         <div className="mt-3">
@@ -220,18 +231,27 @@ function ChangedHere({ ranges, sel }: { ranges: ChangedRange[]; sel: Selection }
   );
 }
 
-/** One cell per bit, LSB first in each byte row of 8… laid out as 32 per row so bit indices read left to right from 0. */
-export function BitGrid({ bytes, off, size, set, flipped, tone, names, namesFrom }: { bytes: Uint8Array; off: number; size: number; set: number[]; flipped: number[]; tone: Tone; names?: Map<number, string>; namesFrom?: string }) {
+/**
+ * One cell per bit, LSB first in each byte row of 8… laid out as 32 per row so bit indices read left to right from 0.
+ * With `onPick` the cells are buttons: a picked bit (amber) narrows the code lookup to it; `lit` bits are the ones a
+ * code instruction's mask names while the pointer hovers it.
+ */
+export function BitGrid({ bytes, off, size, set, flipped, tone, names, namesFrom, picked, lit, onPick }: {
+  bytes: Uint8Array; off: number; size: number; set: number[]; flipped: number[]; tone: Tone; names?: Map<number, string>; namesFrom?: string;
+  picked?: number; lit?: number[]; onPick?: (bit: number | undefined) => void;
+}) {
   const nbits = size * 8;
-  const setS = new Set(set), flipS = new Set(flipped);
+  const setS = new Set(set), flipS = new Set(flipped), litS = new Set(lit ?? []);
   const nameOf = (bit: number) => names?.get(bit);
   const perRow = nbits <= 16 ? nbits : 32;
   const rows = Math.ceil(nbits / perRow);
   const v = uintAt(bytes, off, size);
+  const Cell = onPick ? "button" : "span";
   return (
     <div className="mt-3">
       <SectionLabel right={<span className="tnum font-code">0x{v.toString(16).toUpperCase()}{set.length ? ` · set ${set.join(", ")}` : " · no bits set"}</span>}>
         <Icon name="binary" className="size-3" />Bits <span className="tnum font-normal">{nbits}</span>
+        {picked !== undefined && <span className="rounded px-1 font-semibold normal-case tracking-normal text-warning" style={{ background: mix("warning", 14) }}>bit {picked} picked</span>}
       </SectionLabel>
       <div className="mt-1.5 space-y-1.5">
         {Array.from({ length: rows }, (_, r) => {
@@ -239,28 +259,32 @@ export function BitGrid({ bytes, off, size, set, flipped, tone, names, namesFrom
           const n = Math.min(perRow, nbits - start);
           return (
             <div key={r}>
-              <div className="grid gap-px" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }} role="img" aria-label={`Bits ${start} to ${start + n - 1}`}>
+              <div className="grid gap-px" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }} role={onPick ? "radiogroup" : "img"} aria-label={`Bits ${start} to ${start + n - 1}`}>
                 {Array.from({ length: n }, (_, i) => {
                   const bit = start + i;
-                  const on = setS.has(bit), fl = flipS.has(bit), nm = nameOf(bit);
+                  const on = setS.has(bit), fl = flipS.has(bit), nm = nameOf(bit), pk = picked === bit, lt = litS.has(bit);
+                  const ring = pk ? "var(--color-warning)" : lt ? mix("warning", 80) : fl ? "var(--color-m-change)" : nm ? mix("cand", on ? 100 : 55) : undefined;
                   return (
-                    <span key={bit} title={`bit ${bit} = 0x${(1n << BigInt(bit)).toString(16).toUpperCase()}${nm ? ` · ${nm} (finding)` : ""}${on ? " · set" : ""}${fl ? " · flipped during the watch" : ""}`}
-                      className={`h-4 rounded-[2px] ${bit % 8 === 7 && i !== n - 1 ? "mr-1" : ""} ${fl || nm ? "ring-2 ring-inset" : on ? "" : "bg-surface-3"}`}
-                      style={{ background: on ? mix(tone, fl ? 95 : 80) : nm ? mix("cand", 10) : undefined, ...(fl ? { ["--tw-ring-color" as string]: "var(--color-m-change)" } : nm ? { ["--tw-ring-color" as string]: mix("cand", on ? 100 : 55) } : {}) }} />
+                    <Cell key={bit} type={onPick ? "button" : undefined} role={onPick ? "radio" : undefined} aria-checked={onPick ? pk : undefined}
+                      onClick={onPick ? () => onPick(pk ? undefined : bit) : undefined}
+                      title={`bit ${bit} = 0x${(1n << BigInt(bit)).toString(16).toUpperCase()}${nm ? ` · ${nm} (finding)` : ""}${on ? " · set" : ""}${fl ? " · flipped during the watch" : ""}${lt ? " · named by the code under the pointer" : ""}${onPick ? pk ? " · picked: click to clear" : " · click to look up code for this bit" : ""}`}
+                      className={`h-4 rounded-[2px] ${bit % 8 === 7 && i !== n - 1 ? "mr-1" : ""} ${ring ? "ring-2 ring-inset" : on ? "" : "bg-surface-3"} ${onPick ? "cursor-pointer hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : ""} ${pk ? "scale-y-110" : ""}`}
+                      style={{ background: on ? mix(tone, fl || pk ? 95 : 80) : pk || lt ? mix("warning", lt && !pk ? 18 : 28) : nm ? mix("cand", 10) : undefined, ...(ring ? { ["--tw-ring-color" as string]: ring } : {}) }} />
                   );
                 })}
               </div>
               <div className="tnum mt-0.5 grid font-code text-[9px] text-fg-3" style={{ gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` }} aria-hidden>
                 {Array.from({ length: n }, (_, i) => {
                   const bit = start + i;
-                  const show = bit % 8 === 0 || setS.has(bit) || flipS.has(bit) || bit === nbits - 1;
-                  return <span key={bit} className={`text-center ${bit % 8 === 7 && i !== n - 1 ? "mr-1" : ""} ${flipS.has(bit) ? "font-semibold text-m-change" : setS.has(bit) ? "text-fg-2" : ""}`}>{show ? bit : ""}</span>;
+                  const show = bit % 8 === 0 || setS.has(bit) || flipS.has(bit) || bit === nbits - 1 || picked === bit || litS.has(bit);
+                  return <span key={bit} className={`text-center ${bit % 8 === 7 && i !== n - 1 ? "mr-1" : ""} ${picked === bit || litS.has(bit) ? "font-semibold text-warning" : flipS.has(bit) ? "font-semibold text-m-change" : setS.has(bit) ? "text-fg-2" : ""}`}>{show ? bit : ""}</span>;
                 })}
               </div>
             </div>
           );
         })}
       </div>
+      {onPick && picked === undefined && <p className="mt-1 text-[10px] text-fg-3">Click a bit to look up the code that tests exactly that bit.</p>}
       {names && names.size > 0 && namesFrom && <p className="mt-1.5 text-[10px] text-fg-3">Bit names from finding <span className="font-code text-fg-2">{namesFrom}</span>; the HUD's struct doesn't name them.</p>}
       {names && names.size > 0 && (
         <ul className="mt-1.5 flex flex-wrap gap-1">
