@@ -32,6 +32,9 @@ What differs when you read the same game data from both HUDs, and how to write c
 
 ## Tool behaviour across the games
 - **All MCP tools work on both,** with `game=poe1|poe2`. The smoke test passes on both HUDs.
-- **`get_map_image` needs the Radar plugin** loaded in that HUD; without it the tool returns `radar_unavailable`.
+- **`get_map_image` works on both games.**
+  - PoE2's Radar registers `Radar.GetMapImage`, which the tool uses. PoE1's Radar registers only `Radar.LookForRoute` and `Radar.ClusterTarget`.
+  - Without `GetMapImage`, the bridge draws the area from `IngameState.Data.RawPathfindingData` and reports `source: "pathfinding"`.
+  - The pathfinding grid is `int[][]` indexed **`[y][x]`**, with values 0 = blocked and 1-5 = walkable (5 = open floor, 1-4 = near a wall). The PoE1 hideout is 760×759.
 - **`run_csharp` needs "Allow C# Scripts"** ticked per HUD; `reload_plugin` needs "Avoid locking plugin dlls" per HUD.
 - **`TheGame`** appears as a member on many PoE1 objects; it's plumbing, and `explore_object` doesn't expand it.
