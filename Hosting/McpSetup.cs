@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.5.0";
+    public const string Version = "3.6.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -26,6 +26,8 @@ internal static class McpSetup
         is open, the user's selected and pinned stats arrive in your context, so "this stat" means the selection.
 
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
+        knowledge has short verified packs (dev loop, PoE2 API differences and decoy offsets, player stats):
+        read the relevant one before guessing how the HUD behaves.
         run_csharp runs a C# script inside the HUD when you need logic, not just a value (the user must enable
         it in the bridge settings). Inspect only: never send input or write memory.
         hud_find_types / hud_type are the offline API reference: every type and member (non-public too) of
