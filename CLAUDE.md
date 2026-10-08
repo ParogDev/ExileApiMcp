@@ -13,6 +13,8 @@ MCP server (C# SDK 2.2, spec 2026-07-28) exposing live PoE1/PoE2 HUD state throu
 | `Bridge/BridgeRegistry.cs` | poe1/poe2 bridges, `game` resolution, bridge errors -> McpException |
 | `Tools/*.cs` | static tool classes; inject `BridgeRegistry`; annotate ReadOnly/Destructive/Idempotent/OpenWorld |
 | `Apps/PlayerStatsApp.cs` | `ui://exile/player-stats` resource; HTML embedded from `ui/player-stats.html` |
+| `ui-src/` | The app's TypeScript/React source, dev harness and basic-host container. Built in Docker by `ui-src/build.ps1`. **Read `ui-src/README.md` before touching the UI** |
+| `run.cmd` | Launcher used by `.mcp.json` and Claude Desktop: builds, then runs a private copy so `bin\` is never locked |
 
 ## Rules
 
@@ -21,4 +23,7 @@ MCP server (C# SDK 2.2, spec 2026-07-28) exposing live PoE1/PoE2 HUD state throu
 - **stdio:** never write to stdout. Logs go to stderr only.
 - **Stateless:** no per-connection or per-session state in the server. Shared state lives in the HUD plugin (`stats.*`); recordings are addressed by file name.
 - **Client capabilities in stateless HTTP:** `server.ClientCapabilities` is null. Read `context.JsonRpcRequest.Context?.ClientCapabilities ?? server.ClientCapabilities`.
-- **Build:** `dotnet build`. The bin folder is locked while a client runs the server, so to verify a build use `dotnet build -o <temp dir>`.
+- **Build:** `dotnet build`. Clients launched through `run.cmd` run from `bin\launch\run-*` copies and never lock `bin\Debug`. A server started with `dotnet run` does lock it; then verify with `dotnet build -o <temp dir>`.
+- **UI changes:** edit `ui-src/`, run `ui-src/build.ps1`, and commit `ui/player-stats.html` with the source. CI fails on a stale bundle.
+- **Seeing the UI:** for layout and states use the harness (`build.ps1 -Serve`, then `http://127.0.0.1:5174/harness.html?...`; drive it with `window.harness`). For real data use `ui-src/basic-host.ps1` against `run.cmd --http`. Screenshot both themes and a 380px width before calling a UI change done.
+- **Tool result shapes are the UI's contract:** `ui-src/src/types.ts` mirrors the stats tools' `structuredContent`. Change both together.

@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/*
+ * Theme: the host sends MCP Apps style variables (--color-background-primary, --font-sans, ...)
+ * via hostContext.styles; useHostStyles() writes them onto :root. Hosts that send none get the
+ * fallbacks below, which follow data-theme (set by applyDocumentTheme) or the OS scheme.
+ * Components only use the semantic tokens (bg-surface, text-fg-2, border-line, ...).
+ */
+:root {
+  color-scheme: light dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+@theme inline {
+  --color-surface: var(--color-background-primary, light-dark(#ffffff, #1f1f1e));
+  --color-surface-2: var(--color-background-secondary, light-dark(#f6f5f2, #2a2a28));
+  --color-surface-3: var(--color-background-tertiary, light-dark(#ebe9e4, #363633));
+  --color-fg: var(--color-text-primary, light-dark(#1f1e1d, #f2f1ee));
+  --color-fg-2: var(--color-text-secondary, light-dark(#5e5d59, #b4b2ab));
+  --color-fg-3: var(--color-text-tertiary, light-dark(#8c8a84, #85837d));
+  --color-line: var(--color-border-primary, light-dark(#e4e2dc, #3d3d3a));
+  --color-line-2: var(--color-border-secondary, light-dark(#d2d0c9, #4a4a46));
+  --color-ring: var(--color-ring-primary, light-dark(#2563eb, #60a5fa));
+  --color-danger: var(--color-text-danger, light-dark(#b91c1c, #f87171));
+  --color-success: var(--color-text-success, light-dark(#15803d, #4ade80));
+  --color-warning: var(--color-text-warning, light-dark(#a16207, #fbbf24));
+  --color-info: var(--color-text-info, light-dark(#1d4ed8, #60a5fa));
+  --color-danger-bg: var(--color-background-danger, light-dark(#fef2f2, #3b1515));
+
+  /* Game hues: fixed meaning (life is red, mana blue...), tuned to read on light and dark. */
+  --color-life: light-dark(#c2342b, #e2554b);
+  --color-es: light-dark(#3f7fa6, #7fb8d9);
+  --color-mana: light-dark(#2f55c4, #5f86ee);
+  --color-fire: light-dark(#d0521b, #f07a3c);
+  --color-cold: light-dark(#2f86c0, #5cb4ec);
+  --color-lightning: light-dark(#b38a00, #e8c43a);
+  --color-chaos: light-dark(#9a3fa8, #c77ad4);
+
+  /* Named ui/code (not sans/mono) so they never shadow the host's --font-sans/--font-mono. */
+  --font-ui: var(--font-sans, ui-sans-serif, system-ui, "Segoe UI", sans-serif);
+  --font-code: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  --radius-card: var(--border-radius-md, 8px);
+}
+
+html, body {
+  margin: 0;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  font-family: var(--font-sans, ui-sans-serif, system-ui, "Segoe UI", sans-serif);
+  font-size: var(--font-text-sm-size, 0.875rem);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers line up in columns and don't jitter while values tick. */
+.tnum { font-variant-numeric: tabular-nums; }
+
+@keyframes flash-up { from { background: color-mix(in oklab, var(--color-success) 22%, transparent); } }
+@keyframes flash-down { from { background: color-mix(in oklab, var(--color-danger) 22%, transparent); } }
+.flash-up { animation: flash-up 1.4s ease-out; }
+.flash-down { animation: flash-down 1.4s ease-out; }
+
+/* Over-cap part of a resistance bar: hatched "ghost" segment. */
+.ghost-hatch {
+  background-image: repeating-linear-gradient(135deg, currentColor 0 2px, transparent 2px 5px);
+  opacity: 0.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-up, .flash-down { animation: none; }
+  * { transition: none !important; }
+}

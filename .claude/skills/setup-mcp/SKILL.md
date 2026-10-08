@@ -69,8 +69,8 @@ Use **absolute paths** with double backslashes for Windows:
 {
   "mcpServers": {
     "exileapi": {
-      "command": "dotnet",
-      "args": ["run", "--project", "<absolute path to ExileApiMcp>"],
+      "command": "cmd",
+      "args": ["/c", "<absolute path to ExileApiMcp>\\run.cmd"],
       "env": {
         "BRIDGE_DIR": "<absolute path to bridge directory>"
       }
@@ -78,6 +78,10 @@ Use **absolute paths** with double backslashes for Windows:
   }
 }
 ```
+
+Use `run.cmd`, not `dotnet run`. `run.cmd` runs a private copy of the build, so several clients and rebuilds never fight over a locked `bin\` folder. Omit `env` when the bridge is in a default location: `Documents\PoeHelper\claude-bridge` for PoE1 or `Documents\halp2\claude-bridge` for PoE2. Both games then work through the same entry.
+
+For the interactive stats panel, offer to add the same entry to Claude Desktop's `%APPDATA%\Claude\claude_desktop_config.json` under `mcpServers`. Back the file up first, and add only that key. The panel renders in the Desktop **Chat** tab after a restart.
 
 ### Step 5: Report
 

@@ -19,6 +19,10 @@ MCP server that exposes live **Path of Exile 1 and 2** game state as [Model Cont
 - **One server, both games.** Tools take an optional `game` argument (`poe1` | `poe2`). Without it, the one HUD that is running is used. `bridge_status` shows which bridges are up and what each game's HUD *cannot* provide; those fields are omitted, never faked.
 - **MCP spec 2026-07-28, stateless** (C# SDK 2.2). Over HTTP, current clients use no sessions. Older clients that still send `initialize` get a session (dual-era).
 - **MCP App.** `show_player_stats` opens an interactive stats panel in clients that render MCP Apps (Claude Desktop chat, with the server configured locally over stdio). Other clients get a text summary.
+  - The panel shows vitals, resistance bars against their caps, pinned stats, and a searchable, sortable table of every stat.
+  - It follows the host's light/dark theme.
+  - It stays in sync with the in-game panel: pin a stat in either, or let Claude pin it, and both show it.
+  - UI source, dev harness and how to test it: [ui-src/README.md](ui-src/README.md).
 
 ## Requirements
 
@@ -30,14 +34,16 @@ MCP server that exposes live **Path of Exile 1 and 2** game state as [Model Cont
 
 ## Configure
 
+Start the server with **`run.cmd`**. It builds into `bin\launch\build`, then runs a private copy, so several clients (Claude Code sessions, Claude Desktop, an `--http` instance) can run it while you keep rebuilding. (`dotnet run` locks `bin\`, and a second client's build then fails.) It needs the .NET 10 SDK.
+
 ### Claude Code (stdio) - `.mcp.json`
 
 ```json
 {
   "mcpServers": {
     "exileapi": {
-      "command": "dotnet",
-      "args": ["run", "--project", "path/to/ExileApiMcp"]
+      "command": "cmd",
+      "args": ["/c", "C:\\path\\to\\ExileApiMcp\\run.cmd"]
     }
   }
 }
@@ -49,14 +55,17 @@ The legacy single-HUD settings `BRIDGE_DIR` (+ `BRIDGE_PORT`) still work. With t
 
 ### Claude Desktop (stdio, renders the stats app)
 
-Add the same entry to `claude_desktop_config.json` (Settings → Developer → Edit config). Claude Desktop renders MCP Apps for local servers configured this way; servers added by URL are reached from the cloud and can't see `127.0.0.1`.
+1. Add the same entry under `mcpServers` in `%APPDATA%\Claude\claude_desktop_config.json` (Settings → Developer → Edit config), with the absolute path to `run.cmd`.
+2. Restart Claude Desktop.
+3. In a **Chat** conversation, ask "show my player stats".
+
+Claude Desktop renders MCP Apps for local servers configured this way. Servers added by URL are reached from the cloud and can't see `127.0.0.1`.
 
 ### HTTP (local agents, MCP Inspector, ext-apps basic-host)
 
 ```
-dotnet run --project path/to/ExileApiMcp -- --http [--port 50910]
+run.cmd --http [--port 50910]
 ```
-
 - Listens on `http://127.0.0.1:50910/mcp` only.
 - Requires `Authorization: Bearer <token>`. The token is created on first run in `%LOCALAPPDATA%\ExileApiMcp\http-token.txt`; set `MCP_HTTP_TOKEN` to use your own.
 - For Claude Code:
