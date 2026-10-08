@@ -199,11 +199,16 @@ public static class MemoryTools
         [Description("Struct type to overlay (default: the HUD's own for the object)")] string? type = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
-        => path == null && address == null
+    {
+        // Hosts may send explicit nulls ("address": null): treat them as absent.
+        if (address is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined }) address = null;
+        if (string.IsNullOrWhiteSpace(path)) path = null;
+        return path == null && address == null
             ? MemoryLayout(bridges, "GameController.Player.GetComponent<Life>()", null, null, 64, game, ct)
             : address != null && type == null
                 ? MemoryRead(bridges, path, address, 0, 256, game, ct)
                 : MemoryLayout(bridges, path, address, type, 64, game, ct);
+    }
 
     // ── Helpers ──────────────────────────────────────────────────────
 
