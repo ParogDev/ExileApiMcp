@@ -41,6 +41,27 @@ public sealed class BridgeRegistry : IDisposable
 
     public IReadOnlyList<BridgeClient> Bridges => _bridges;
 
+    private static readonly TimeSpan StartupGrace = TimeSpan.FromSeconds(4);
+
+    /// <summary>
+    /// <see cref="Resolve"/>, but when no bridge is up yet, wait briefly for one: a HUD that is just
+    /// (re)starting writes its bridge token within a few seconds, and failing instantly in that window
+    /// sends agents off debugging a non-problem.
+    /// </summary>
+    private async Task<BridgeClient> ResolveWaitingAsync(string? game, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + StartupGrace;
+        while (true)
+        {
+            try { return Resolve(game); }
+            catch (McpException) when (string.IsNullOrWhiteSpace(game) && _bridges.Count > 1
+                                       && !_bridges.Any(b => b.LooksAvailable) && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(250, ct);
+            }
+        }
+    }
+
     /// <summary>Resolve the bridge for a call, or throw an <see cref="McpException"/> the model can act on.</summary>
     public BridgeClient Resolve(string? game)
     {
@@ -72,7 +93,7 @@ public sealed class BridgeRegistry : IDisposable
     public async Task<(BridgeClient Bridge, JToken Result)> CallAsync(string? game, string method, JObject? parameters,
         CancellationToken ct)
     {
-        var bridge = Resolve(game);
+        var bridge = await ResolveWaitingAsync(game, ct);
         try
         {
             await bridge.EnsureConnectedAsync(ct);
