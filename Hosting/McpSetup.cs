@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.10.1";
+    public const string Version = "3.11.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -25,6 +25,9 @@ internal static class McpSetup
         show_player_stats opens that view as an interactive panel where the client supports MCP Apps; while it
         is open, the user's selected and pinned stats arrive in your context, so "this stat" means the selection.
 
+        explore_object maps live HUD data: start at 'GameController' and follow paths. Each line is
+        name: type = preview, and entities list their components. Read the C# accessor for plugin code from its
+        result rather than guessing member names. show_data_explorer opens the same tree for the user.
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
         watch_object samples a path over time and reports only the fields that changed: run it while the user
         does something in game to find which field reflects it.
