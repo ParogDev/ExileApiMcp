@@ -3,14 +3,17 @@ import { EmptyState, IconButton, SectionLabel } from "../components";
 import { SmallButton } from "../explorer/Tree";
 import { Icon, type IconName } from "../icons";
 import { mix } from "./paint";
-import { captureHeadline, cardFromGuide, describeChange, evidenceRows, GUIDE_LABEL, guideExperiment, guideSubline, parseEvidenceKey, parseWatch, repeatsOf, type CardModel, type EvidenceKey, type EvidenceRow } from "./runModel";
+import { actionsFromRecord, captureHeadline, cardFromGuide, cardFromStep, describeChange, evidenceRows, fmtLeft, fmtWait, GUIDE_LABEL, guideExperiment, guideSubline, parseEvidenceKey, parseWatch, receiptOf, repeatsOf, stepOver, type CardModel, type CardStatus, type EvidenceKey, type EvidenceRow } from "./runModel";
 import { plannedSteps, RUN_CHECKS, RUN_TARGET_REPEATS, RUN_TIMEOUTS_MS, type MemoryStore, type RunAttempt, type RunState, type Snapshot } from "./store";
-import type { AwaitResult, ExperimentChange, ExperimentPreset, GuideStatus, RecordStep } from "./types";
+import type { ExperimentChange, ExperimentPreset, RecordStep } from "./types";
 
-// The guided-experiment runner. A developer picks a preset, ticks the setup checklist and runs it step by step: the
-// big card mirrors the in-game agent guide card (DO THIS NOW -> CHANGE SEEN -> CAPTURED / TRY AGAIN), each capture is
-// read back in plain language, and the evidence (what changed in every repeat of an action) builds up on the side.
-// When the agent is running an experiment instead, the same screens follow its run read-only.
+// The guided-experiment runner. A developer picks a preset, ticks the setup checklist and runs it step by step: each
+// step runs in the server (experiment_step_start) while the app polls experiment_status, so a wait can last minutes; the
+// big card mirrors the in-game agent guide card (DO THIS NOW -> CHANGE SEEN -> CAPTURED / TRY AGAIN / CANCELLED), each
+// capture is read back in plain language, and the evidence (what changed in every repeat of an action) builds up on the
+// side. When the agent is running an experiment instead, the same screens follow its run read-only.
+
+interface Action { label: string; instruction: string }
 
 export interface RunHost { send?: (text: string) => void; ask?: (text: string) => void }
 
@@ -30,7 +33,7 @@ export function Run({ store, snap, fullscreen, host, now }: { store: MemoryStore
 function Picker({ store, run, now }: { store: MemoryStore; run: RunState; now: number }) {
   const presets = run.presets ?? [];
   const records = run.records ?? [];
-  const recorded = (id: string) => records.filter((r) => r.name === id || r.name.startsWith(id + "-")).length;
+  const recorded = (id: string) => records.filter((r) => r.name === id || r.name.startsWith(id + "-"));
   return (
     <div className="flex flex-col gap-2.5">
       <section aria-label="Guided experiments" className="overflow-hidden rounded-lg border border-line bg-surface">
@@ -45,14 +48,15 @@ function Picker({ store, run, now }: { store: MemoryStore; run: RunState; now: n
         {run.presets && presets.length === 0 && <EmptyState icon="play" title="No presets for this game" className="py-5">Knowledge/experiments.json holds the presets; ask Claude to run a custom experiment instead.</EmptyState>}
         <ul className="divide-y divide-line">
           {presets.map((p) => {
-            const n = recorded(p.id);
+            const recs = recorded(p.id);
+            const n = recs.reduce((s, r) => s + (r.steps ?? 0), 0);
             return (
               <li key={p.id}>
                 <button type="button" data-run-preset={p.id} onClick={() => store.pickPreset(p.id)} className="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 px-3 py-2.5 text-left hover:bg-surface-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-[12.5px] font-semibold">{p.title}</span>
-                      {n > 0 && <span className="tnum shrink-0 rounded bg-surface-3 px-1 text-[9.5px] font-semibold text-fg-2" title={`${n} record${n === 1 ? "" : "s"} on disk from earlier runs`}>recorded</span>}
+                      {recs.length > 0 && <span className="tnum shrink-0 rounded bg-surface-3 px-1 text-[9.5px] font-semibold text-fg-2" title={`${recs.length} record${recs.length === 1 ? "" : "s"} on disk from earlier runs, ${n} step${n === 1 ? "" : "s"} in all`}>recorded{n ? ` ×${n}` : ""}</span>}
                     </div>
                     <p className="mt-0.5 text-[11px] leading-snug text-fg-2">{p.question}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-fg-3">
@@ -76,6 +80,7 @@ function Picker({ store, run, now }: { store: MemoryStore; run: RunState; now: n
               <li key={r.name}>
                 <button type="button" onClick={() => store.openRecord(r.name)} className="flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-surface-2" title={`Read the summary of ${r.name}: what changed every time, what only sometimes`}>
                   <span className="truncate font-code text-[11.5px]">{r.name}</span>
+                  {r.steps !== undefined && <span className="tnum shrink-0 rounded bg-surface-3 px-1 text-[9.5px] font-semibold text-fg-2">×{r.steps} step{r.steps === 1 ? "" : "s"}</span>}
                   <span className="tnum ml-auto shrink-0 text-[10px] text-fg-3">{agoText(now - Date.parse(r.updated))}</span>
                   <Icon name="chevronRight" className="size-3.5 shrink-0 text-fg-3" />
                 </button>
@@ -107,7 +112,7 @@ function Setup({ store, run }: { store: MemoryStore; run: RunState }) {
       <Header icon="play" title={p.title} right={<SmallButton icon="arrowLeft" onClick={() => store.resetRun()}>Presets</SmallButton>} />
       <div className="px-3 py-2.5">
         <p className="text-[11.5px] leading-snug text-fg-2"><span className="font-semibold text-fg">Question. </span>{p.question}</p>
-        <p className="mt-1 text-[11px] text-fg-3">Plan: {p.steps.length} action{p.steps.length === 1 ? "" : "s"}, each {RUN_TARGET_REPEATS}-3 times, so about {p.steps.length * RUN_TARGET_REPEATS}-{p.steps.length * 3} steps. Each step waits for you up to {run.timeoutMs / 1000} s.</p>
+        <p className="mt-1 text-[11px] text-fg-3">Plan: {p.steps.length} action{p.steps.length === 1 ? "" : "s"}, each {RUN_TARGET_REPEATS}-3 times, so about {p.steps.length * RUN_TARGET_REPEATS}-{p.steps.length * 3} steps. Each step waits for you up to {fmtWait(run.timeoutMs)}.</p>
 
         <SectionLabel className="mt-3">Before you start</SectionLabel>
         <ul className="mt-1.5 space-y-1">
@@ -149,13 +154,13 @@ function Setup({ store, run }: { store: MemoryStore; run: RunState }) {
           <div className="flex items-center gap-1.5 text-[11px]">
             <span className="shrink-0 text-fg-3">Wait up to</span>
             <div className="flex overflow-hidden rounded-md border border-line" role="radiogroup" aria-label="Timeout per step">
-              {RUN_TIMEOUTS_MS.map((ms) => <button key={ms} type="button" role="radio" aria-checked={run.timeoutMs === ms} onClick={() => store.setRunTimeout(ms)} className={`tnum h-6 px-1.5 text-[11px] ${run.timeoutMs === ms ? "bg-fg text-surface" : "text-fg-2 hover:bg-surface-3 hover:text-fg"}`}>{ms / 1000} s</button>)}
+              {RUN_TIMEOUTS_MS.map((ms) => <button key={ms} type="button" role="radio" aria-checked={run.timeoutMs === ms} data-run-timeout={ms} onClick={() => store.setRunTimeout(ms)} className={`tnum h-6 px-1.5 text-[11px] ${run.timeoutMs === ms ? "bg-fg text-surface" : "text-fg-2 hover:bg-surface-3 hover:text-fg"}`}>{fmtWait(ms)}</button>)}
             </div>
           </div>
         </div>
         <p className="mt-1 text-[10.5px] leading-snug text-fg-3">
           {existing > 0 ? <>Continues the record <span className="font-code">{run.experiment}</span> ({existing} step{existing === 1 ? "" : "s"} so far); repeats add to its evidence. Change the name for a fresh one.</> : <>Steps are saved to this record; <span className="font-code">experiment_summary</span> reads it back.</>}
-          {" "}Longer waits are for Claude's own runs: the app's host stops a call after about a minute.
+          {" "}The wait runs in the server, so take the time an action needs; a step can be cancelled while it waits.
         </p>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -187,12 +192,15 @@ function Running({ store, run, fullscreen, now }: { store: MemoryStore; run: Run
     <div className="flex flex-col gap-2.5">
       <StepCard card={card} now={now} title={p.title}>
         <div className="flex flex-wrap items-center gap-1.5">
-          {card.status === "waiting" || card.status === "detected" || card.status === "settling" ? (
-            <span className="text-[11px] text-fg-2">Do it in game now, then hold still. The card turns green when the change settled.</span>
+          {waiting ? (
+            <>
+              <span className="min-w-0 flex-1 text-[11px] text-fg-2">{card.status === "waiting" ? "Do it in game now, then hold still. The card turns green when the change settled." : "Hold still: the change is settling."}</span>
+              <SmallButton icon="x" onClick={() => void store.cancelStep()} disabled={run.waiting?.cancelling} title="experiment_step_cancel: stop waiting; nothing is recorded">{run.waiting?.cancelling ? "Cancelling…" : "Cancel"}</SmallButton>
+            </>
           ) : (
             <>
-              <button type="button" data-run="go" onClick={() => void store.runStep()} className="inline-flex h-7 items-center gap-1.5 rounded-md bg-fg px-3 text-[11.5px] font-medium text-surface" title={`await_change label=${action.label} for up to ${run.timeoutMs / 1000} s`}>
-                <Icon name={card.status === "failed" ? "sync" : "play"} className="size-3.5" />{card.status === "failed" ? "Try again" : card.status === "captured" ? `Repeat · ${ordinal(reps + 1)} time` : reps > 0 ? `Go · ${ordinal(reps + 1)} time` : "Go"}
+              <button type="button" data-run="go" onClick={() => void store.runStep()} className="inline-flex h-7 items-center gap-1.5 rounded-md bg-fg px-3 text-[11.5px] font-medium text-surface" title={`experiment_step_start label=${action.label}, waits up to ${fmtWait(run.timeoutMs)}`}>
+                <Icon name={card.status === "failed" || card.status === "cancelled" ? "sync" : "play"} className="size-3.5" />{card.status === "failed" || card.status === "cancelled" ? "Try again" : card.status === "captured" ? `Repeat · ${ordinal(reps + 1)} time` : reps > 0 ? `Go · ${ordinal(reps + 1)} time` : "Go"}
               </button>
               <SmallButton icon="arrowRight" onClick={() => store.nextStep()} title="Show the next action (no wait starts yet)">{p.steps.length > 1 ? `Next: ${p.steps[(run.stepIndex + 1) % p.steps.length].label}` : "Same action"}</SmallButton>
               <SmallButton icon="check" tone={allDone ? "primary" : "default"} onClick={() => void store.finishRun()} disabled={total === 0} title="Read the evidence, mark the in-game card done and list what to undo">Finish</SmallButton>
@@ -200,7 +208,7 @@ function Running({ store, run, fullscreen, now }: { store: MemoryStore; run: Run
           )}
         </div>
       </StepCard>
-      <StepList preset={p} current={run.stepIndex} record={record} local={record ? [] : localSteps(run)} disabled={waiting} onPick={(i) => store.setStepIndex(i)} />
+      <StepList actions={p.steps} current={run.stepIndex} record={record} local={record ? [] : localSteps(run)} disabled={waiting} onPick={(i) => store.setStepIndex(i)} />
     </div>
   );
   const right = (
@@ -219,32 +227,28 @@ function Running({ store, run, fullscreen, now }: { store: MemoryStore; run: Run
   );
 }
 
-/** The card as this app's own run shows it: ready (before Go), the guide's live status while waiting, then the outcome. */
-function ownCard(run: RunState, action: { label: string; instruction: string }, last: RunAttempt | undefined, now: number): CardModel {
-  const g = run.guide;
-  const ownGuide = g && guideExperiment(g) === run.experiment;
+/**
+ * The card as this app's own run shows it: ready (before Go), the server step's live status while it waits (waiting ->
+ * detected, with the countdown against its timeout), then the outcome of the last step for this action.
+ */
+function ownCard(run: RunState, action: Action, last: RunAttempt | undefined, now: number): CardModel {
   if (run.waiting) {
-    // The guide knows "detected" before await_change returns; take its status when it is about this step.
-    // Only this step's own card text counts: the poll may still show the previous step's receipt.
-    const thisStep = ownGuide && g.instruction === action.instruction;
-    const live = thisStep && (g.status === "detected" || g.status === "settling") ? (g.status as GuideStatus) : "waiting";
-    return { status: live, instruction: action.instruction, step: run.waiting.step, steps: run.waiting.steps, since: run.waiting.startedAt, timeoutMs: run.waiting.timeoutMs, detail: live === "waiting" && thisStep && g.status === "waiting" ? g.detail ?? undefined : undefined };
+    const s = run.step;
+    const ours = s && s.startedAt === run.waiting.startedAt && !stepOver(s);
+    const live = ours ? cardFromStep(s, run.stepSince) : undefined;
+    // The in-game card's detail ("That changed back - still waiting") when it is about this very step.
+    const g = run.guide;
+    const detail = live?.status === "waiting" && g && guideExperiment(g) === run.experiment && g.instruction === action.instruction && g.status === "waiting" ? g.detail ?? undefined : undefined;
+    return { status: live?.status ?? "waiting", instruction: action.instruction, step: run.waiting.step, steps: run.waiting.steps, since: run.stepSince ?? Date.parse(run.waiting.startedAt), timeoutMs: run.waiting.timeoutMs, detail };
   }
   if (last && last.label === action.label && now - last.at < 60_000) {
+    if ("cancelled" in last.result) return { status: "cancelled", instruction: action.instruction, since: last.at };
     if ("error" in last.result) return { status: "failed", instruction: action.instruction, detail: last.result.error, since: last.at };
-    if (last.result.changed) return { status: "captured", instruction: action.instruction, step: last.result.step, steps: plannedSteps(run.preset?.steps.length ?? 1, last.result.step), detail: headlineOf(last.result), since: last.at };
+    if (last.result.changed) return { status: "captured", instruction: action.instruction, step: last.result.step, steps: plannedSteps(run.preset?.steps.length ?? 1, last.result.step), detail: receiptOf(last.result), since: last.at };
     // The server's long note goes to the results card; the card itself keeps the HUD's one-liner.
     return { status: "failed", instruction: action.instruction, since: last.at };
   }
   return { status: "idle", instruction: action.instruction };
-}
-
-/** The server's one-line receipt, like the in-game card shows: "Inventory.ItemCount: 11 -> 12 (+1 more)". */
-function headlineOf(r: Extract<AwaitResult, { changed: true }>): string {
-  const first = r.changes.find((c) => c.kind === "value") ?? r.changes[0];
-  if (!first) return "captured";
-  const v = describeChange(first);
-  return `${v.name}: ${v.from} → ${v.to}${r.changes.length > 1 ? ` (+${r.changes.length - 1} more)` : ""}`;
 }
 
 function localSteps(run: RunState): RecordStep[] {
@@ -253,13 +257,14 @@ function localSteps(run: RunState): RecordStep[] {
 
 // ── The card: mirrors the HUD's agent guide card ─────────────────────
 
-const LOOK: Record<GuideStatus, { tone: string; icon: IconName; loud: boolean; pulse: boolean }> = {
+const LOOK: Record<CardStatus, { tone: string; icon: IconName; loud: boolean; pulse: boolean }> = {
   idle: { tone: "var(--color-fg-3)", icon: "target", loud: false, pulse: false },
   waiting: { tone: "var(--color-ring)", icon: "radio", loud: true, pulse: true },
   detected: { tone: "var(--color-ring)", icon: "sync", loud: false, pulse: false },
   settling: { tone: "var(--color-ring)", icon: "sync", loud: false, pulse: false },
   captured: { tone: "var(--color-success)", icon: "check", loud: false, pulse: false },
   failed: { tone: "var(--color-danger)", icon: "warning", loud: true, pulse: false },
+  cancelled: { tone: "var(--color-fg-2)", icon: "x", loud: false, pulse: false },
   done: { tone: "var(--color-fg-2)", icon: "check", loud: false, pulse: false },
   info: { tone: "var(--color-fg-2)", icon: "info", loud: false, pulse: false },
 };
@@ -286,7 +291,7 @@ export function StepCard({ card, now, title, children, readOnly }: { card: CardM
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {readOnly && <span className="rounded-full border border-line px-1.5 text-[9.5px] font-medium text-fg-3" title="Claude is running this experiment; the app only shows it">following</span>}
           {card.step !== undefined && <span className="tnum rounded-full border border-line bg-surface-2 px-1.5 text-[10px] text-fg-2">step {card.step}{card.steps ? ` / ${card.steps}` : ""}</span>}
-          {(card.status === "waiting" || card.status === "failed") && elapsed !== undefined && <span className="tnum text-[10.5px] text-fg-3" title="Since the instruction appeared">{Math.floor(elapsed / 1000)} s</span>}
+          {(card.status === "waiting" || card.status === "failed" || card.status === "cancelled") && elapsed !== undefined && <span className="tnum text-[10.5px] text-fg-3" title="Since the instruction appeared">{fmtLeft(elapsed)}</span>}
         </span>
       </div>
       <div className="px-3 pb-2.5 pt-1.5">
@@ -298,7 +303,7 @@ export function StepCard({ card, now, title, children, readOnly }: { card: CardM
             <div className="h-1.5 overflow-hidden rounded bg-surface-3" role="progressbar" aria-valuenow={Math.round(pct * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Time left for this step">
               <div className={`h-full transition-[width] duration-500 ease-linear ${card.status === "waiting" ? "m-sampling" : ""}`} style={{ width: `${(1 - pct) * 100}%`, background: look.tone }} />
             </div>
-            <p className="tnum mt-1 text-[10.5px] text-fg-3">{leftMs !== undefined ? `${Math.ceil(leftMs / 1000)} s left` : ""}{card.status === "waiting" ? " · a change that reverts (hover, animation) is ignored" : ""}</p>
+            <p className="tnum mt-1 text-[10.5px] text-fg-3">{leftMs !== undefined ? `${fmtLeft(leftMs)} left` : ""}{card.status === "waiting" ? " · a change that reverts (hover, animation) is ignored" : ""}</p>
           </div>
         )}
         {children && <div className="mt-2.5">{children}</div>}
@@ -313,13 +318,13 @@ function mixVar(v: string, pct: number): string {
 
 // ── Step list with the repeat counter ────────────────────────────────
 
-function StepList({ preset, current, record, local, disabled, onPick }: { preset: ExperimentPreset; current: number; record: { steps: RecordStep[] } | undefined; local: RecordStep[]; disabled: boolean; onPick: (i: number) => void }) {
-  const under = preset.steps.filter((s) => repeatsOf(s.label, record, local) < RUN_TARGET_REPEATS).length;
+function StepList({ actions, current, record, local, disabled, onPick }: { actions: Action[]; current: number; record: { steps: RecordStep[] } | undefined; local: RecordStep[]; disabled: boolean; onPick: (i: number) => void }) {
+  const under = actions.filter((s) => repeatsOf(s.label, record, local) < RUN_TARGET_REPEATS).length;
   return (
     <section aria-label="Actions" className="overflow-hidden rounded-lg border border-line bg-surface">
       <Header icon="list" title="Actions"><span className="text-[10.5px] text-fg-3">{under > 0 ? `${under} still need ${RUN_TARGET_REPEATS}+ repeats` : `all done ${RUN_TARGET_REPEATS}+ times`}</span></Header>
       <ol className="divide-y divide-line">
-        {preset.steps.map((s, i) => {
+        {actions.map((s, i) => {
           const n = repeatsOf(s.label, record, local);
           const active = i === current;
           return (
@@ -361,10 +366,12 @@ interface ResultView {
   repeats?: number;
   consistent?: { always: EvidenceKey[]; sometimes: EvidenceKey[] };
   transient?: number;
+  cancelled?: boolean;
 }
 
 function resultOf(a: RunAttempt): ResultView {
-  if ("error" in a.result) return { label: a.label, at: a.at, ok: false, headline: "The call failed.", changes: [], error: a.result.error };
+  if ("cancelled" in a.result) return { label: a.label, at: a.at, ok: false, headline: "Cancelled before anything was captured; nothing was recorded.", changes: [], cancelled: true };
+  if ("error" in a.result) return { label: a.label, at: a.at, ok: false, headline: "The step ended without a result.", changes: [], error: a.result.error };
   const r = a.result;
   if (!r.changed) return { label: a.label, at: a.at, ok: false, headline: captureHeadline(r), changes: [], note: r.note, transient: r.transientChanges };
   return { label: a.label, at: a.at, ok: true, headline: captureHeadline(r), changes: r.changes, repeats: r.repeatsOfThisLabel, transient: r.transientChangesIgnored, consistent: r.consistent ? { always: r.consistent.always.map(parseEvidenceKey), sometimes: r.consistent.sometimes.map(parseEvidenceKey) } : undefined };
@@ -380,12 +387,12 @@ function Results({ r }: { r: ResultView }) {
   const unmapped = views.filter((v) => v.unmapped).length;
   return (
     <section aria-label="Latest capture" className="overflow-hidden rounded-lg border border-line bg-surface">
-      <Header icon={r.ok ? "check" : "warning"} title={r.ok ? "Captured" : "Nothing captured"} iconClass={r.ok ? "text-success" : "text-danger"} right={<span className="font-code text-[10.5px] text-fg-3">{r.label}{r.repeats ? ` · ${ordinal(r.repeats)} time` : ""}</span>} />
+      <Header icon={r.ok ? "check" : r.cancelled ? "x" : "warning"} title={r.ok ? "Captured" : r.cancelled ? "Cancelled" : "Nothing captured"} iconClass={r.ok ? "text-success" : r.cancelled ? "text-fg-3" : "text-danger"} right={<span className="font-code text-[10.5px] text-fg-3">{r.label}{r.repeats ? ` · ${ordinal(r.repeats)} time` : ""}</span>} />
       <div className="px-3 py-2">
         <p className="text-[11.5px] leading-snug text-fg">{r.headline}</p>
         {r.error && <p className="code-wrap mt-1 text-[11px] text-danger">{r.error}</p>}
         {r.note && <p className="mt-1 text-[11px] leading-snug text-fg-2">{r.note}</p>}
-        {!r.ok && !r.error && (
+        {!r.ok && !r.error && !r.cancelled && (
           <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[11px] leading-snug text-fg-2">
             <li>Is the right panel open and the game window focused?</li>
             <li>Does the watched value follow this action at all? Try it once by hand and read it again.</li>
@@ -417,7 +424,7 @@ function Results({ r }: { r: ResultView }) {
         )}
         {r.ok && r.changes.length > 0 && (
           <div className="mt-2">
-            <button type="button" onClick={() => setRaw((v) => !v)} aria-expanded={raw} className="flex items-center gap-1 text-[10.5px] text-fg-3 hover:text-fg"><Icon name="chevron" className={`size-3 transition-transform ${raw ? "rotate-180" : ""}`} />Raw changes (what await_change returned)</button>
+            <button type="button" onClick={() => setRaw((v) => !v)} aria-expanded={raw} className="flex items-center gap-1 text-[10.5px] text-fg-3 hover:text-fg"><Icon name="chevron" className={`size-3 transition-transform ${raw ? "rotate-180" : ""}`} />Raw changes (the step's result)</button>
             {raw && <pre className="code-wrap mt-1 max-h-48 overflow-auto rounded bg-surface-3/60 px-2 py-1 font-code text-[10px] leading-snug text-fg-2">{JSON.stringify(r.changes, null, 1)}</pre>}
           </div>
         )}
@@ -526,13 +533,15 @@ function Follow({ store, run, fullscreen, host, now }: { store: MemoryStore; run
   const rows = useMemo(() => evidenceRows(run.summary?.experiment === run.experiment ? run.summary : undefined, run.preset), [run.summary, run.experiment, run.preset]);
   const lastStep = record?.steps[record.steps.length - 1];
   const result = lastStep ? resultOfStep(lastStep, record!.steps.filter((s) => s.label === lastStep.label).length) : undefined;
-  const card: CardModel = g ? cardFromGuide(g, run.guideSince) : { status: "info", instruction: "Waiting for the in-game card…" };
+  const card = followCard(run, now);
+  // The actions: the preset's, else recovered from the record's steps (and the step running now).
+  const actions = useMemo<Action[]>(() => run.preset?.steps ?? actionsFromRecord(record, run.step), [run.preset, record, run.step]);
   const done = run.phase === "done";
   const banner = (
     <div className="flex items-start gap-2 rounded-lg border border-info/30 bg-info/5 px-3 py-2 text-[11.5px] leading-snug text-fg-2" role="status">
       <Icon name="sparkle" className="mt-px size-3.5 shrink-0 text-info" />
       <span className="min-w-0 flex-1">
-        <span className="font-semibold text-fg">Claude is running <span className="font-code">{run.following}</span>.</span> Do what the in-game card says; this view follows along and fills in as each step lands. {run.preset ? "" : "No preset matches this record, so the actions are known from the steps only."}
+        <span className="font-semibold text-fg">Claude is running <span className="font-code">{run.following}</span>.</span> Do what the in-game card says; this view follows along and fills in as each step lands. {run.preset ? "" : "No preset matches this record, so the actions are known from its steps only."}
       </span>
       <SmallButton icon="x" onClick={() => store.stopFollowing()} title="Stop following and go back to the presets (the run itself continues)">Stop</SmallButton>
     </div>
@@ -549,7 +558,7 @@ function Follow({ store, run, fullscreen, host, now }: { store: MemoryStore; run
     <div className="flex flex-col gap-2.5">
       {banner}
       <StepCard card={card} now={now} title={run.preset?.title ?? run.following} readOnly />
-      {run.preset && <StepList preset={run.preset} current={currentStep(run.preset, g?.instruction, lastStep?.label)} record={record} local={[]} disabled onPick={() => {}} />}
+      {actions.length > 0 && <StepList actions={actions} current={currentStep(actions, run.stepRunning ? run.step?.label : undefined, g?.instruction, lastStep?.label)} record={record} local={[]} disabled onPick={() => {}} />}
       {g?.log && g.log.length > 0 && (
         <section aria-label="Agent log" className="overflow-hidden rounded-lg border border-line bg-surface">
           <Header icon="list" title="Agent log"><span className="tnum text-[10.5px] text-fg-3">{g.log.length}</span></Header>
@@ -576,11 +585,27 @@ function Follow({ store, run, fullscreen, host, now }: { store: MemoryStore; run
   );
 }
 
-/** Which preset action the agent's card is on: by its instruction, else the last recorded label. */
-function currentStep(p: ExperimentPreset, instruction: string | null | undefined, lastLabel: string | undefined): number {
-  const byText = instruction ? p.steps.findIndex((s) => s.instruction === instruction) : -1;
+/**
+ * The card the follow-along shows: the step the server is running (countdown and all); once it is over, the in-game
+ * card (the agent's "done" line, or the receipt), falling back to the step's own outcome for a minute.
+ */
+function followCard(run: RunState, now: number): CardModel {
+  const s = run.step, g = run.guide;
+  if (s && run.stepRunning && !stepOver(s)) return cardFromStep(s, run.stepSince);
+  const ownGuide = g && (guideExperiment(g) ?? run.following) === run.following;
+  if (ownGuide && (g.status === "done" || g.status === "info")) return cardFromGuide(g, run.guideSince);
+  if (s && stepOver(s) && s.finishedAt && now - Date.parse(s.finishedAt) < 60_000) return cardFromStep(s, run.stepSince);
+  if (g) return cardFromGuide(g, run.guideSince);
+  return { status: "info", instruction: "Waiting for the in-game card…" };
+}
+
+/** Which action the agent's run is on: the running step's label, else the card's instruction, else the last recorded label. */
+function currentStep(actions: Action[], runningLabel: string | undefined, instruction: string | null | undefined, lastLabel: string | undefined): number {
+  const byRunning = runningLabel ? actions.findIndex((s) => s.label === runningLabel) : -1;
+  if (byRunning >= 0) return byRunning;
+  const byText = instruction ? actions.findIndex((s) => s.instruction === instruction) : -1;
   if (byText >= 0) return byText;
-  const byLabel = lastLabel ? p.steps.findIndex((s) => s.label === lastLabel) : -1;
+  const byLabel = lastLabel ? actions.findIndex((s) => s.label === lastLabel) : -1;
   return byLabel >= 0 ? byLabel : 0;
 }
 

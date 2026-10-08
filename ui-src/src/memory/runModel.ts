@@ -2,7 +2,7 @@
 // described in plain language, the evidence per action (what changed every time vs sometimes) and what the user has
 // left to undo in game when an action's undo was done fewer times than the action.
 
-import type { AwaitResult, Consistent, ExperimentChange, ExperimentPreset, ExperimentRecord, GuideState, GuideStatus, RecordStep, SummaryResult } from "./types";
+import type { AwaitResult, Consistent, ExperimentChange, ExperimentPreset, ExperimentRecord, GuideState, GuideStatus, RecordStep, StepState, SummaryResult } from "./types";
 
 export interface WatchInfo {
   kind: "value" | "memory" | "collection" | string;
@@ -117,26 +117,44 @@ export function fmtSecs(ms: number): string {
   return ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 1000)} s`;
 }
 
+/** The card's states: the HUD guide's, plus "cancelled" (a step stopped from the app or by experiment_step_cancel). */
+export type CardStatus = GuideStatus | "cancelled";
+
 /** Plain name for the in-game card's status, as the HUD shows it. */
-export const GUIDE_LABEL: Record<GuideStatus, string> = {
-  idle: "", waiting: "Do this now", detected: "Change seen", settling: "Holding still", captured: "Captured", failed: "Try again", info: "Note", done: "Done",
+export const GUIDE_LABEL: Record<CardStatus, string> = {
+  idle: "", waiting: "Do this now", detected: "Change seen", settling: "Holding still", captured: "Captured", failed: "Try again", cancelled: "Cancelled", info: "Note", done: "Done",
 };
 
 /** The one-line meaning under the instruction (same wording as the HUD's card). */
-export function guideSubline(status: GuideStatus | string, detail?: string | null): string | undefined {
+export function guideSubline(status: CardStatus | string, detail?: string | null): string | undefined {
   switch (status) {
     case "detected": return "Change seen… hold still while it settles";
     case "settling": return "Still changing… keep holding still";
     case "captured": return detail ?? "Recorded.";
     case "failed": return detail ?? "Nothing lasting changed. Do it once more.";
+    case "cancelled": return detail ?? "Stopped before anything was captured; nothing was recorded.";
     default: return undefined;
   }
 }
 
-/** "Experiment: stash-ctrl-click" -> "stash-ctrl-click". */
+/**
+ * "Experiment: stash-ctrl-click" -> "stash-ctrl-click". Only a hint for which record to ask experiment_status about:
+ * whether a run is on is decided by that tool, never by the title.
+ */
 export function guideExperiment(g: GuideState | undefined): string | undefined {
   const m = g?.title && /^Experiment:\s*(.+)$/.exec(g.title);
   return m ? m[1].trim() : undefined;
+}
+
+/** "Wait up to" choices as the user reads them: 30 s, 60 s, 2 min, 5 min. */
+export function fmtWait(ms: number): string {
+  return ms < 90_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`;
+}
+
+/** Time left on the countdown: "47 s" under a minute, "1:58" above. */
+export function fmtLeft(ms: number): string {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 // ── Evidence ─────────────────────────────────────────────────────────
@@ -178,12 +196,24 @@ export function parseEvidenceKey(key: string): EvidenceKey {
   return { name, full: raw, seen: m[2] ? Number(m[2]) : undefined, of: m[3] ? Number(m[3]) : undefined, unmapped };
 }
 
+/**
+ * The actions of an experiment without a preset, from its record: one per label in first-seen order, worded by the
+ * instruction the step was recorded with (the agent's own experiments carry it; older records don't).
+ */
+export function actionsFromRecord(record: ExperimentRecord | undefined, current?: StepState): { label: string; instruction: string }[] {
+  const out = new Map<string, string>();
+  for (const s of record?.steps ?? []) if (!out.has(s.label) || (!out.get(s.label) && s.instruction)) out.set(s.label, s.instruction ?? "");
+  if (current && !out.has(current.label)) out.set(current.label, current.instruction ?? "");
+  else if (current && !out.get(current.label) && current.instruction) out.set(current.label, current.instruction);
+  return [...out].map(([label, instruction]) => ({ label, instruction: instruction || `Do the '${label}' action` }));
+}
+
 export function evidenceRows(summary: SummaryResult | undefined, preset: ExperimentPreset | undefined): EvidenceRow[] {
   if (!summary) return [];
   const order = new Map((preset?.steps ?? []).map((s, i) => [s.label, i]));
   return summary.labels.map((l) => ({
     label: l.label,
-    instruction: preset?.steps.find((s) => s.label === l.label)?.instruction,
+    instruction: preset?.steps.find((s) => s.label === l.label)?.instruction ?? summary.record.steps.find((s) => s.label === l.label && s.instruction)?.instruction ?? undefined,
     repeats: l.repeats,
     always: l.consistent.always.map(parseEvidenceKey),
     sometimes: l.consistent.sometimes.map(parseEvidenceKey),
@@ -232,9 +262,9 @@ export function undoList(preset: ExperimentPreset | undefined, counts: Map<strin
   return out;
 }
 
-/** The in-game card as the runner mirrors it, from a guide state or from the app's own run. */
+/** The in-game card as the runner mirrors it, from a server step, a guide state or the app's own run. */
 export interface CardModel {
-  status: GuideStatus;
+  status: CardStatus;
   title?: string;
   instruction?: string;
   step?: number;
@@ -242,7 +272,7 @@ export interface CardModel {
   detail?: string;
   /** When the current instruction appeared (for the elapsed / countdown). */
   since?: number;
-  /** The timeout the countdown runs against, when the app started the step. */
+  /** The timeout the countdown runs against, when a step is running. */
   timeoutMs?: number;
 }
 
@@ -251,10 +281,32 @@ export function cardFromGuide(g: GuideState, since?: number): CardModel {
   return { status, title: g.title ?? undefined, instruction: g.instruction ?? undefined, step: g.step ?? undefined, steps: g.steps ?? undefined, detail: g.detail ?? undefined, since };
 }
 
-/** True when the guide's card belongs to an experiment this app isn't running itself. */
-export function isAgentRun(g: GuideState | undefined, ownExperiment: string | undefined, ownBusy: boolean): boolean {
-  if (!g || ownBusy) return false;
-  const exp = guideExperiment(g);
-  if (!exp) return false;
-  return g.status === "waiting" || g.status === "detected" || g.status === "settling" || (exp !== ownExperiment && (g.status === "captured" || g.status === "failed"));
+/** The server's one-line receipt, like the in-game card shows: "Inventory.ItemCount: 11 -> 12 (+1 more)". */
+export function receiptOf(r: Extract<AwaitResult, { changed: true }>): string {
+  const first = r.changes.find((c) => c.kind === "value") ?? r.changes[0];
+  if (!first) return "captured";
+  const v = describeChange(first);
+  return `${v.name}: ${v.from} → ${v.to}${r.changes.length > 1 ? ` (+${r.changes.length - 1} more)` : ""}`;
+}
+
+/** True once experiment_status reports the step over (captured, failed, cancelled, error, or stale). */
+export function stepOver(s: StepState | undefined): boolean {
+  return !!s && (!!s.finishedAt || s.status === "stale");
+}
+
+/**
+ * The card from the step the server is running (or last ran) for an experiment: the countdown runs from `since`
+ * (client clock, set from the server's elapsedMs) against the step's timeoutMs; a finished step shows its outcome.
+ */
+export function cardFromStep(s: StepState, since: number | undefined): CardModel {
+  const base: CardModel = { status: "waiting", title: `Experiment: ${s.experiment}`, instruction: s.instruction ?? `Do the '${s.label}' action now`, step: s.step ?? undefined, steps: s.steps ?? undefined, since, timeoutMs: s.timeoutMs };
+  switch (s.status) {
+    case "starting": case "waiting": return base;
+    case "detected": return { ...base, status: "detected" };
+    case "captured": return { ...base, status: "captured", detail: s.result?.changed ? receiptOf(s.result) : undefined, timeoutMs: undefined };
+    case "failed": return { ...base, status: "failed", timeoutMs: undefined };
+    case "cancelled": return { ...base, status: "cancelled", timeoutMs: undefined };
+    case "stale": return { ...base, status: "failed", detail: "The server stopped reporting this step (it was restarted mid-step). Start it again.", timeoutMs: undefined };
+    default: return { ...base, status: "failed", detail: s.error ?? "The step ended with an error.", timeoutMs: undefined };
+  }
 }

@@ -59,12 +59,13 @@ const APP = APPS[appName];
 const server: FakeHost = appName === "explorer" ? new FakeExplorer() : appName === "memory" ? new FakeMemory() : new FakeServer();
 server.scenario = params.get("scenario") ?? "live";
 server.latencyMs = Number(params.get("latency") ?? (appName === "stats" ? 40 : 60));
-// memory runner: user=acts|nothing|host-timeout|never (never = waits until harness.server.act()); run=follow simulates Claude running one.
+// memory runner: user=acts|nothing|never (never = the full countdown runs until harness.server.act() or the timeout);
+// run=follow simulates Claude running one (follow=slow: the fake user takes 40 s per step, so the countdown is visible).
 if (server instanceof FakeMemory) {
   const u = params.get("user");
-  if (u === "nothing" || u === "host-timeout" || u === "acts") server.user = u;
+  if (u === "nothing" || u === "acts") server.user = u;
   if (u === "never") server.actMs = 10 * 60_000;
-  if (params.get("run") === "follow") setTimeout(() => void server.agentRun(), 1500);
+  if (params.get("run") === "follow") setTimeout(() => void server.agentRun(undefined, params.get("follow") === "slow" ? 40_000 : undefined), 1500);
 }
 
 // Roughly Claude-like host variables; "none" tests the app's own fallbacks.
@@ -231,10 +232,10 @@ function Harness() {
             <div className="flex flex-wrap gap-1">
               <Btn onClick={() => server.act()}>user acts now</Btn>
               <Btn onClick={() => { server.user = server.user === "acts" ? "nothing" : "acts"; force((n) => n + 1); }}>{server.user === "nothing" ? "user acts (after 2.5 s)" : "user does nothing (fails)"}</Btn>
-              <Btn onClick={() => { server.user = server.user === "host-timeout" ? "acts" : "host-timeout"; force((n) => n + 1); }}>{server.user === "host-timeout" ? "host waits" : "host times out"}</Btn>
+              <Btn onClick={() => { server.actMs = server.actMs >= 600_000 ? 2500 : 600_000; force((n) => n + 1); }}>{server.actMs >= 600_000 ? "user acts after 2.5 s" : "user never acts (full countdown)"}</Btn>
               <Btn onClick={() => void server.agentRun()}>simulate Claude running one</Btn>
             </div>
-            <p className="mt-1 text-fg-3">Records stash-ctrl-click (4 steps) and stash-switch-tab (2) are real PoE1 runs; new steps are synthesised in their shape (the 2nd repeat adds a "sometimes" change). The fake guide card follows waiting → detected → captured / failed. URL: mode=experiments, preset=stash-ctrl-click, experiment=stash-ctrl-click (summary), user=nothing|never|host-timeout, run=follow.</p>
+            <p className="mt-1 text-fg-3">Records stash-ctrl-click (4 steps) and stash-switch-tab (2) are real PoE1 runs; new steps are synthesised in their shape (the 2nd repeat adds a "sometimes" change). Steps run "in the server" (experiment_step_start / experiment_status / experiment_step_cancel) and the fake guide card follows waiting → detected → captured / failed / cancelled. URL: mode=experiments, preset=stash-ctrl-click, experiment=stash-ctrl-click (summary), user=nothing|never, run=follow[&follow=slow].</p>
           </Field>
         )}
         {server instanceof FakeServer && (
