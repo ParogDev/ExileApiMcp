@@ -70,6 +70,15 @@ Don't name a byte from one sample. Each step below produces counts and counterex
     - **bit 4 → a byte at +60**.
     - The values at +0 and +60 are unmapped by the HUD; their meaning is still unknown.
   - UI code `FUN_140a8e150` tests bit 6 to render the affinity line in bold, and tests bit 0 as well.
+- **Child tabs and other Flags bits** (code plus population, 2026-10-08):
+  - **Flags bit 5 = child tab**, e.g. a page inside the Map stash. **+58 (u16, unmapped by the HUD) = the parent tab's index**, `0xFFFF` for top-level tabs.
+    - Evidence: all 27 Map pages point to the Map stash tab (index 23); the conversion code `FUN_14025ac30` picks the parent link by bit 5.
+    - Child tabs exist only after their stash has been opened.
+  - **Flags bit 0 = remove-only** (4 of 4 "(Remove-only)" tabs, no others).
+  - **Flags bit 9 (byte +62 bit 1):** set on the tabs opened or changed this session. Probably client-side "loaded" state; unconfirmed.
+  - **+0 (8 bytes):** only on child tabs, with a different value per Map page. Its meaning is still open.
+  - **+60 (1 byte, gated by bit 4):** copied into the client's tab info but unused on 92 tabs (personal and guild). Possibly stash-folder data, since the HUD's tab-type enum has a Folder type; untested.
+  - The client conversion loops over **22 affinity bits** (0-21).
 - **`Flags` (+61):**
   - bit 6 = has an affinity (11 vs 60 tabs, 0 counterexamples, any number of affinities). It was also seen clearing when a tab's last affinity was taken;
   - bit 1 = tab has a type (`TabType` ≠ 0; 63 vs 8, 0 counterexamples).

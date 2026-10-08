@@ -32,11 +32,31 @@
       "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 6, "expectAll": ["0x3d) & 0x40", "0x3f,4"] }
     },
     {
+      "id": "stash.flags.remove-only",
+      "title": "Stash tab Flags bit 0 = remove-only tab",
+      "subject": "ServerStashTab (ServerStashTabOffsets.Flags)",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 0", "evidence": "set on exactly the 4 tabs the game lists as '(Remove-only)' (16, 1, 2, 5) and on no other of 71; UI code FUN_140a8e150 tests it" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "manual", "how": "List tabs with Flags & 1 (run_csharp over ServerData.PlayerStashTabs, Read<ushort>(Address + 61)) and compare with the tabs the game labels '(Remove-only)' in the stash tab list." }
+    },
+    {
+      "id": "stash.child.parent-index",
+      "title": "Stash tab Flags bit 5 = child tab (a page inside e.g. the Map stash); +58 (u16, unmapped) = parent tab index, 0xFFFF for top-level tabs",
+      "subject": "ServerStashTab",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 5; +58 (2 bytes)", "evidence": "client conversion FUN_14025ac30 takes the tab's parent link from +0x3A when bit 5 is clear and from its caller when set; all 27 Map stash pages have bit 5 and +58 = 23 (the Map stash tab's index); all 44 top-level tabs have +58 = 0xFFFF. Pages only exist after the stash was opened (the guild Map tab had none)" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 5, "expectAll": ["0x3d) & 0x20", "0x3a"] }
+    },
+    {
       "id": "stash.field.0x00-gated-bit5",
       "title": "Stash tab +0 holds an 8-byte value (unmapped by the HUD), present when Flags bit 5 is set, zero otherwise",
       "subject": "ServerStashTab",
       "games": {
-        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+0 (8 bytes), gated by Flags bit 5", "evidence": "find_field_access: the deserializer zeroes *param_2 unless (flags & 0x20), the serializer writes 8 bytes from +0 when it is set. Meaning still unknown: probe with a tab where bit 5 is set" },
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+0 (8 bytes), gated by Flags bit 5", "evidence": "find_field_access: the deserializer zeroes *param_2 unless (flags & 0x20), the serializer writes 8 bytes from +0 when it is set. Bit 5 = child tab, so +0 is per-page data of child tabs (27 Map pages, all different values, e.g. 0x43, 0x83, 0x1CE4C1, 0x19EA0F3200). Meaning still unknown: compare with the page the user opens" },
         "poe2": { "status": "unverified" }
       },
       "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 5, "expectAll": ["0x3d) & 0x20"] }
