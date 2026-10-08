@@ -1,24 +1,45 @@
-// Dev harness: a minimal MCP Apps host for player-stats.html with a fake server (fakeServer.ts).
+// Dev harness: a minimal MCP Apps host for the apps, with fake servers (fakeServer.ts, fakeExplore.ts).
 // Every UI state is reachable from URL params, so agents can screenshot states deterministically:
 //
-//   /harness.html?theme=dark&width=380&scenario=offline&vars=none&latency=400&display=fullscreen
+//   /harness.html?app=stats&theme=dark&width=380&scenario=offline&vars=none&latency=400&display=fullscreen
+//   /harness.html?app=explorer&path=GameController.Player&theme=dark&width=380&scenario=flaky
 //
 // and drive it from the console / javascript tools through window.harness:
-//   harness.hud.pin("cold_damage_resistance_%")   harness.hud.filter("life", "vitals")
-//   harness.hud.select("level")                   harness.server.bumpRandomStat("level")
-//   harness.setScenario("offline")                harness.log() / harness.context()
+//   stats:    harness.hud.pin("cold_damage_resistance_%")   harness.hud.filter("life", "vitals")
+//             harness.hud.select("level")                   harness.server.bumpRandomStat("level")
+//   explorer: harness.server.bump()  (life drops)           harness.server.drift = false
+//   both:     harness.setScenario("offline")                harness.log() / harness.context() / harness.messages()
 
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { McpUiDisplayMode, McpUiStyles, McpUiTheme } from "@modelcontextprotocol/ext-apps";
-import { FakeServer, type ScenarioName } from "./fakeServer";
+import type { CallToolResult } from "@modelcontextprotocol/client";
+import { FakeServer, type CallLogEntry } from "./fakeServer";
+import { FakeExplorer } from "./fakeExplore";
 import "../src/styles.css";
 
+type AppName = "stats" | "explorer";
+
+interface FakeHost {
+  scenario: string;
+  latencyMs: number;
+  log: CallLogEntry[];
+  onChange?: () => void;
+  handle(name: string, args: Record<string, unknown>): Promise<CallToolResult>;
+  tick(): void;
+}
+
 const params = new URLSearchParams(location.search);
-const server = new FakeServer();
-server.scenario = (params.get("scenario") as ScenarioName) ?? "live";
-server.latencyMs = Number(params.get("latency") ?? 40);
+const appName: AppName = params.get("app") === "explorer" ? "explorer" : "stats";
+const APPS: Record<AppName, { title: string; html: string; scenarios: string[]; initialTool: string; initialArgs: () => Record<string, unknown> }> = {
+  stats: { title: "Player stats", html: "./player-stats.html", scenarios: ["live", "offline", "not-in-game", "empty", "flaky"], initialTool: "stats_ui_state", initialArgs: () => ({}) },
+  explorer: { title: "Data explorer", html: "./data-explorer.html", scenarios: ["live", "offline", "flaky"], initialTool: "show_data_explorer", initialArgs: () => ({ path: params.get("path") ?? "GameController", game: "poe2" }) },
+};
+const APP = APPS[appName];
+const server: FakeHost = appName === "explorer" ? new FakeExplorer() : new FakeServer();
+server.scenario = params.get("scenario") ?? "live";
+server.latencyMs = Number(params.get("latency") ?? (appName === "explorer" ? 60 : 40));
 
 // Roughly Claude-like host variables; "none" tests the app's own fallbacks.
 const CLAUDE_VARS: McpUiStyles = {
@@ -44,7 +65,7 @@ function Harness() {
   const [width, setWidth] = useState(params.get("width") ?? "720");
   const [display, setDisplay] = useState<McpUiDisplayMode>((params.get("display") as McpUiDisplayMode) ?? "inline");
   const [height, setHeight] = useState(400);
-  const [scenario, setScenario] = useState<ScenarioName>(server.scenario);
+  const [scenario, setScenario] = useState(server.scenario);
   const [, force] = useState(0);
   const [contexts, setContexts] = useState<Ctx[]>([]);
   const [messages, setMessages] = useState<string[]>([]);
@@ -61,7 +82,7 @@ function Harness() {
     const iframe = frame.current!;
     let disposed = false;
     (async () => {
-      const html = await (await fetch("./player-stats.html")).text();
+      const html = await (await fetch(APP.html)).text();
       const b = new AppBridge(null, { name: "ExileApi dev harness", version: "1.0.0" },
         { openLinks: {}, serverTools: {}, logging: {}, updateModelContext: { text: {} }, message: { text: {} } },
         {
@@ -84,9 +105,10 @@ function Harness() {
       b.onsizechange = async ({ height: h }) => { if (h) setHeight(h); };
       b.onrequestdisplaymode = async ({ mode }) => { setDisplay(mode); return { mode }; };
       b.oninitialized = () => {
-        // Same order as a real host: the input, then the result of show_player_stats.
-        b.sendToolInput({ arguments: {} });
-        server.handle("stats_ui_state", {}).then((r) => b.sendToolResult(r), (e) => b.sendToolCancelled({ reason: String(e) }));
+        // Same order as a real host: the input, then the result of the tool that opened the app.
+        const args = APP.initialArgs();
+        b.sendToolInput({ arguments: args });
+        server.handle(APP.initialTool, args).then((r) => b.sendToolResult(r), (e) => b.sendToolCancelled({ reason: String(e) }));
       };
       await b.connect(new PostMessageTransport(iframe.contentWindow!, iframe.contentWindow!));
       if (disposed) return;
@@ -104,18 +126,27 @@ function Harness() {
 
   useEffect(() => {
     (window as unknown as { harness: unknown }).harness = {
-      server, hud: server.hud,
-      setScenario: (s: ScenarioName) => setScenario(s),
+      app: appName, server, hud: server instanceof FakeServer ? server.hud : undefined,
+      setScenario: (s: string) => setScenario(s),
       setTheme, setWidth: (w: number | string) => setWidth(String(w)), setDisplay,
       log: () => server.log, context: () => contexts, messages: () => messages,
     };
   }, [contexts, messages]);
 
   const full = display === "fullscreen";
+  const other: AppName = appName === "stats" ? "explorer" : "stats";
+  // bare=1: only the app's iframe, filling the viewport (for pixel-exact screenshots in a narrow pane).
+  if (params.get("bare") === "1") {
+    return (
+      <iframe ref={frame} title={`${APP.title} app`} sandbox="allow-scripts allow-same-origin allow-forms" className="block bg-surface"
+        style={{ width: width.endsWith("%") ? width : `${width}px`, height: full ? "100vh" : height, maxWidth: "100%", border: 0 }} />
+    );
+  }
   return (
     <div className="flex min-h-screen gap-3 bg-surface-2 p-3 text-fg">
       <aside className="flex w-64 shrink-0 flex-col gap-3 text-xs">
-        <h1 className="text-sm font-semibold">Player stats · dev harness</h1>
+        <h1 className="text-sm font-semibold">{APP.title} · dev harness</h1>
+        <a className="text-fg-3 underline-offset-2 hover:underline" href={`?${new URLSearchParams({ ...Object.fromEntries(params), app: other })}`}>switch to {APPS[other].title}</a>
         <Field label="Theme">
           <Seg value={theme} options={["light", "dark"]} onChange={(v) => setTheme(v as McpUiTheme)} />
         </Field>
@@ -126,28 +157,41 @@ function Harness() {
           <Seg value={display} options={["inline", "fullscreen"]} onChange={(v) => setDisplay(v as McpUiDisplayMode)} />
         </Field>
         <Field label="Scenario">
-          <select value={scenario} onChange={(e) => setScenario(e.target.value as ScenarioName)} className="w-full rounded border border-line bg-surface px-2 py-1">
-            {["live", "offline", "not-in-game", "empty", "flaky"].map((s) => <option key={s}>{s}</option>)}
+          <select value={scenario} onChange={(e) => setScenario(e.target.value)} className="w-full rounded border border-line bg-surface px-2 py-1">
+            {APP.scenarios.map((s) => <option key={s}>{s}</option>)}
           </select>
         </Field>
         <Field label={`Latency ${server.latencyMs} ms`}>
           <input type="range" min={0} max={1500} step={10} value={server.latencyMs} onChange={(e) => { server.latencyMs = Number(e.target.value); force((n) => n + 1); }} className="w-full" />
         </Field>
-        <Field label="Simulate a change in the HUD panel">
-          <div className="flex flex-wrap gap-1">
-            <Btn onClick={() => server.hud.pin("cold_damage_resistance_%", !server.state.pinnedStatKeys.includes("cold_damage_resistance_%"))}>toggle pin cold res</Btn>
-            <Btn onClick={() => server.hud.filter("life")}>filter "life"</Btn>
-            <Btn onClick={() => server.hud.filter("", "resistances")}>category res</Btn>
-            <Btn onClick={() => server.hud.select("level")}>select level</Btn>
-            <Btn onClick={() => server.hud.sort("value", true)}>sort value ↓</Btn>
-            <Btn onClick={() => { server.hud.filter("", "all"); server.hud.select(null); server.hud.sort("category", false); }}>reset view</Btn>
-            <Btn onClick={() => server.bumpRandomStat("fire_damage_resistance_%")}>change fire res</Btn>
+        {server instanceof FakeServer && (
+          <Field label="Simulate a change in the HUD panel">
+            <div className="flex flex-wrap gap-1">
+              <Btn onClick={() => server.hud.pin("cold_damage_resistance_%", !server.state.pinnedStatKeys.includes("cold_damage_resistance_%"))}>toggle pin cold res</Btn>
+              <Btn onClick={() => server.hud.filter("life")}>filter "life"</Btn>
+              <Btn onClick={() => server.hud.filter("", "resistances")}>category res</Btn>
+              <Btn onClick={() => server.hud.select("level")}>select level</Btn>
+              <Btn onClick={() => server.hud.sort("value", true)}>sort value ↓</Btn>
+              <Btn onClick={() => { server.hud.filter("", "all"); server.hud.select(null); server.hud.sort("category", false); }}>reset view</Btn>
+              <Btn onClick={() => server.bumpRandomStat("fire_damage_resistance_%")}>change fire res</Btn>
+            </div>
+          </Field>
+        )}
+        {server instanceof FakeExplorer && (
+          <Field label="Simulate the game">
+            <div className="flex flex-wrap gap-1">
+              <Btn onClick={() => server.bump()}>take a hit (life −60)</Btn>
+              <Btn onClick={() => { server.drift = !server.drift; force((n) => n + 1); }}>{server.drift ? "freeze values" : "let values drift"}</Btn>
+            </div>
+            <p className="mt-1 text-fg-3">Injected states: Player has a blocked member and a throwing getter; IngameUi has budget-skipped members; Life values drift. Unknown members error like the bridge.</p>
+          </Field>
+        )}
+        {server instanceof FakeServer && (
+          <div className="rounded border border-line bg-surface p-2">
+            <div className="mb-1 font-semibold text-fg-2">HUD state · rev {server.state.rev}</div>
+            <pre className="max-h-40 overflow-auto font-code text-[10px] whitespace-pre-wrap">{JSON.stringify(server.state, null, 1)}</pre>
           </div>
-        </Field>
-        <div className="rounded border border-line bg-surface p-2">
-          <div className="mb-1 font-semibold text-fg-2">HUD state · rev {server.state.rev}</div>
-          <pre className="max-h-40 overflow-auto font-code text-[10px] whitespace-pre-wrap">{JSON.stringify(server.state, null, 1)}</pre>
-        </div>
+        )}
         <div className="rounded border border-line bg-surface p-2">
           <div className="mb-1 font-semibold text-fg-2">Model context (latest first)</div>
           {contexts.length === 0 ? <p className="text-fg-3">none yet</p> : contexts.slice(0, 4).map((c) => <p key={c.at} className="mb-1 border-b border-line pb-1">{c.text}</p>)}
@@ -158,7 +202,7 @@ function Harness() {
         <div className="text-xs text-fg-3">iframe {width}{width.endsWith("%") ? "" : "px"} × {full ? "fill" : `${height}px (auto-resize)`}</div>
         <iframe
           ref={frame}
-          title="player-stats app"
+          title={`${APP.title} app`}
           sandbox="allow-scripts allow-same-origin allow-forms"
           className="rounded-lg border border-line bg-surface"
           style={{ width: width.endsWith("%") ? width : `${width}px`, height: full ? "calc(100vh - 12rem)" : height, maxWidth: "100%" }}

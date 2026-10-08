@@ -3,18 +3,22 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
-// Two builds into dist/, both single-file:
-//   default         player-stats.html -> embedded in the server as ui://exile/player-stats
-//   --mode harness  harness.html      -> dev-only fake host that loads ./player-stats.html
+// Three builds into dist/, all single-file (vite-plugin-singlefile takes one input per build):
+//   default          player-stats.html  -> embedded in the server as ui://exile/player-stats
+//   --mode explorer  data-explorer.html -> embedded as ui://exile/data-explorer
+//   --mode harness   harness.html       -> dev-only fake host that loads either app (?app=stats|explorer)
+const INPUTS: Record<string, string> = { explorer: "data-explorer.html", harness: "harness.html" };
+
 export default defineConfig(({ mode }) => {
-  const input = mode === "harness" ? "harness.html" : "player-stats.html";
+  const input = INPUTS[mode] ?? "player-stats.html";
   return {
     plugins: [react(), tailwindcss(), viteSingleFile()],
     build: {
       outDir: "dist",
-      emptyOutDir: mode !== "harness",
+      // The first build (player-stats) clears dist/; the others add to it.
+      emptyOutDir: !(mode in INPUTS),
       rollupOptions: { input },
-      // The app ships inside a tool resource: keep it small and dependency-free at runtime.
+      // The apps ship inside tool resources: keep them small and dependency-free at runtime.
       sourcemap: false,
       reportCompressedSize: false,
     },

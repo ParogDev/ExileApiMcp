@@ -43,6 +43,12 @@
   --color-lightning: light-dark(#b38a00, #e8c43a);
   --color-chaos: light-dark(#9a3fa8, #c77ad4);
 
+  /* Data explorer value colours by kind (devtools-like, tuned for both themes). */
+  --color-k-num: light-dark(#1a56c4, #82b1ff);
+  --color-k-str: light-dark(#a3471d, #f0a070);
+  --color-k-bool: light-dark(#6d3fc2, #c3a2ff);
+  --color-k-enum: light-dark(#0b7a6f, #5fd8c8);
+
   /* Named ui/code (not sans/mono) so they never shadow the host's --font-sans/--font-mono. */
   --font-ui: var(--font-sans, ui-sans-serif, system-ui, "Segoe UI", sans-serif);
   --font-code: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
@@ -109,6 +115,18 @@ html, body {
   background-size: 200% 100%;
   animation: shimmer 1.6s linear infinite;
 }
+
+/* Data explorer: a row watch_object reported as changed. */
+.watch-hit {
+  background: color-mix(in oklab, var(--color-warning) 12%, transparent);
+  box-shadow: inset 2px 0 0 var(--color-warning);
+}
+.watch-hit[aria-selected="true"] {
+  background: color-mix(in oklab, var(--color-warning) 18%, transparent);
+}
+
+/* Code blocks: wrap long accessors instead of forcing a horizontal scroll at 380 px. */
+.code-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Low life: the fill breathes. */
 @keyframes breathe { 50% { opacity: 0.55; } }
