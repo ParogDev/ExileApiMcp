@@ -41,7 +41,7 @@ const APPS: Record<AppName, { title: string; html: string; scenarios: string[]; 
   stats: { title: "Player stats", html: "./player-stats.html", scenarios: ["live", "offline", "not-in-game", "empty", "flaky"], initialTool: "stats_ui_state", initialArgs: () => ({}) },
   explorer: { title: "Data explorer", html: "./data-explorer.html", scenarios: ["live", "offline", "flaky"], initialTool: "show_data_explorer", initialArgs: () => ({ path: params.get("path") ?? "GameController", game: "poe2" }) },
   memory: {
-    title: "Memory view", html: "./memory-view.html", scenarios: ["live", "offline", "flaky"], initialTool: "show_memory_view",
+    title: "Memory view", html: "./memory-view.html", scenarios: ["live", "offline", "flaky", "ghidra-down"], initialTool: "show_memory_view",
     initialArgs: () => {
       const a: Record<string, unknown> = { game: "poe1" };
       if (params.get("address")) a.address = params.get("address");
@@ -210,8 +210,9 @@ function Harness() {
               <Btn onClick={() => server.toggleAffinity()}>toggle stash affinity</Btn>
               <Btn onClick={() => { server.drift = !server.drift; force((n) => n + 1); }}>{server.drift ? "freeze values" : "let values drift"}</Btn>
               <Btn onClick={() => { server.quiet = !server.quiet; force((n) => n + 1); }}>{server.quiet ? "watches find changes" : "watches find nothing"}</Btn>
+              <Btn onClick={() => { server.scanMs = server.scanMs ? 0 : 4000; force((n) => n + 1); }}>{server.scanMs ? "code scans instant" : "code scans slow (4 s/offset)"}</Btn>
             </div>
-            <p className="mt-1 text-fg-3">Life and the stash tab are real captures; any other address reads as a synthesised object. Paths below Life (e.g. .CurHP) fail with no_address, GameController with no_struct, 0x0 with unreadable.</p>
+            <p className="mt-1 text-fg-3">Life and the stash tab are real captures; any other address reads as a synthesised object. Paths below Life (e.g. .CurHP) fail with no_address, GameController with no_struct, 0x0 with unreadable. Code lookups: stash Flags (+61) and Affinity (+63) are real Ghidra results and pre-cached; other offsets are synthesised and "scan" first. Scenario ghidra-down fails them.</p>
           </Field>
         )}
         {server instanceof FakeServer && (

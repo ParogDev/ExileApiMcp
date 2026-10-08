@@ -4,18 +4,21 @@ import { decodeDotNet, fmtBytes, fmtValue, hexOff, leafOf, type Region, type Seg
 import { CHECK_LABEL, KIND_LABEL, TONE_TEXT, checkTone, kindIcon, mix, segAlpha, segTone } from "./paint";
 import { LIVE_FLASH_MS, type ByteChange, type MemoryStore, type Snapshot, type View } from "./store";
 import { marksIn, type FindingMark, type StructFindings } from "./findingsModel";
+import { marksIn as codeMarksIn, markSize, type CodeMark, type CodeMarks } from "./codeModel";
 
 export type MapFilter = "all" | "fields" | "cands" | "changed";
 
 // ── Strip: the whole region as one bar, byte-accurate ────────────────
 
-/** Minimap of the region: every segment at its true width, change ticks above, struct end marked. */
-export function Strip({ store, snap, region, segs, sf }: { store: MemoryStore; snap: Snapshot; region: Region; segs: Seg[]; sf?: StructFindings }) {
+/** Minimap of the region: every segment at its true width, change ticks above, struct end marked, code marks below. */
+export function Strip({ store, snap, region, segs, sf, cm }: { store: MemoryStore; snap: Snapshot; region: Region; segs: Seg[]; sf?: StructFindings; cm?: CodeMarks }) {
   const pct = (n: number) => `${(n / region.size) * 100}%`;
   const sel = snap.selection;
   const hov = snap.hover;
   const changeRuns = useMemo(() => runs(snap.changes, region.size), [snap.changes, region.size]);
   const struct = region.structSize;
+  // Code marks on bytes the HUD doesn't map: dashed violet ticks under the bar.
+  const codeTicks = useMemo(() => (cm ? [...cm.values()].filter((m) => { const k = region.cover[m.off]; const s = k >= 0 ? region.segs[k] : undefined; return !s || s.kind === "gap"; }) : []), [cm, region]);
   return (
     <div className="px-0.5 pt-1">
       {/* Change ticks: where the last watch saw bytes move. */}
@@ -49,6 +52,12 @@ export function Strip({ store, snap, region, segs, sf }: { store: MemoryStore; s
         {struct !== undefined && struct < region.size && (
           <span className="pointer-events-none absolute inset-y-0 w-px bg-fg/70" style={{ left: pct(struct) }} title={`Struct end: ${struct} bytes`} />
         )}
+        {codeTicks.map((m) => (
+          <button key={`code:${m.off}`} type="button" tabIndex={-1} aria-label={`Used by code at +${hexOff(m.off)}`}
+            title={`+${hexOff(m.off)}: unmapped, but ${m.fns.slice(0, 2).join(", ")}${m.fns.length > 2 ? ` +${m.fns.length - 2}` : ""} use${m.fns.length === 1 ? "s" : ""} it (${m.widths.map((w) => `${w} B`).join(" / ") || "?"})`}
+            onClick={() => store.selectBytes(m.off, markSize(m))}
+            className="absolute inset-y-0 border-y-2 border-dashed hover:brightness-110" style={{ left: pct(m.off), width: `max(3px, ${pct(markSize(m))})`, borderColor: mix("cand", 85), background: mix("cand", 18) }} />
+        ))}
         {hov && <span className="pointer-events-none absolute inset-y-0 bg-fg/15" style={{ left: pct(hov.off), width: `max(2px, ${pct(hov.size)})` }} />}
         {sel && <span className="pointer-events-none absolute -inset-y-px rounded-[2px] ring-2 ring-ring" style={{ left: pct(sel.off), width: `max(3px, ${pct(sel.size)})` }} />}
       </div>
@@ -77,7 +86,7 @@ function runs(changes: ReadonlyMap<number, ByteChange>, size: number): { off: nu
   return out;
 }
 
-export function Legend({ struct }: { struct: boolean }) {
+export function Legend({ struct, code }: { struct: boolean; code?: boolean }) {
   const item = (swatch: ReactNode, label: string, title?: string) => <span className="inline-flex items-center gap-1" title={title}>{swatch}{label}</span>;
   const box = (cls: string, style?: React.CSSProperties) => <span className={`inline-block size-2 rounded-[2px] ${cls}`} style={style} />;
   return (
@@ -86,6 +95,7 @@ export function Legend({ struct }: { struct: boolean }) {
         <>
           {item(box("", { background: mix("field", 75) }), "HUD maps this", "A field of the struct the HUD reads")}
           {item(box("", { background: mix("cand", 75) }), "found, not mapped", "Structure the HUD's struct doesn't name: candidates (vtables, vectors, pointers) and recorded findings (bits, offsets)")}
+          {code && item(box("border border-dashed", { borderColor: mix("cand", 85), background: mix("cand", 18) }), "used by code", "Unmapped bytes the game's code reads or writes, from this session's code lookups")}
           {item(box("m-hatch bg-surface-3"), "unmapped", "Nothing known here")}
           {item(box("", { background: mix("warning", 80) }), "suspicious")}
           {item(box("", { background: mix("danger", 80) }), "invalid")}
@@ -135,8 +145,8 @@ function toRows(segs: Seg[]): RowItem[] {
   return rows;
 }
 
-export function MapRows({ store, snap, view, region, segs, now, fill, maxHeight = "20rem", sf }: {
-  store: MemoryStore; snap: Snapshot; view: View; region: Region; segs: Seg[]; now: number; fill?: boolean; maxHeight?: string; sf?: StructFindings;
+export function MapRows({ store, snap, view, region, segs, now, fill, maxHeight = "20rem", sf, cm }: {
+  store: MemoryStore; snap: Snapshot; view: View; region: Region; segs: Seg[]; now: number; fill?: boolean; maxHeight?: string; sf?: StructFindings; cm?: CodeMarks;
 }) {
   const rows = useMemo(() => toRows(segs), [segs]);
   const body = useRef<HTMLDivElement>(null);
@@ -192,7 +202,8 @@ export function MapRows({ store, snap, view, region, segs, now, fill, maxHeight 
         <SegRow key={r.seg.id} seg={r.seg} region={region} view={view} selected={sel?.segId === r.seg.id || (!sel?.segId && !!sel && sel.off >= r.seg.off && sel.off < r.seg.off + r.seg.size)}
           hovered={!!snap.hover && snap.hover.off < r.seg.off + r.seg.size && snap.hover.off + snap.hover.size > r.seg.off && snap.hover.off !== sel?.off}
           change={changeOf(snap.changes, r.seg)} flashAt={flashOf(snap.liveFlash, r.seg, now)} store={store}
-          marks={marksIn(sf, r.seg.off, r.seg.size)} bitNames={r.seg.field ? sf?.bitNames.get(leafOf(r.seg.field.name)) : undefined} />
+          marks={marksIn(sf, r.seg.off, r.seg.size)} bitNames={r.seg.field ? sf?.bitNames.get(leafOf(r.seg.field.name)) : undefined}
+          code={codeMarksFor(cm, r.seg)} />
       ))}
     </div>
   );
@@ -264,11 +275,12 @@ export function MarkChip({ m, onClick }: { m: FindingMark; onClick?: () => void 
   );
 }
 
-const SegRow = memo(function SegRow({ seg: s, region, view, selected, hovered, change, flashAt, store, marks, bitNames }: {
+const SegRow = memo(function SegRow({ seg: s, region, view, selected, hovered, change, flashAt, store, marks, bitNames, code }: {
   seg: Seg; region: Region; view: View; selected: boolean; hovered: boolean; change?: ByteChange; flashAt: number; store: MemoryStore;
-  marks: FindingMark[]; bitNames?: Map<number, string>;
+  marks: FindingMark[]; bitNames?: Map<number, string>; code: CodeMark[];
 }) {
-  const found = marks.length > 0;
+  const used = code.length > 0;
+  const found = marks.length > 0 || (used && s.kind === "gap");
   const tone = s.kind === "gap" && found ? "cand" : segTone(s);
   const dim = (s.kind === "gap" && !found) || s.kind === "zeros" || (s.kind === "slot" && s.slot?.kind === "zero");
   const past = region.structSize !== undefined && s.off >= region.structSize;
@@ -330,17 +342,21 @@ const SegRow = memo(function SegRow({ seg: s, region, view, selected, hovered, c
   } else if (s.kind === "zeros") {
     name = <span className="text-[11.5px] italic text-fg-3">{s.count} zero slots</span>;
     value = <span className="tnum font-code text-[11px] text-fg-3">{fmtBytes(s.size)}</span>;
-  } else if (found) {
+  } else if (marks.length > 0) {
     name = <span className="flex min-w-0 items-center gap-1.5 text-[12px]"><Icon name="sparkle" className="size-3 shrink-0 text-m-cand" /><span className="truncate font-medium text-m-cand">finding</span></span>;
+    value = <span className="tnum font-code text-[11px] text-fg-3">{fmtBytes(s.size)}</span>;
+  } else if (used) {
+    name = <span className="flex min-w-0 items-center gap-1.5 text-[12px]"><Icon name="code" className="size-3 shrink-0 text-m-cand" /><span className="truncate font-medium text-m-cand">used by code</span></span>;
     value = <span className="tnum font-code text-[11px] text-fg-3">{fmtBytes(s.size)}</span>;
   } else {
     name = <span className="text-[11.5px] italic text-fg-3">{past ? "past the struct end" : "unmapped"}</span>;
     value = <span className="tnum font-code text-[11px] text-fg-3">{fmtBytes(s.size)}</span>;
   }
-  const markChips = marks.length > 0 && (
+  const markChips = (marks.length > 0 || used) && (
     <span className="flex min-w-0 shrink items-center gap-1 overflow-hidden">
       {marks.slice(0, 2).map((m, i) => <MarkChip key={`${m.finding.id}:${m.bit ?? i}`} m={m} />)}
       {marks.length > 2 && <span className="shrink-0 text-[9.5px] text-m-cand">+{marks.length - 2}</span>}
+      {used && <CodeChip marks={code} gap={s.kind === "gap"} />}
     </span>
   );
 
@@ -361,7 +377,8 @@ const SegRow = memo(function SegRow({ seg: s, region, view, selected, hovered, c
         <span className="hidden text-[9.5px] text-fg-3 xs:inline">{s.off}</span>
       </span>
       <span className="tnum hidden font-code text-[10px] text-fg-3 xs:block">{s.size}B</span>
-      <span className={`h-[70%] rounded-[1px] ${s.kind === "gap" && !found ? "m-hatch bg-surface-3" : s.kind === "zeros" ? "bg-surface-3" : ""}`} style={(s.kind === "gap" && !found) || s.kind === "zeros" ? undefined : { background: mix(tone, 85) }} aria-hidden />
+      <span className={`h-[70%] rounded-[1px] ${s.kind === "gap" && !found ? "m-hatch bg-surface-3" : s.kind === "zeros" ? "bg-surface-3" : ""} ${used && s.kind === "gap" && marks.length === 0 ? "border-y border-dashed" : ""}`}
+        style={(s.kind === "gap" && !found) || s.kind === "zeros" ? undefined : used && s.kind === "gap" && marks.length === 0 ? { background: mix("cand", 30), borderColor: mix("cand", 90) } : { background: mix(tone, 85) }} aria-hidden />
       <span className="flex min-w-0 items-center gap-2">{name}{markChips || detail}</span>
       <span className="flex min-w-0 items-center justify-end">{value}</span>
       <span className="flex items-center gap-1">
@@ -379,6 +396,32 @@ const SegRow = memo(function SegRow({ seg: s, region, view, selected, hovered, c
     </div>
   );
 });
+
+/**
+ * Code marks worth a chip on a row: on unmapped bytes, every one (the discovery); on a mapped field, only an access
+ * wider than the field (the HUD's field may be too small). The looked-up offset itself has its Code card.
+ */
+function codeMarksFor(cm: CodeMarks | undefined, s: Seg): CodeMark[] {
+  const marks = codeMarksIn(cm, s.off, s.size);
+  if (s.kind === "gap") return marks;
+  if (s.kind === "field" && s.field) { const size = s.field.size; return marks.filter((m) => m.widths.some((w) => m.off + w > s.off + size)); }
+  return [];
+}
+
+/** On an unmapped row: which function uses these bytes and how wide; on a field: an access wider than the HUD's field. */
+function CodeChip({ marks, gap }: { marks: CodeMark[]; gap: boolean }) {
+  const fns = [...new Set(marks.flatMap((m) => m.fns))];
+  const widths = [...new Set(marks.flatMap((m) => m.widths))].sort((a, b) => b - a);
+  const gated = marks.flatMap((m) => m.gatedBy);
+  return (
+    <span className="inline-flex max-w-[16rem] shrink items-center gap-1 truncate rounded border border-dashed px-1 font-code text-[9.5px] font-medium text-m-cand"
+      style={{ background: mix("cand", 8), borderColor: mix("cand", 55) }}
+      title={`${fns.length ? fns.join(", ") : "Code"} ${gap ? "uses these unmapped bytes" : "reads past the HUD's field"}${widths.length ? ` as ${widths.map((w) => `${w} B`).join(" / ")}` : ""}${gated.length ? `\nGated by +${gated.map((g) => `${g.fromOff} bit ${g.bits.join("+")} ${g.when}`).join(", +")}` : ""}\nFrom the code lookup(s) at +${[...new Set(marks.flatMap((m) => m.fromTargets))].join(", +")}`}>
+      <Icon name="code" className="size-2.5 shrink-0" />
+      <span className="truncate">{gap ? (fns[0] ?? "code") : "wider in code"}{fns.length > 1 && gap ? ` +${fns.length - 1}` : ""}{widths.length ? <span className="tnum opacity-80"> · {widths[0]} B</span> : null}{gated.length ? <span className="hidden opacity-80 xs:inline"> · bit {gated[0].bits.join("+")}</span> : null}</span>
+    </span>
+  );
+}
 
 function bitsOfValue(v: number, nbits: number): number[] {
   const out: number[] = [];

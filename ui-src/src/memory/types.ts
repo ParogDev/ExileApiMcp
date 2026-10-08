@@ -272,3 +272,64 @@ export interface VerifyResult {
   howToVerify?: string;
   correlate?: LabelFinding;
 }
+
+// ── Code access (find_field_access: static analysis of the Ghidra copy of the exe) ──
+
+export type AccessKind = "read" | "write" | "bit-test" | "set-bits" | "clear-bits" | "address-of";
+export type Confidence = "high" | "medium" | "low";
+
+/** One function of the struct that touches the target offset. */
+export interface AccessFunction {
+  /** "FUN_141d4d020", or "?" when Ghidra has no function at the address. */
+  function: string;
+  accesses: number;
+  /** Comma-joined kinds: "read,write". */
+  kinds: string;
+  /** How many of the anchor fields the same base register also touches. */
+  knownFields: number;
+  bitMatch: boolean;
+}
+
+/** One instruction touching the target offset. */
+export interface Access {
+  function: string;
+  /** Hex without 0x: "141d4d1bf". */
+  address: string;
+  /** "TEST byte ptr [RDI + 0x3d], 0x40" */
+  instruction: string;
+  kind: AccessKind | string;
+  /** Bytes; 0 = unknown (address-of). */
+  width: number;
+  base: string;
+  /** Bits a mask / BT touches (for clear-bits: the bits cleared). */
+  bits?: number[];
+  matchesBit?: boolean;
+  /** "+63 Affinity" */
+  knownFieldsAlsoAccessed: string[];
+  confidence: Confidence;
+}
+
+export interface Decompiled {
+  function: string;
+  signature?: string;
+  /** C-like pseudocode lines around the target offset, "  ..." between runs. */
+  excerpt?: string;
+  lineCount?: number;
+  error?: string;
+}
+
+/** find_field_access structuredContent (mirrors Tools/CodeAccessTools.cs). */
+export interface FieldAccessResult {
+  game?: Game;
+  program: string;
+  struct?: string | null;
+  path?: string | null;
+  target: { offset: number; hex: string; bit?: number | null };
+  anchors: { offset: number; field: string; accesses: number }[];
+  minKnown: number;
+  programWideAccesses: number;
+  functions: AccessFunction[];
+  accesses: Access[];
+  decompiled: Decompiled[];
+  unanchored?: string;
+}

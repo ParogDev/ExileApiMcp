@@ -14,7 +14,7 @@
 // bridge's: {error: "no_address" | "no_struct" | "unreadable", message}.
 
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import type { Candidate, CompareResult, CorrelateResult, Finding, FindingsResult, LayoutField, LayoutResult, PopulationResult, ReadResult, ReadSlot, VerifyResult, WatchResult, WhereResult } from "../src/memory/types";
+import type { Access, AccessFunction, Candidate, CompareResult, CorrelateResult, Decompiled, FieldAccessResult, Finding, FindingsResult, LayoutField, LayoutResult, PopulationResult, ReadResult, ReadSlot, VerifyResult, WatchResult, WhereResult } from "../src/memory/types";
 import type { CallLogEntry } from "./fakeServer";
 import layoutLife from "./memory/layout-life.json";
 import layoutStash from "./memory/layout-stashtab.json";
@@ -29,8 +29,13 @@ import compareAffinity from "./memory/compare-affinity.json";
 import snapshotsList from "./memory/snapshots-list.json";
 import findingsFixture from "./memory/findings.json";
 import verifyAffinity from "./memory/verify-affinity.json";
+import accessFlags from "./memory/field-access-stash-flags.json";
+import accessAffinity from "./memory/field-access-stash-affinity.json";
 
-export type MemoryScenario = "live" | "offline" | "flaky";
+/** ghidra-down: every find_field_access fails like the real server does when the headless Ghidra isn't up. */
+export type MemoryScenario = "live" | "offline" | "flaky" | "ghidra-down";
+
+const GHIDRA_DOWN = "Ghidra isn't running. Start it in the background from the scaffolding repo: powershell -NoProfile -ExecutionPolicy Bypass -File tools\\ghidra-headless.ps1 (wait for 'running on port 8089').";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const LIFE = layoutLife as unknown as LayoutResult;
@@ -53,6 +58,10 @@ export class FakeMemory {
   private stash = { flags: 0x42, affinity: 0x1000 };
   /** Saved snapshots: the real affinity series plus whatever the harness user saves. */
   private snapshots: { name: string; savedAt: string }[] = (snapshotsList as { snapshots: { name: string; savedAt: string }[] }).snapshots.slice();
+  /** How long an uncached find_field_access "scan" takes (the real one: ~30 s per searched offset). */
+  scanMs = 4000;
+  /** Offsets already scanned (struct:offset): the stash tab's Flags and Affinity come pre-cached like on the dev machine. */
+  private scanned = new Set<string>(["GameOffsets.ServerStashTabOffsets:61", "GameOffsets.ServerStashTabOffsets:63", "GameOffsets.ServerStashTabOffsets:56", "GameOffsets.ServerStashTabOffsets:52", "GameOffsets.ServerStashTabOffsets:50", "GameOffsets.ServerStashTabOffsets:49", "GameOffsets.ServerStashTabOffsets:48"]);
 
   async handle(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
     const t0 = performance.now();
@@ -60,6 +69,7 @@ export class FakeMemory {
     const entry: CallLogEntry = { at: Date.now(), name, args, ms: 0, outcome: "ok" };
     try {
       if (name === "watch_memory") await sleep(Math.min(Number(args.durationMs ?? 5000), 1500));
+      else if (name === "find_field_access") await sleep(this.scenario === "ghidra-down" ? this.latencyMs : this.scanDelay(args));
       else await sleep(this.latencyMs + jitter);
       if (this.scenario === "offline" || (this.scenario === "flaky" && Math.random() < 0.3)) {
         throw new Error("The poe1 HUD bridge is not reachable (connection refused on 127.0.0.1:50900). Is the HUD running?");
@@ -104,8 +114,137 @@ export class FakeMemory {
       case "memory_snapshot": return this.snapshot(a);
       case "findings": return this.findings(a);
       case "verify_finding": return this.verify(a);
+      case "find_field_access": return this.fieldAccess(a);
       default: throw new Error(`Unknown tool: ${name}`);
     }
+  }
+
+  // ── find_field_access ──────────────────────────────────────────────
+
+  private structFor(a: Record<string, unknown>): LayoutResult | undefined {
+    const path = typeof a.path === "string" ? a.path : "";
+    if (!path) return undefined;
+    return /Stash/i.test(path) ? STASH : path.includes("GetComponent<Life>()") ? LIFE : undefined;
+  }
+
+  private parseOffset(v: unknown): number | undefined {
+    if (typeof v === "number") return Math.trunc(v);
+    const s = String(v ?? "").trim();
+    if (/^0x[0-9a-f]+$/i.test(s)) return parseInt(s, 16);
+    if (/^\d+$/.test(s)) return Number(s);
+    return undefined;
+  }
+
+  /** Cached offsets answer at once; a new offset "scans" (scanMs per unscanned offset among the target and its anchors). */
+  private scanDelay(a: Record<string, unknown>): number {
+    const s = this.structFor(a);
+    const off = this.parseOffset(a.offset);
+    if (off === undefined || !s) return this.latencyMs;
+    const anchors = this.anchorsFor(s, off, a).map((x) => x.offset);
+    const fresh = [off, ...anchors].filter((o) => !this.scanned.has(`${s.struct}:${o}`));
+    return this.latencyMs + fresh.length * this.scanMs;
+  }
+
+  private anchorsFor(s: LayoutResult | undefined, target: number, a: Record<string, unknown>): { offset: number; field: string; accesses: number }[] {
+    const known = new Map<number, string>();
+    for (const f of s?.fields ?? []) if (f.off >= 8 && (target < f.off || target >= f.off + f.size)) known.set(f.off, f.name.split(".").pop()!);
+    for (const k of (Array.isArray(a.knownOffsets) ? (a.knownOffsets as number[]) : [])) if (k >= 8 && k !== target && !known.has(k)) known.set(k, `+${k}`);
+    return [...known].sort((x, y) => Math.abs(x[0] - target) - Math.abs(y[0] - target)).slice(0, 6)
+      .map(([offset, field]) => ({ offset, field, accesses: 120 + (hash(`acc:${s?.struct}:${offset}`) % 14000) }));
+  }
+
+  private fieldAccess(a: Record<string, unknown>): CallToolResult {
+    if (this.scenario === "ghidra-down") return err("error", GHIDRA_DOWN);
+    const target = this.parseOffset(a.offset);
+    if (target === undefined) return err("error", 'offset: a number like 61 or "0x3D".');
+    if (target <= 0) return err("error", "Offset 0 can't be searched by displacement ([reg] has none); pick a field at +1 or above.");
+    const s = this.structFor(a);
+    if (typeof a.path === "string" && !s) return err("error", `memory.layout failed: '${a.path}' caches no offsets struct; pass type or knownOffsets.`);
+    const bit = typeof a.bit === "number" ? a.bit : null;
+    const minKnown = Number(a.minKnown ?? 2);
+    const anchors = this.anchorsFor(s, target, a);
+    if (anchors.length < minKnown) return err("error", `Need at least ${minKnown} known offsets of the struct: pass path (an object of this struct) or knownOffsets.`);
+    for (const o of [target, ...anchors.map((x) => x.offset)]) this.scanned.add(`${s?.struct ?? "?"}:${o}`);
+
+    // The two real captures, re-targeted to the requested bit.
+    const real = s === STASH && target === 61 ? accessFlags : s === STASH && target === 63 ? accessAffinity : undefined;
+    if (real) {
+      const r = structuredClone(real) as unknown as FieldAccessResult;
+      r.target.bit = bit;
+      r.accesses = r.accesses.filter((x) => x.confidence !== "low" || Number(x.knownFieldsAlsoAccessed.length) >= minKnown).map((x) => {
+        const o = { ...x } as Access;
+        if (bit === null) delete o.matchesBit; else o.matchesBit = !!o.bits?.includes(bit);
+        return o;
+      });
+      r.functions = r.functions.filter((f) => f.knownFields >= minKnown).map((f) => ({ ...f, bitMatch: bit !== null && r.accesses.some((x) => x.function === f.function && x.matchesBit) }));
+      r.minKnown = minKnown;
+      r.decompiled = r.decompiled.slice(0, Math.max(0, Math.min(6, Number(a.decompile ?? 3))));
+      return json(r);
+    }
+    const synth = this.synthAccess(s, target, bit, minKnown, Number(a.decompile ?? 3), anchors, typeof a.path === "string" ? a.path : null);
+    // A strict fingerprint finds nothing for a synthesised offset: the "no anchored functions" state.
+    if (minKnown >= 4) return json({ ...synth, functions: [], accesses: [], decompiled: [], unanchored: `${synth.programWideAccesses} other instructions use ${synth.target.hex} on a base that touches fewer than ${minKnown} known fields (other structs, or code we can't tie to this one)` });
+    return json(synth);
+  }
+
+  /** A plausible result for any other offset: a struct copy, the two serializer helpers and a few writers, all re-targeted. */
+  private synthAccess(s: LayoutResult | undefined, target: number, bit: number | null, minKnown: number, decompile: number, anchors: { offset: number; field: string; accesses: number }[], path: string | null): FieldAccessResult {
+    const hex = target.toString(16);
+    const field = s?.fields.find((f) => target >= f.off && target < f.off + f.size);
+    const width = field ? Math.min(8, field.size - (target - field.off)) : [1, 2, 4, 8][hash(`w:${target}`) % 4];
+    const ptr = width === 8 ? "qword" : width === 4 ? "dword" : width === 2 ? "word" : "byte";
+    const reg = width === 8 ? "RAX" : width === 4 ? "EAX" : width === 2 ? "AX" : "AL";
+    const also = (n: number) => anchors.slice(0, n).map((x) => `+${x.offset} ${x.field}`).sort((p, q) => Number(/\d+/.exec(p)![0]) - Number(/\d+/.exec(q)![0]));
+    const conf = (n: number): Access["confidence"] => (n >= 4 ? "high" : n >= 3 ? "medium" : "low");
+    const h = hash(`${s?.struct}:${target}`);
+    const fnName = (i: number) => `FUN_14${(0x0100000 + ((h + i * 0x9e3779b1) % 0x2a00000)).toString(16).padStart(7, "0")}`;
+    const addr = (fn: string, d: number) => (parseInt(fn.slice(4), 16) + d).toString(16);
+    const isStash = s === STASH;
+    const accesses: Access[] = [];
+    const functions: AccessFunction[] = [];
+    const add = (fn: string, kinds: string, known: number, items: { d: number; instruction: string; kind: string; width: number; base: string; bits?: number[] }[]) => {
+      if (known < minKnown) return;
+      functions.push({ function: fn, accesses: items.length, kinds, knownFields: known, bitMatch: bit !== null && items.some((it) => it.bits?.includes(bit)) });
+      for (const it of items) accesses.push({ function: fn, address: addr(fn, it.d), instruction: it.instruction, kind: it.kind, width: it.width, base: it.base, ...(it.bits ? { bits: it.bits } : {}), ...(bit !== null ? { matchesBit: !!it.bits?.includes(bit) } : {}), knownFieldsAlsoAccessed: also(known), confidence: conf(known) });
+    };
+    // The struct copy (the same function the real captures show for the stash tab).
+    const copyFn = isStash ? "FUN_1403233f0" : fnName(0);
+    add(copyFn, "read,write", Math.min(6, anchors.length), [
+      { d: 0x107, instruction: `${width === 1 || width === 2 ? "MOVZX EAX" : `MOV ${reg}`}, ${ptr} ptr [RBX + 0x${hex}]`, kind: "read", width, base: "RBX" },
+      { d: 0x10b, instruction: `MOV ${ptr} ptr [RDI + 0x${hex}], ${reg}`, kind: "write", width, base: "RDI" },
+    ]);
+    if (isStash) {
+      add("FUN_141d4d020", "address-of", 4, [{ d: 0x1a0 + (target % 32), instruction: `LEA RDX, [RDI + 0x${hex}]`, kind: "address-of", width: 0, base: "RDI" }]);
+      add("FUN_141d4d1f0", "address-of", 4, [{ d: 0x160 + (target % 32), instruction: `LEA RDX, [R14 + 0x${hex}]`, kind: "address-of", width: 0, base: "R14" }]);
+    }
+    if (width === 1) add(fnName(1), "bit-test,set-bits", 3, [
+      { d: 0x9e, instruction: `TEST byte ptr [RSI + 0x${hex}], 0x${(1 << (h % 8)).toString(16)}`, kind: "bit-test", width: 1, base: "RSI", bits: [h % 8] },
+      { d: 0xc4, instruction: `OR byte ptr [RSI + 0x${hex}], 0x${(1 << ((h >> 3) % 8)).toString(16)}`, kind: "set-bits", width: 1, base: "RSI", bits: [(h >> 3) % 8] },
+    ]);
+    add(fnName(2), "write", 3, [{ d: 0x46, instruction: `MOV ${ptr} ptr [RCX + 0x${hex}], ${reg === "AL" ? "DL" : reg === "AX" ? "DX" : reg === "EAX" ? "EDX" : "RDX"}`, kind: "write", width, base: "RCX" }]);
+    add(fnName(3), "read", 2, [{ d: 0x2f1, instruction: `${width <= 2 ? "MOVZX ECX" : `MOV ${reg === "RAX" ? "RCX" : "ECX"}`}, ${ptr} ptr [RBX + 0x${hex}]`, kind: "read", width, base: "RBX" }]);
+    add(fnName(4), "read,write", 2, [
+      { d: 0x5d, instruction: `MOVZX EAX, ${ptr} ptr [RDX + 0x${hex}]`, kind: "read", width, base: "RDX" },
+      { d: 0x61, instruction: `MOV ${ptr} ptr [RCX + 0x${hex}], ${reg}`, kind: "write", width, base: "RCX" },
+    ]);
+    const decompiled: Decompiled[] = [];
+    const nb = anchors.slice(0, 3).map((x) => x.offset).sort((p, q) => p - q);
+    const cast = (w: number) => (w === 8 ? "undefined8" : w === 4 ? "undefined4" : w === 2 ? "undefined2" : "undefined1");
+    const line = (o: number, w: number) => `      *(${cast(w)} *)((longlong)puVar3 + 0x${o.toString(16)}) = *(${cast(w)} *)((longlong)puVar4 + 0x${o.toString(16)});`;
+    if (decompile > 0 && functions.some((f) => f.function === copyFn)) {
+      const ws = (o: number) => s?.fields.find((f) => f.off === o)?.size ?? 4;
+      decompiled.push({ function: copyFn, signature: `undefined8 * ${copyFn}(undefined8 *param_1,longlong *param_2)`, excerpt: ["  ...", ...nb.filter((o) => o < target).map((o) => line(o, ws(o))), line(target, width), ...nb.filter((o) => o > target).map((o) => line(o, ws(o))), "      puVar3 = puVar3 + 0xd;"].join("\n"), lineCount: 46 });
+    }
+    if (decompile > 1 && width === 1 && functions.some((f) => f.function === fnName(1))) {
+      decompiled.push({ function: fnName(1), signature: `void ${fnName(1)}(longlong param_1,longlong param_2)`, excerpt: ["  ...", `  if ((*(byte *)(param_2 + 0x${hex}) & 0x${(1 << (h % 8)).toString(16)}) != 0) {`, `    *(undefined4 *)(param_2 + 0x${nb[0].toString(16)}) = 0;`, "  }", "  ...", `  *(byte *)(param_2 + 0x${hex}) = *(byte *)(param_2 + 0x${hex}) | 0x${(1 << ((h >> 3) % 8)).toString(16)};`].join("\n"), lineCount: 88 });
+    }
+    const programWide = 40 + (h % 2600);
+    return {
+      game: "poe1", program: (accessFlags as { program: string }).program, struct: s?.struct ?? null, path,
+      target: { offset: target, hex: `0x${target.toString(16).toUpperCase()}`, bit }, anchors, minKnown, programWideAccesses: programWide,
+      functions, accesses, decompiled,
+      unanchored: `${Math.max(0, programWide - accesses.length)} other instructions use +0x${target.toString(16).toUpperCase()} on a base that touches fewer than ${minKnown} known fields (other structs, or code we can't tie to this one)`,
+    };
   }
 
   // ── memory_layout ──────────────────────────────────────────────────

@@ -12,6 +12,8 @@ import { LIVE_MS, type MemoryStore, type Mode, type Selection, type View } from 
 import { WatchPanel } from "./WatchPanel";
 import type { LayoutResult, ReadResult } from "./types";
 import { findingsFor, isToCheck } from "./findingsModel";
+import { codeKey, codeMarks, gatesOf, rankFunctions } from "./codeModel";
+import { CodePanel, type CodeHost } from "./CodePanel";
 import { Population } from "./Population";
 import { Experiments } from "./Experiments";
 import { Findings } from "./Findings";
@@ -49,6 +51,10 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
   const sf = useMemo(() => snap.fnd.data && (layout || view?.target.path) ? findingsFor(snap.fnd.data.findings, { struct: layout?.struct, object: layout?.object, path: view?.target.path }, game) : undefined, [snap.fnd.data, layout, view?.target.path, game]);
   const toCheck = game && snap.fnd.data ? snap.fnd.data.findings.filter((f) => isToCheck(f, game)).length : 0;
   const mode = snap.mode;
+  // Offsets the game's code uses, from this session's find_field_access lookups on this struct.
+  const structKey = store.structKeyOf(view);
+  const cm = useMemo(() => codeMarks(snap.code.values(), structKey), [snap.code, structKey]);
+  const codeQ = sel ? snap.code.get(codeKey(structKey, store.codeTarget(sel, snap.bitSel).offset, store.codeTarget(sel, snap.bitSel).bit)) : undefined;
 
   useEffect(() => { setFilter("all"); }, [view?.id]);
   // A watch that found changes switches the map to them once, so the discovery is in view.
@@ -82,8 +88,15 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
       parts.push(r.changedRanges.length ? `Watch (${Math.round(r.durationMs / 1000)} s, ${r.samples} samples): ${r.changedRanges.map((c) => `+${c.off} ${c.field ?? ""} ${c.first} -> ${c.last} x${c.changes}${c.bitsFlipped?.length ? ` bits ${c.bitsFlipped.join(",")}${c.bitsRelativeTo ? ` of ${c.bitsRelativeTo}` : ""}` : ""}${c.noisy ? " (noisy)" : ""}`).join("; ")}.` : "Watch: nothing changed.");
       structured.watch = { durationMs: r.durationMs, samples: r.samples, changedRanges: r.changedRanges };
     }
+    if (codeQ?.status === "done" && codeQ.result) {
+      const r = codeQ.result;
+      const fns = rankFunctions(r, r.target.bit ?? undefined).slice(0, 5);
+      const gates = gatesOf(r);
+      parts.push(`Code (find_field_access, static Ghidra) for +${r.target.offset}${r.target.bit !== undefined && r.target.bit !== null ? ` bit ${r.target.bit}` : ""}: ${r.functions.length} functions of the struct; top ${fns.map((f) => `${f.fn.function}${f.role ? ` (${f.role})` : ""} ${f.confidence}`).join(", ")}${gates.length ? `; gates: ${gates.map((g) => `bit ${g.bits.join("+")} ${g.when} -> +${hexOff(g.off)}${g.width ? ` (${g.width} B)` : ""}`).join(", ")}` : ""}.`);
+      structured.code = { target: r.target, functions: fns.map((f) => ({ function: f.fn.function, role: f.role, confidence: f.confidence, kinds: f.kinds, also: f.also })), gates: gates.map((g) => ({ bits: g.bits, when: g.when, off: g.off, width: g.width, kind: g.kind })), decompiled: r.decompiled.slice(0, 2) };
+    }
     return { text: parts.join(" "), structured };
-  }, [view, region, layout, read, game, sel, selSeg, watchForView, snap.views, snap.index]);
+  }, [view, region, layout, read, game, sel, selSeg, watchForView, snap.views, snap.index, codeQ]);
 
   // Debounced, deduplicated model context on selection / view / watch changes.
   const lastCtx = useRef("");
@@ -92,13 +105,18 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
     const t = setTimeout(() => {
       const d = describe();
       if (!d) return;
-      const key = `${view?.id}|${sel?.off}:${sel?.size}|${watchForView?.startedAt}:${watchForView?.status}`;
+      const key = `${view?.id}|${sel?.off}:${sel?.size}|${watchForView?.startedAt}:${watchForView?.status}|${codeQ?.key}:${codeQ?.status}`;
       if (key === lastCtx.current) return;
       lastCtx.current = key;
       host.updateModelContext!(d.text, d.structured);
     }, 800);
     return () => clearTimeout(t);
-  }, [host, describe, view?.id, sel?.off, sel?.size, watchForView?.startedAt, watchForView?.status]);
+  }, [host, describe, view?.id, sel?.off, sel?.size, watchForView?.startedAt, watchForView?.status, codeQ?.key, codeQ?.status]);
+
+  const codeHost = useMemo<CodeHost>(() => ({
+    send: host.updateModelContext ? (text, structured) => { host.updateModelContext!(text, { game, ...structured }); store.toast("info", "Sent to Claude's context"); } : undefined,
+    ask: host.ask,
+  }), [host, game, store]);
 
   const inspectorHost = useMemo<InspectorHost>(() => ({
     send: host.updateModelContext ? () => { const d = describe(); if (d) { host.updateModelContext!(d.text, d.structured); store.toast("info", "Sent to Claude's context"); } } : undefined,
@@ -159,16 +177,16 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
       {region ? (
         <>
           <div className="px-2 pt-1">
-            <Strip store={store} snap={snap} region={region} segs={region.segs} sf={sf} />
-            <div className="mt-0.5 pb-1.5"><Legend struct={!!layout} /></div>
+            <Strip store={store} snap={snap} region={region} segs={region.segs} sf={sf} cm={cm} />
+            <div className="mt-0.5 pb-1.5"><Legend struct={!!layout} code={cm.size > 0} /></div>
           </div>
-          <MapRows store={store} snap={snap} view={view!} region={region} segs={segs} now={now} fill={fullscreen} maxHeight="20rem" sf={sf} />
+          <MapRows store={store} snap={snap} view={view!} region={region} segs={segs} now={now} fill={fullscreen} maxHeight="20rem" sf={sf} cm={cm} />
         </>
       ) : errorBody ? errorBody : <LoadingMap />}
       <div className="flex items-center gap-2 border-t border-line px-2 py-1 text-[10.5px] text-fg-3">
         <span className="hidden sm:inline">↑↓ move · Enter follow pointer · Esc clear · shift-click in hex widens</span>
         <span className="sm:hidden">↑↓ Enter Esc</span>
-        <span className="ml-auto tnum" title="memory_layout / memory_read / watch_memory / memory_where calls this session">{snap.calls} calls</span>
+        <span className="ml-auto tnum" title="memory_layout / memory_read / watch_memory / memory_where / find_field_access calls this session">{snap.calls} calls</span>
       </div>
     </section>
   );
@@ -185,7 +203,8 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
     </section>
   );
 
-  const inspector = region && view ? (sel ? <Inspector key={`${view.id}:${sel.off}:${sel.size}`} store={store} snap={snap} view={view} region={region} sel={sel} host={inspectorHost} variant={fullscreen ? "panel" : "card"} sf={sf} /> : <NoSelection struct={!!layout} />) : null;
+  const inspector = region && view ? (sel ? <Inspector key={`${view.id}:${sel.off}:${sel.size}`} store={store} snap={snap} view={view} region={region} sel={sel} host={inspectorHost} variant={fullscreen ? "panel" : "card"} sf={sf} cm={cm} /> : <NoSelection struct={!!layout} />) : null;
+  const codePanel = region && view && sel && <CodePanel key={`code:${view.id}:${sel.off}:${sel.size}`} store={store} snap={snap} view={view} region={region} sel={sel} cm={cm} host={codeHost} variant={fullscreen ? "panel" : "card"} now={now} />;
   const watchPanel = region && view && <WatchPanel store={store} snap={snap} view={view} region={region} now={now} variant={fullscreen ? "panel" : "card"} />;
 
   const textHost = useMemo(() => ({
@@ -261,6 +280,7 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
             {hexCard && <div className="hidden min-h-0 lg:flex lg:flex-col">{hexCard}</div>}
             <aside className="scroll-thin flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
               {inspector}
+              {codePanel}
               {watchPanel}
               {hexCard && <div className="flex max-h-[22rem] flex-col lg:hidden">{hexCard}</div>}
             </aside>
@@ -272,6 +292,7 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
           {summary}
           {mapCard}
           {inspector}
+          {codePanel}
           {hexCard}
           {watchPanel}
         </div>
