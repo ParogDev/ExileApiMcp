@@ -8,7 +8,11 @@
 //   stats:    harness.hud.pin("cold_damage_resistance_%")   harness.hud.filter("life", "vitals")
 //             harness.hud.select("level")                   harness.server.bumpRandomStat("level")
 //   explorer: harness.server.bump()  (life drops)           harness.server.drift = false
-//   both:     harness.setScenario("offline")                harness.log() / harness.context() / harness.messages()
+//   memory:   harness.server.bump()  harness.server.toggleAffinity()  harness.server.quiet = true
+//   all:      harness.setScenario("offline")                harness.log() / harness.context() / harness.messages()
+//
+//   /harness.html?app=memory&path=GameController.IngameState.ServerData.PlayerStashTabs[0]&theme=dark&width=380
+//   /harness.html?app=memory&address=0x41137889400            (a raw read, no struct)
 
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -17,9 +21,10 @@ import type { McpUiDisplayMode, McpUiStyles, McpUiTheme } from "@modelcontextpro
 import type { CallToolResult } from "@modelcontextprotocol/client";
 import { FakeServer, type CallLogEntry } from "./fakeServer";
 import { FakeExplorer } from "./fakeExplore";
+import { FakeMemory } from "./fakeMemory";
 import "../src/styles.css";
 
-type AppName = "stats" | "explorer";
+type AppName = "stats" | "explorer" | "memory";
 
 interface FakeHost {
   scenario: string;
@@ -31,15 +36,25 @@ interface FakeHost {
 }
 
 const params = new URLSearchParams(location.search);
-const appName: AppName = params.get("app") === "explorer" ? "explorer" : "stats";
+const appName: AppName = params.get("app") === "explorer" ? "explorer" : params.get("app") === "memory" ? "memory" : "stats";
 const APPS: Record<AppName, { title: string; html: string; scenarios: string[]; initialTool: string; initialArgs: () => Record<string, unknown> }> = {
   stats: { title: "Player stats", html: "./player-stats.html", scenarios: ["live", "offline", "not-in-game", "empty", "flaky"], initialTool: "stats_ui_state", initialArgs: () => ({}) },
   explorer: { title: "Data explorer", html: "./data-explorer.html", scenarios: ["live", "offline", "flaky"], initialTool: "show_data_explorer", initialArgs: () => ({ path: params.get("path") ?? "GameController", game: "poe2" }) },
+  memory: {
+    title: "Memory view", html: "./memory-view.html", scenarios: ["live", "offline", "flaky"], initialTool: "show_memory_view",
+    initialArgs: () => {
+      const a: Record<string, unknown> = { game: "poe1" };
+      if (params.get("address")) a.address = params.get("address");
+      else a.path = params.get("path") ?? "GameController.Player.GetComponent<Life>()";
+      if (params.get("type")) a.type = params.get("type");
+      return a;
+    },
+  },
 };
 const APP = APPS[appName];
-const server: FakeHost = appName === "explorer" ? new FakeExplorer() : new FakeServer();
+const server: FakeHost = appName === "explorer" ? new FakeExplorer() : appName === "memory" ? new FakeMemory() : new FakeServer();
 server.scenario = params.get("scenario") ?? "live";
-server.latencyMs = Number(params.get("latency") ?? (appName === "explorer" ? 60 : 40));
+server.latencyMs = Number(params.get("latency") ?? (appName === "stats" ? 40 : 60));
 
 // Roughly Claude-like host variables; "none" tests the app's own fallbacks.
 const CLAUDE_VARS: McpUiStyles = {
@@ -134,7 +149,7 @@ function Harness() {
   }, [contexts, messages]);
 
   const full = display === "fullscreen";
-  const other: AppName = appName === "stats" ? "explorer" : "stats";
+  const others = (Object.keys(APPS) as AppName[]).filter((a) => a !== appName);
   // bare=1: only the app's iframe, filling the viewport (for pixel-exact screenshots in a narrow pane).
   if (params.get("bare") === "1") {
     return (
@@ -146,7 +161,9 @@ function Harness() {
     <div className="flex min-h-screen gap-3 bg-surface-2 p-3 text-fg">
       <aside className="flex w-64 shrink-0 flex-col gap-3 text-xs">
         <h1 className="text-sm font-semibold">{APP.title} · dev harness</h1>
-        <a className="text-fg-3 underline-offset-2 hover:underline" href={`?${new URLSearchParams({ ...Object.fromEntries(params), app: other })}`}>switch to {APPS[other].title}</a>
+        <div className="flex flex-wrap gap-x-2 text-fg-3">
+          {others.map((o) => <a key={o} className="underline-offset-2 hover:underline" href={`?${new URLSearchParams({ ...Object.fromEntries(params), app: o })}`}>switch to {APPS[o].title}</a>)}
+        </div>
         <Field label="Theme">
           <Seg value={theme} options={["light", "dark"]} onChange={(v) => setTheme(v as McpUiTheme)} />
         </Field>
@@ -184,6 +201,17 @@ function Harness() {
               <Btn onClick={() => { server.drift = !server.drift; force((n) => n + 1); }}>{server.drift ? "freeze values" : "let values drift"}</Btn>
             </div>
             <p className="mt-1 text-fg-3">Injected states: Player has a blocked member and a throwing getter; IngameUi has budget-skipped members; Life values drift. Unknown members error like the bridge.</p>
+          </Field>
+        )}
+        {server instanceof FakeMemory && (
+          <Field label="Simulate the game">
+            <div className="flex flex-wrap gap-1">
+              <Btn onClick={() => server.bump()}>take a hit (life −500)</Btn>
+              <Btn onClick={() => server.toggleAffinity()}>toggle stash affinity</Btn>
+              <Btn onClick={() => { server.drift = !server.drift; force((n) => n + 1); }}>{server.drift ? "freeze values" : "let values drift"}</Btn>
+              <Btn onClick={() => { server.quiet = !server.quiet; force((n) => n + 1); }}>{server.quiet ? "watches find changes" : "watches find nothing"}</Btn>
+            </div>
+            <p className="mt-1 text-fg-3">Life and the stash tab are real captures; any other address reads as a synthesised object. Paths below Life (e.g. .CurHP) fail with no_address, GameController with no_struct, 0x0 with unreadable.</p>
           </Field>
         )}
         {server instanceof FakeServer && (

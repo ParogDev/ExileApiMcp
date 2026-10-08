@@ -7,8 +7,9 @@
     "typecheck": "tsc --noEmit",
     "build:app": "vite build",
     "build:explorer": "vite build --mode explorer",
+    "build:memory": "vite build --mode memory",
     "build:harness": "vite build --mode harness",
-    "build": "npm run typecheck && npm run build:app && npm run build:explorer && npm run build:harness",
+    "build": "npm run typecheck && npm run build:app && npm run build:explorer && npm run build:memory && npm run build:harness",
     "preview": "vite preview --host 0.0.0.0 --port 5174 --strictPort"
   },
   "dependencies": {

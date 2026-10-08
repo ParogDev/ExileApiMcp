@@ -52,6 +52,14 @@ const PATHS = {
   dot: "M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
   box: "M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5",
   hash: "M5 9h14M5 15h14M9.5 4l-2 16M16.5 4l-2 16",
+  // Memory view
+  quote: "M7 7h4v4H7zM13 7h4v4h-4zM11 11c0 2.5-1.5 4-4 4.5M17 11c0 2.5-1.5 4-4 4.5",
+  sliders: "M4 6h10M18 6h2M4 12h3M11 12h9M4 18h12M20 18h0M14 4v4M7 10v4M16 16v4",
+  chip: "M8 8h8v8H8zM5 5h14v14H5zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3",
+  radio: "M12 12h.01M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8",
+  binary: "M6 4h4v7H6zM6 13h4v7H6zM14 4h4v7h-4zM14 13h4v7h-4z",
+  diff: "M12 3v18M3 12h18",
+  grid: "M4 4h16v16H4zM4 12h16M12 4v16",
 } as const;
 
 export type IconName = keyof typeof PATHS;

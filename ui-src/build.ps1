@@ -7,9 +7,10 @@
     a named Docker volume. Output:
       ..\ui\player-stats.html   embedded into ExileApiMcp (commit this)
       ..\ui\data-explorer.html  embedded into ExileApiMcp (commit this)
-      .\dist\harness.html       dev harness: fake host + fixtures for both apps (not committed; see README.md)
+      ..\ui\memory-view.html    embedded into ExileApiMcp (commit this)
+      .\dist\harness.html       dev harness: fake host + fixtures for all apps (not committed; see README.md)
 
-    -Serve     after building, serve dist\ on http://127.0.0.1:5174 (harness: /harness.html?app=stats|explorer).
+    -Serve     after building, serve dist\ on http://127.0.0.1:5174 (harness: /harness.html?app=stats|explorer|memory).
                Blocks until Ctrl+C; run it in the background from agents.
     -Npm "..." run an npm command instead of building, e.g. -Npm "install -E some-pkg@1.2.3"
                (keeps package-lock.json in sync without npm on the host).
@@ -49,7 +50,7 @@ if ($LASTEXITCODE -ne 0) { Write-Output 'ERROR: UI build failed'; exit 1 }
 
 $uiDir = Join-Path (Split-Path $here -Parent) 'ui'
 New-Item -ItemType Directory -Force $uiDir | Out-Null
-$sizes = foreach ($app in 'player-stats.html', 'data-explorer.html') {
+$sizes = foreach ($app in 'player-stats.html', 'data-explorer.html', 'memory-view.html') {
     Copy-Item (Join-Path $here "dist\$app") (Join-Path $uiDir $app) -Force
     "ui\$app ($([math]::Round((Get-Item (Join-Path $uiDir $app)).Length / 1KB)) KB)"
 }
