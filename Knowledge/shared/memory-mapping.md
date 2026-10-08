@@ -21,6 +21,15 @@ How to see what the HUD maps in a game struct, what it doesn't, and confirm it i
   - then call `get_xrefs_to?address=`, `decompile_function?address=` and `read_memory?address=&length=`.
   - Use bearer `GHIDRA_MCP_AUTH_TOKEN` on every call.
 
+## Worked example: PoE1 stash tab affinities (`ServerStashTabOffsets`)
+- **`Affinity` (+63, UInt32) is a bit mask, one bit per affinity type.** Read from tabs named after their affinity:
+  - Currency = bit 3, Unique = 4, Divination = 6, Essence = 8, Fragment = 9, Delve = 12, Blight = 13, Metamorph = 14, Delirium = 15, Flask = 17, Gem = 18.
+  - Bits 5, 7, 10 and 11 are in use but unnamed; one of them is Map and one is Mercenary.
+- **Each affinity belongs to one tab only.** Giving it to another tab clears it from the previous one: `watch_memory` saw bit 11 move from one tab to another.
+- **`Flags` (+61) gains bit 6 (0x02 to 0x42) when a tab gets an affinity.** Tabs with affinities read 0x42. The HUD doesn't name this bit.
+- **How it was found:** `watch_memory path=...PlayerStashTabs[33] size=96 durationMs=60000` while the user ticked and confirmed affinities in the tab's settings. The change lands only after the confirm button (the server applies it).
+- **Pitfall: the tab's address can change.** The array was reallocated while the settings window was open. Watch by path, which is re-resolved on every sample, not by a stored address.
+
 ## Worked example: PoE1 `Life` (`LifeComponentOffsets`, 580 bytes mapped)
 - **What the HUD maps (16 fields, all plausible):** `Owner` at +0x8, and the `Health`/`Mana`/`EnergyShield` values (`VitalStruct` fields) from +0x188/+0x1D8/+0x220 on.
 - **Constructor** `FUN_141e678d0` (writes vtable `0x1435A7340`):

@@ -153,12 +153,15 @@ public static class MemoryTools
             int j = i;
             while (j + 1 < size && changes[j + 1] > 0) j++;
             var len = j - i + 1;
+            var overlappingFields = fields.Where(f => f["off"]!.Value<int>() <= j && f["off"]!.Value<int>() + f["size"]!.Value<int>() > i).ToList();
+            var overlapping = overlappingFields.Select(f => f["name"]!.ToString()).ToList();
+            // Bit numbers relative to the field when one field covers the range (Affinity bit 11 = value 1 << 11),
+            // otherwise relative to the range's first byte.
+            var bitBase = overlappingFields.Count == 1 ? overlappingFields[0]["off"]!.Value<int>() : i;
             var bits = new JArray();
             for (int k = i; k <= j; k++)
                 for (int bit = 0; bit < 8; bit++)
-                    if ((flipped[k] & (1 << bit)) != 0) bits.Add((k - (i & ~3)) * 8 + bit);
-            var overlapping = fields.Where(f => f["off"]!.Value<int>() <= j && f["off"]!.Value<int>() + f["size"]!.Value<int>() > i)
-                .Select(f => f["name"]!.ToString()).ToList();
+                    if ((flipped[k] & (1 << bit)) != 0) bits.Add((k - bitBase) * 8 + bit);
             ranges.Add(new JObject
             {
                 ["off"] = i, ["size"] = len,
@@ -167,7 +170,7 @@ public static class MemoryTools
                 ["first"] = BitConverter.ToString(first, i, len).Replace("-", " "),
                 ["last"] = BitConverter.ToString(prev, i, len).Replace("-", " "),
                 ["bitsFlipped"] = bits.Count <= 16 ? bits : null,
-                ["note"] = bits.Count <= 16 ? "bit numbers count from the 4-byte-aligned word containing the range" : null,
+                ["bitsRelativeTo"] = bits.Count <= 16 ? (overlappingFields.Count == 1 ? $"field {overlapping[0]} (+{bitBase})" : $"+{i}") : null,
                 ["firstChangeAtMs"] = Enumerable.Range(i, len).Min(k => changes[k] > 0 ? firstChangeMs[k] : long.MaxValue),
                 ["lastChangeAtMs"] = Enumerable.Range(i, len).Max(k => lastChangeMs[k]),
                 ["noisy"] = Enumerable.Range(i, len).Max(k => changes[k]) >= samples * 0.6 ? true : null,
