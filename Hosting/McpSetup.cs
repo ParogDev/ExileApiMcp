@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.16.0";
+    public const string Version = "3.17.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -41,6 +41,10 @@ internal static class McpSetup
         experiment_presets has ready-made stash experiments. Knowledge pack shared/working-with-users says how to word
         an instruction and what goes on the card, in detail and in chat. The Memory View's Experiments tab
         (show_memory_view) lets the user run a preset themselves or follow your run step by step.
+        Before asking the user, try what needs nobody: game_data (the game's data tables, e.g. the names behind an id or
+        bit; row n is usually id n), memory_correlate over a whole collection, find_field_access + code_struct_layout
+        (the struct as the game's code reads it, diffed with the HUD's). Ask for an in-game action only for what those
+        can't show.
         find_field_access explains a field from the game's code: the functions that read, write or bit-test it,
         decompiled from the Ghidra copy (static; never the running game). Needs Ghidra headless running.
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
