@@ -109,6 +109,8 @@ run.cmd --http [--port 50910]
 **Prompts:**
 - `plugin_dev_loop(plugin, game?)`: edit → restart → `hud_plugins` → `hud_log` → verify live.
 - `investigate_stat(key, game?)`: explain a stat from live evidence and point the user at it in the shared view.
+- `guided_experiment(question, game?)`: find something out *with* the user. They perform one in-game action per step, shown on the HUD's agent guide card; the tools capture what changes, and the steps are repeated until the evidence is clear. Agents are encouraged to work this way whenever an answer depends on game state the user can change.
+- `probe_memory(path, question, game?)`: the full method for unknown memory (observe → population → guided experiment → code → record).
 
 The dev-loop tools read the HUD folders on disk (next to the bridge folders), so they work with the game and HUD closed. Two things are rewritten to save tokens and keep machine-specific source locations out of agents' notes:
 - paths outside the HUD folder are shortened;

@@ -73,11 +73,10 @@ public static class DevPrompts
            you already know (e.g. ["TabType","Affinity","Name"]). Accept a bit only with 0 counterexamples and at
            least 3 items on each side. Read the near-misses: their counterexample items often name the real rule.
            Results within a label's own storage are expected.
-        3. Experiment. memory_snapshot name=baseline (collections: labels=["Name", ...] so items match across
-           snapshots). Ask the user to change ONE thing (and to confirm it in game if the game needs that), then
-           memory_snapshot name=on. Ask them to undo it, then memory_snapshot name=off. memory_compare
-           names=[baseline,on,off]: the answer flips on and back, and nothing else does. For fast state, use
-           watch_memory while they act.
+        3. Experiment with the user (prompt guided_experiment). await_change with instruction="<one action>" puts
+           the step on the HUD's agent guide card and captures before/after when they act. Ask for the change, then
+           its undo: the answer flips on and back, and nothing else does. Repeat 2-3 times and read
+           experiment_summary. For collections, memory_snapshot / memory_compare (labels=["Name", ...]) also work.
         4. Counterexamples. Think of states the population lacks (several flags at once, empty, max) and test them
            the same way before generalising.
         5. Explain it from the code. find_field_access offset=<off> bit=<bit> path=<one object> lists the game
@@ -91,6 +90,32 @@ public static class DevPrompts
            at +0 also leads to the constructor (ghidra get_xrefs_to, then decompile_function).
         6. Report the finding with its evidence (counts, which experiment, counterexamples tried) and add it to the
            knowledge pack shared/memory-mapping if it's new. Remind the user of any in-game changes to undo.
+        """;
+
+    [McpServerPrompt(Name = "guided_experiment", Title = "Find something out together with the user, in game")]
+    [Description("Answer a question about the game's data by running a guided experiment with the user: one in-game action " +
+                 "per step, shown on the HUD's agent guide card, captured and repeated until the evidence is clear.")]
+    public static string GuidedExperiment(
+        [Description("What you want to find out, e.g. 'which memory follows switching stash tabs'")] string question,
+        [Description("'poe1' or 'poe2' (optional)")] string? game = null) => $"""
+        Find out "{question}"{GameText(game)} together with the user. They act in game and you observe; you never send input.
+
+        1. Plan, short. Pick what to watch: value:<walker path> for HUD values, memory:<path>[:size] for an object's
+           bytes (field names come from the HUD's struct, unmapped bytes show as such), collection:<path>[:Label] for
+           every item of a list. Prefer the narrowest objects; whole UI elements flicker. Check experiment_presets for
+           a ready-made one. Pick the actions: one per step, each with its undo (on/off, next/prev, to/from).
+        2. Tell the user in one or two chat lines what the experiment is for and what they will do, then start step 1.
+           Ask them first if the setup needs something (e.g. stash open on a tab with items).
+        3. Each step: await_change experiment=<name> label=<action> instruction="<the action, under ~70 characters>"
+           step=n steps=m watch=[...]. The instruction appears in game on the guide card (DO THIS NOW). The card turns
+           green with what changed, or red if nothing lasting did. In chat, say only what was captured and what's next.
+        4. Repeat each action 2-3 times. experiment_summary shows what changed EVERY time (the evidence) vs sometimes
+           (side effects, or watches you added later). Item-dependent effects (stacks, slots) show up as "sometimes":
+           ask what the user did when a result is surprising.
+        5. Watch for surprises: a HUD value that doesn't follow the action, or reads nonsense (a pointer where a count
+           should be), is a mapping bug. Confirm it with a reliable neighbour (e.g. ServerInventory vs the UI element).
+        6. Finish: guide status=done with a one-line result, record new facts in findings.json (with the experiment as
+           evidence) and tell the user anything they changed in game that they may want to undo.
         """;
 
     private static string GameText(string? game) => string.IsNullOrWhiteSpace(game) ? "" : $" ({game})";
