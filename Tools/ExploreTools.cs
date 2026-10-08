@@ -47,6 +47,7 @@ public static class ExploreTools
         calls++;
         if (root["error"] != null) return ToolResults.Json(root);
         game = bridge.Game == "auto" ? game : bridge.Game;
+        if (game != null) root["game"] = game;
 
         // Breadth-first expansion of nested objects/structs/collections, within a call budget. Back-references
         // (Owner, an ancestor's address) and memory plumbing are listed but not expanded: they repeat what is
