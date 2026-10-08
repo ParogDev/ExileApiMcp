@@ -44,7 +44,11 @@ public sealed class BridgeClient : IDisposable
 
     public int? Port { get; private set; }
 
-    public bool IsConnected => _client?.Connected == true && _writer != null;
+    // Socket.Connected only turns false after a failed operation, so a connection the HUD closed
+    // (HUD restart) would still look alive; the read loop sets this when it sees the close.
+    private volatile bool _remoteClosed;
+
+    public bool IsConnected => _client?.Connected == true && _writer != null && !_remoteClosed;
 
     /// <summary>True when the bridge has written its token file, i.e. the HUD plugin is (or was) running.</summary>
     public bool LooksAvailable => File.Exists(Path.Combine(BridgeDir, "bridge-token.txt"));
@@ -86,6 +90,7 @@ public sealed class BridgeClient : IDisposable
             try
             {
                 Disconnect();
+                _remoteClosed = false;
                 _client = new TcpClient { NoDelay = true };
                 await _client.ConnectAsync(System.Net.IPAddress.Loopback, Port.Value, budget.Token);
                 var stream = _client.GetStream();
@@ -145,6 +150,12 @@ public sealed class BridgeClient : IDisposable
             {
                 await writer.WriteLineAsync(request.ToString(Formatting.None).AsMemory(), ct);
             }
+            catch (IOException ex)
+            {
+                // Nothing reached the bridge, so the caller may safely reconnect and resend.
+                Disconnect();
+                throw new BridgeNotSentException(Game, $"connection lost before sending ({ex.Message})");
+            }
             finally
             {
                 _writeLock.Release();
@@ -201,6 +212,8 @@ public sealed class BridgeClient : IDisposable
         catch (IOException) { }
         catch (ObjectDisposedException) { }
 
+        if (!ct.IsCancellationRequested) _remoteClosed = true;
+
         foreach (var kvp in _pending)
             if (_pending.TryRemove(kvp.Key, out var tcs))
                 tcs.TrySetException(new BridgeUnavailableException(Game, "connection to the HUD bridge was lost"));
@@ -234,4 +247,7 @@ public class BridgeException(string game, string message) : Exception($"[{game}]
 }
 
 /// <summary>The HUD bridge for a game is not reachable (HUD closed, plugin disabled, wrong dir).</summary>
-public sealed class BridgeUnavailableException(string game, string message) : BridgeException(game, message);
+public class BridgeUnavailableException(string game, string message) : BridgeException(game, message);
+
+/// <summary>The connection failed before the request was written: it was not processed, so a resend is safe.</summary>
+public sealed class BridgeNotSentException(string game, string message) : BridgeUnavailableException(game, message);
