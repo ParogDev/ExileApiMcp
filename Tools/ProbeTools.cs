@@ -315,10 +315,22 @@ public static class ProbeTools
         }
         var keyLabel = (a["labels"] as JArray)?.FirstOrDefault()?.ToString();
         string Key(JToken item) => keyLabel != null && item["labels"]?[keyLabel] is { } k ? $"{keyLabel}={k} [{item["index"]}]" : $"[{item["index"]}]";
-        string Match(JToken item) => keyLabel != null && item["labels"]?[keyLabel] is { } k ? k.ToString() : item["index"]!.ToString();
-        var bItems = ((JArray)b["items"]!).GroupBy(Match).ToDictionary(g => g.Key, g => g.First());
-        foreach (var ia in (JArray)a["items"]!)
-            if (bItems.TryGetValue(Match(ia), out var ib))
+        // Key value plus its occurrence number, so duplicate keys (two tabs named "10") pair up in order.
+        Dictionary<string, JToken> Keyed(JArray items)
+        {
+            var seen = new Dictionary<string, int>();
+            var d = new Dictionary<string, JToken>();
+            foreach (var it in items)
+            {
+                var k = keyLabel != null && it["labels"]?[keyLabel] is { } kv ? kv.ToString() : it["index"]!.ToString();
+                seen[k] = seen.TryGetValue(k, out var n) ? n + 1 : 0;
+                d[$"{k}#{seen[k]}"] = it;
+            }
+            return d;
+        }
+        var bItems = Keyed((JArray)b["items"]!);
+        foreach (var (k, ia) in Keyed((JArray)a["items"]!))
+            if (bItems.TryGetValue(k, out var ib))
                 yield return (Key(ia), Convert.FromBase64String(ia["data"]!.ToString()), Convert.FromBase64String(ib["data"]!.ToString()),
                     ia["labels"] as JObject, ib["labels"] as JObject);
     }

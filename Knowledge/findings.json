@@ -1,0 +1,85 @@
+{
+  "about": "Verified facts about game data and memory, with their status PER GAME and a check that re-runs them. A finding verified on one game is a hypothesis on the other: run verify_finding there and record the result here (status, date, where, evidence). Statuses: verified | differs | unverified | n/a. Check kinds: correlate (memory_correlate finds a bit equal to `expect` with 0 counterexamples), stored (the label's value is stored in the range), eval (eval_path value matches `expect`), manual (an experiment: follow `how`).",
+  "findings": [
+    {
+      "id": "stash.flags.has-affinity",
+      "title": "Stash tab Flags bit 6 = the tab has at least one affinity",
+      "subject": "ServerStashTab (ServerStashTabOffsets)",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 6", "evidence": "memory_correlate over 71 tabs: 11 with affinity vs 60 without, 0 counterexamples; tabs with 1, 2 and 4 affinities; seen clearing when a tab lost its last affinity" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "correlate", "path": "GameController.IngameState.ServerData.PlayerStashTabs", "label": "Affinity", "expect": "Affinity != 0" }
+    },
+    {
+      "id": "stash.flags.has-type",
+      "title": "Stash tab Flags bit 1 = the tab has a type (TabType != 0, i.e. not a Normal tab)",
+      "subject": "ServerStashTab (ServerStashTabOffsets)",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 1", "evidence": "memory_correlate over 71 tabs: 63 typed vs 8 Normal, 0 counterexamples" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "correlate", "path": "GameController.IngameState.ServerData.PlayerStashTabs", "label": "TabType", "expect": "TabType != 0" }
+    },
+    {
+      "id": "stash.affinity.offset",
+      "title": "Stash tab Affinity mask is stored where the HUD reads it",
+      "subject": "ServerStashTab (ServerStashTabOffsets.Affinity)",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+63 (32-bit)", "evidence": "memory_correlate storedAt over 71 tabs (12 distinct values)" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "stored", "path": "GameController.IngameState.ServerData.PlayerStashTabs", "label": "Affinity" }
+    },
+    {
+      "id": "stash.affinity.bits",
+      "title": "Affinity bit -> affinity type table",
+      "subject": "ServerStashTab.Affinity",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "3 Currency, 4 Unique, 5 Map, 6 Divination, 7 Settlers, 8 Essence, 9 Fragment, 10 Sanctum, 11 Mercenary, 12 Delve, 13 Blight, 14 Ultimatum, 15 Delirium, 16 Breach, 17 Flask, 18 Gem, 21 Ritual", "evidence": "one-variable experiment (memory_snapshot/memory_compare, one affinity ticked per step) for 5,7,10,11,14,16,21; population (bit = dedicated TabType) for the rest. The HUD's InventoryTabType names are wrong for 7, 14, 16" },
+        "poe2": { "status": "unverified", "note": "PoE2 has different stash tab types and affinities: expect a different table" }
+      },
+      "check": { "kind": "manual", "how": "Prompt probe_memory with path=GameController.IngameState.ServerData.PlayerStashTabs. memory_snapshot (labels [Name, Affinity, TabType]) -> the user ticks ONE affinity on a tab without any and confirms -> memory_snapshot -> memory_compare; repeat per affinity. Record the table, then give the user the restore list (ticking moves an affinity off its previous tab)." }
+    },
+    {
+      "id": "stash.affinity.per-tab-type",
+      "title": "Which tab types can hold which affinities",
+      "subject": "Stash tab settings",
+      "games": {
+        "poe1": { "status": "unverified", "note": "A Normal tab held 7 affinities at once (Map, Breach, Ultimatum, Ritual, Settlers, Sanctum, Mercenary). The user reports not every tab type offers every affinity; not yet mapped" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "manual", "how": "For each tab type (TabType), open a tab's settings and list the affinities offered; or tick each and see which ones the game accepts (memory_compare). Record per type." }
+    },
+    {
+      "id": "stats.maxres.absent-at-default",
+      "title": "Max resistance stats are absent from Entity.Stats at the default 75% cap",
+      "subject": "Player stats",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "evidence": "No Maximum*ResistancePct key at 75/75/75 (find_in_object name=Maximum over Player.Stats)" },
+        "poe2": { "status": "verified", "date": "2026-10-08", "evidence": "Ghidra: the caps live in the stats source (knowledge poe2/stats-layout)" }
+      },
+      "check": { "kind": "manual", "how": "find_in_object path=GameController.Player.Stats name=MaximumFireDamageResistance depth=1 on a character at the default cap: no match expected." }
+    },
+    {
+      "id": "entity.position.numerics",
+      "title": "Entity position as System.Numerics: PoE1 PosNum / GridPosNum, PoE2 Pos / GridPos",
+      "subject": "Entity",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "Pos/GridPos = SharpDX; PosNum/GridPosNum = System.Numerics", "evidence": "explore_object namespaces (knowledge shared/cross-game)" },
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "Pos/GridPos = System.Numerics (no *Num members)", "evidence": "explore_object namespaces" }
+      },
+      "check": { "kind": "eval", "expressionByGame": { "poe1": "GameController.Player.PosNum", "poe2": "GameController.Player.Pos" }, "expect": "type contains Vector3" }
+    },
+    {
+      "id": "life.vitals-subobjects",
+      "title": "Life holds Health/Mana/ES as embedded sub-objects (vtable + back-pointer before each VitalStruct)",
+      "subject": "Life (LifeComponentOffsets)",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+0x178 / +0x1C8 / +0x210", "evidence": "memory_layout candidates (vtable + self pointer) and the Ghidra constructor FUN_141e678d0" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "manual", "how": "memory_layout path=GameController.Player.GetComponent<Life>(): look for 'vtable' followed by 'self' candidates just before each Health/Mana/EnergyShield field group. Confirm via the vtable at +0 -> Ghidra get_xrefs_to -> decompile the constructor." }
+    }
+  ]
+}

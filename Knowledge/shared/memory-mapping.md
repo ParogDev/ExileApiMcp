@@ -35,12 +35,35 @@ Don't name a byte from one sample. Each step below produces counts and counterex
 ## Worked example: PoE1 stash tab affinities (`ServerStashTabOffsets`)
 - **`Affinity` (+63, UInt32) is a bit mask; a tab can hold several** (1, 2 and 4 seen).
 - **Each affinity belongs to one tab only.** Ticking it elsewhere clears it from the previous tab, as `watch_memory` and the snapshots showed.
-- **The bit index is the game's tab-type id.**
-  - On all 9 tabs with a dedicated type, affinity bit = `TabType` value (population check): Currency 3, Unique 4, Divination 6, Essence 8, Delve 12, Blight 13, Metamorph 14, Delirium 15, Gem 18.
-  - From tabs named after their affinity: Fragment 9, Flask 17.
-  - The HUD's `InventoryTabType` enum names bits 7 and 16 "Quad" and "Folder", which are not affinities, and has no name for 11 or 21. Name those with the one-variable experiment.
+- **All 17 PoE1 affinities, by bit** (verified 2026-10-08):
+
+  | Bit | Affinity | Evidence |
+  |---|---|---|
+  | 3 | Currency | population: `TabType` 3 |
+  | 4 | Unique | population: `TabType` 4 |
+  | 5 | Map | experiment |
+  | 6 | Divination Card | population: `TabType` 6 |
+  | 7 | Settlers | experiment |
+  | 8 | Essence | population: `TabType` 8 |
+  | 9 | Fragment | tab named Fragments |
+  | 10 | Sanctum | experiment |
+  | 11 | Mercenary | experiment |
+  | 12 | Delve | population: `TabType` 12 |
+  | 13 | Blight | population: `TabType` 13 |
+  | 14 | Ultimatum | experiment |
+  | 15 | Delirium | population: `TabType` 15 |
+  | 16 | Breach | experiment |
+  | 17 | Flask | tab named Flask |
+  | 18 | Gem | population: `TabType` 18 |
+  | 21 | Ritual | experiment |
+
+  - **How the experiment ran:** `memory_snapshot` of all tabs, the user ticked one affinity on a Normal tab and confirmed, `memory_compare`. Each step changed exactly one Affinity bit.
+  - **Bits 19 and 20 are unused.**
+  - **Don't name bits from the HUD's `InventoryTabType` enum.** It matches only where a dedicated tab type exists: bit 7 is "Quad" there (Settlers in game), 14 is "Metamorph" (the game's Ultimatum affinity; ticking Ultimatum took bit 14 from a Metamorph-type tab), and 16 is "Folder" (Breach).
+- **A Normal (non-premium, `TabType` 0) tab can hold affinities:** one held 7 at once.
+- **Unexplained:** unmapped bytes +40 and +62 changed on a tab whose affinity didn't change, during the first experiment step. Something else is stored there.
 - **`Flags` (+61):**
-  - bit 6 = has an affinity (11 vs 60 tabs, 0 counterexamples, any number of affinities);
+  - bit 6 = has an affinity (11 vs 60 tabs, 0 counterexamples, any number of affinities). It was also seen clearing when a tab's last affinity was taken;
   - bit 1 = tab has a type (`TabType` ≠ 0; 63 vs 8, 0 counterexamples).
   - Neither is named by the HUD.
 - **How it was found:** `watch_memory path=...PlayerStashTabs[33] size=96 durationMs=60000` while the user ticked and confirmed affinities in the tab's settings. The change lands only after the confirm button (the server applies it).
