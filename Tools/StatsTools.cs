@@ -31,6 +31,9 @@ public static class StatsTools
 
     [McpServerTool(Name = "show_player_stats", Title = "Show player stats", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [McpAppUi(ResourceUri = PlayerStatsApp.ResourceUri)]
+    // Legacy flat key, alongside the nested _meta.ui.resourceUri, as the official ext-apps servers send it
+    // (registerAppTool): hosts built against older MCP Apps drafts look for this one.
+    [McpMeta("ui/resourceUri", PlayerStatsApp.ResourceUri)]
     [Description("Show the player's stats: vitals, resistances, pinned stats and a searchable stat table. Opens an " +
                  "interactive panel in clients that support MCP Apps (synced with the in-game HUD panel); other clients " +
                  "get a text summary.")]
@@ -82,6 +85,7 @@ public static class StatsTools
 
     [McpServerTool(Name = "stats_ui_state", Title = "Stats view state (poll)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [McpAppUi(ResourceUri = PlayerStatsApp.ResourceUri, Visibility = [McpUiToolVisibility.App])]
+    [McpMeta("ui/resourceUri", PlayerStatsApp.ResourceUri)]
     [Description("Shared stats view state plus live vitals. With sinceRev equal to the current rev, returns only " +
                  "{rev, unchanged:true, vitals} - cheap enough to poll every second.")]
     public static async Task<CallToolResult> StatsUiState(BridgeRegistry bridges,
