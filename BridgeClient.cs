@@ -98,7 +98,8 @@ public sealed class BridgeClient : IDisposable
             request["params"] = parameters;
 
         // Attach auth token
-        if (_authToken != null && method != "ping")
+        // Every bridge method requires the token (bridge protocol v2), including ping.
+        if (_authToken != null)
             request["token"] = _authToken;
 
         var json = request.ToString(Formatting.None);
