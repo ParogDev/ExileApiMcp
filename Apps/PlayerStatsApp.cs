@@ -17,7 +17,9 @@ public static class PlayerStatsApp
     public const string ResourceUri = "ui://exile/player-stats";
 
     [McpServerResource(UriTemplate = ResourceUri, Name = "player-stats-ui", Title = "Player stats", MimeType = McpApps.HtmlMimeType)]
-    [McpMeta("ui", """{"prefersBorder":true}""")]
+    // JsonValue, not the (name, value) constructor: that one emits the JSON as a *string*
+    // ("ui":"{\"prefersBorder\":true}"), and hosts expect _meta.ui to be an object.
+    [McpMeta("ui", JsonValue = """{"prefersBorder":true}""")]
     [Description("Interactive player stats panel, synced with the in-game HUD panel.")]
     public static string GetUi() => LoadEmbedded("ui/player-stats.html") ?? Placeholder;
 
