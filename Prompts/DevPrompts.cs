@@ -57,5 +57,35 @@ public static class DevPrompts
            may be missing from the dictionary: say so rather than assuming the 75% default silently.
         """;
 
+    [McpServerPrompt(Name = "probe_memory", Title = "Find what a memory field means, with evidence")]
+    [Description("Reach an empirical answer about unknown or suspect memory (a new member, a flag bit, a moved field): " +
+                 "observe, check across a population, run a one-variable experiment, hunt counterexamples, confirm in Ghidra.")]
+    public static string ProbeMemory(
+        [Description("Walker path to the object (or a collection of them), e.g. GameController.IngameState.ServerData.PlayerStashTabs")] string path,
+        [Description("What you want to find out, e.g. 'which bit marks a tab with an affinity'")] string question,
+        [Description("'poe1' or 'poe2' (optional)")] string? game = null) => $"""
+        Answer "{question}" for `{path}`{GameText(game)} with evidence: counts and counterexamples, not one sample.
+        Everything here only reads the game. Changes in game are the user's to make: ask for exactly one at a time.
+
+        1. Observe. memory_layout path=<one object> (add extend=64 to see past the struct) shows what the HUD maps,
+           the unmapped ranges and the structure-looking data in them. Form a hypothesis: offset, width, meaning.
+        2. Population. If `{path}` is (or has) a collection, run memory_correlate on it with labels for the properties
+           you already know (e.g. ["TabType","Affinity","Name"]). Accept a bit only with 0 counterexamples and at
+           least 3 items on each side. Read the near-misses: their counterexample items often name the real rule.
+           Results within a label's own storage are expected.
+        3. Experiment. memory_snapshot name=baseline (collections: labels=["Name", ...] so items match across
+           snapshots). Ask the user to change ONE thing (and to confirm it in game if the game needs that), then
+           memory_snapshot name=on. Ask them to undo it, then memory_snapshot name=off. memory_compare
+           names=[baseline,on,off]: the answer flips on and back, and nothing else does. For fast state, use
+           watch_memory while they act.
+        4. Counterexamples. Think of states the population lacks (several flags at once, empty, max) and test them
+           the same way before generalising.
+        5. Confirm in code when it matters. Results carry 'ghidra' addresses. A vtable at +0 leads to the
+           constructor (ghidra get_xrefs_to, then decompile_function), which writes every member in order. Code that
+           tests the bit names its meaning.
+        6. Report the finding with its evidence (counts, which experiment, counterexamples tried) and add it to the
+           knowledge pack shared/memory-mapping if it's new. Remind the user of any in-game changes to undo.
+        """;
+
     private static string GameText(string? game) => string.IsNullOrWhiteSpace(game) ? "" : $" ({game})";
 }
