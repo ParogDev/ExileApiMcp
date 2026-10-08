@@ -289,9 +289,11 @@ export interface ExperimentPreset {
 /** experiment_presets {game?}. */
 export interface PresetsResult {
   presets: ExperimentPreset[];
-  /** Experiment records on disk, newest first. */
-  records: { name: string; updated: string }[];
+  /** Experiment records on disk, newest first, with how many steps each holds. */
+  records: ExperimentRecordInfo[];
 }
+
+export interface ExperimentRecordInfo { name: string; updated: string; steps?: number }
 
 /** One change await_change saw between the baseline and the settled state. */
 export interface ExperimentChange {
@@ -323,6 +325,8 @@ export type AwaitResult =
 /** One step of an experiment record on disk. */
 export interface RecordStep {
   label: string;
+  /** What the user was told to do (absent on records from before the field existed). */
+  instruction?: string | null;
   at: string;
   game?: Game;
   changedAfterMs: number;
@@ -339,7 +343,46 @@ export interface SummaryResult {
   record: ExperimentRecord;
 }
 
-/** The in-game agent guide card (guide with no arguments returns it). */
+// ── Non-blocking steps (experiment_step_start / experiment_status / experiment_step_cancel) ──
+
+/** experiment_step_start: the step runs in the server; poll experiment_status. */
+export interface StepStarted { started: true; experiment: string; label: string; startedAt: string; timeoutMs: number; next?: string }
+
+/** starting -> waiting -> detected -> captured | failed | cancelled | error; stale when the server process died mid-step. */
+export type StepStatus = "starting" | "waiting" | "detected" | "captured" | "failed" | "cancelled" | "error" | "stale";
+
+/** The current or last step of an experiment, as experiment_status reports it (the server's .inflight.json). */
+export interface StepState {
+  experiment: string;
+  label: string;
+  instruction?: string | null;
+  step?: number | null;
+  steps?: number | null;
+  /** ISO, server clock; `elapsedMs` (while running) is the server's own measure, so the countdown needn't trust clocks. */
+  startedAt: string;
+  timeoutMs: number;
+  status: StepStatus | string;
+  watch?: string[];
+  updatedAt?: string;
+  elapsedMs?: number;
+  finishedAt?: string;
+  /** The full await_change result once captured or failed. */
+  result?: AwaitResult;
+  error?: string;
+}
+
+/** experiment_status {experiment}. */
+export interface StatusResult {
+  experiment: string;
+  running: boolean;
+  recordedSteps: number;
+  step?: StepState;
+}
+
+/** experiment_step_cancel {experiment}. */
+export interface StepCancelled { experiment: string; cancelled: boolean; note?: string }
+
+/** The in-game agent guide card (guide_state, or guide with no arguments, returns it). */
 export type GuideStatus = "idle" | "waiting" | "detected" | "settling" | "captured" | "failed" | "info" | "done";
 
 export interface GuideState {

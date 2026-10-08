@@ -4,11 +4,12 @@
 
 import type { Toast } from "../sync";
 import { addrPlus, bytesFromHex, isPathText, parseAddress, pathLabel, regionFromLayout, regionFromRead, shortAddr, type Region } from "./bytes";
-import type { AwaitResult, ChangedRange, CompareResult, CorrelateResult, ExperimentPreset, FindingStatus, FindingsResult, Game, GuideState, LayoutResult, MemoryError, PopulationResult, PresetsResult, ReadResult, SnapshotList, SnapshotSaved, SummaryResult, VerifyResult, WatchResult, WhereResult } from "./types";
+import type { AwaitResult, ChangedRange, CompareResult, CorrelateResult, ExperimentPreset, ExperimentRecordInfo, FindingStatus, FindingsResult, Game, GuideState, LayoutResult, MemoryError, PopulationResult, PresetsResult, ReadResult, SnapshotList, SnapshotSaved, StatusResult, StepCancelled, StepStarted, StepState, SummaryResult, VerifyResult, WatchResult, WhereResult } from "./types";
 import { asFieldAccess, classifyCodeError, codeKey, type CodeQuery } from "./codeModel";
-import { evidenceRows, guideExperiment, isAgentRun, labelCounts, undoList } from "./runModel";
+import { evidenceRows, guideExperiment, labelCounts, stepOver, undoList } from "./runModel";
 
 export type CallTool = (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; isError: boolean; text?: string }>;
+type ToolOutcome = { data: unknown } | { error: MemoryError };
 
 export const WATCH_MS = 5000;
 export const WATCH_INTERVAL_MS = 100;
@@ -120,13 +121,20 @@ export interface ExpState {
   saveError?: string;
 }
 
-/** How long the app waits for the user's action by default (the host's request timeout is ~60 s, so never more than 45). */
-export const RUN_TIMEOUTS_MS = [20_000, 30_000, 45_000];
-export const RUN_DEFAULT_TIMEOUT_MS = 45_000;
+/**
+ * How long a step waits for the user's action. The step runs in the server (experiment_step_start) and the app only
+ * polls, so the host's request timeout no longer caps it: up to 5 minutes, 2 by default.
+ */
+export const RUN_TIMEOUTS_MS = [30_000, 60_000, 120_000, 300_000];
+export const RUN_DEFAULT_TIMEOUT_MS = 120_000;
 /** Each preset action is asked for this many times before "finish" stops nudging. */
 export const RUN_TARGET_REPEATS = 2;
-export const GUIDE_POLL_MS = 2500;
-export const SUMMARY_POLL_MS = 4000;
+/** experiment_status every second while the runner is open; guide_state every other tick; the record every fourth. */
+export const STATUS_POLL_MS = 1000;
+export const GUIDE_POLL_TICKS = 2;
+export const SUMMARY_POLL_TICKS = 4;
+/** In the pick phase, the records list every 5 s: a record growing on its own is someone else's run. */
+export const RECORDS_POLL_TICKS = 5;
 /** The "Before you start" checklist. The preset's own setup line is the first item. */
 export const RUN_CHECKS = ["setup", "focus", "one-action"] as const;
 
@@ -135,15 +143,15 @@ export type RunPhase = "pick" | "setup" | "run" | "done";
 export interface RunAttempt {
   at: number;
   label: string;
-  /** The server's answer, or why the call failed (host timeout, bridge down). */
-  result: AwaitResult | { error: string };
+  /** The step's result, or why it ended without one (cancelled; the server lost it; the start call failed). */
+  result: AwaitResult | { error: string } | { cancelled: true };
 }
 
 /** The guided-experiment runner: a preset run from the app step by step, or the agent's run followed read-only. */
 export interface RunState {
   presetsLoading: boolean;
   presets?: ExperimentPreset[];
-  records?: { name: string; updated: string }[];
+  records?: ExperimentRecordInfo[];
   presetsError?: string;
   phase: RunPhase;
   preset?: ExperimentPreset;
@@ -153,23 +161,30 @@ export interface RunState {
   timeoutMs: number;
   /** Index into preset.steps of the action the card shows. */
   stepIndex: number;
-  /** The in-flight await_change. */
-  waiting?: { label: string; startedAt: number; timeoutMs: number; step: number; steps: number };
-  /** Every await_change this session, newest last. */
+  /** The step this app started and hasn't seen finish yet. `startedAt` is the server's ISO stamp (matches experiment_status). */
+  waiting?: { label: string; startedAt: string; timeoutMs: number; step: number; steps: number; cancelling?: boolean };
+  /** Every step this session, newest last. */
   attempts: readonly RunAttempt[];
+  /** experiment_status for the chosen experiment: the step the server is running (ours or the agent's), or the last one. */
+  step?: StepState;
+  /** Client-clock time that step started (from the server's elapsedMs), for the countdown. */
+  stepSince?: number;
+  /** Whether the server is running a step of this experiment right now. */
+  stepRunning?: boolean;
+  /** How many steps the record held at the last status poll; growth this app didn't cause means someone else is running it. */
+  recordedSteps?: number;
+  statusAt?: number;
   summary?: SummaryResult;
   summaryLoading: boolean;
   summaryError?: string;
   summaryAt?: number;
-  /** The in-game card, polled while the runner is open. */
+  /** The in-game card, polled read-only (guide_state) while the runner is open. */
   guide?: GuideState;
   guideAt?: number;
   /** When the current guide instruction appeared, as far as this app saw it. */
   guideSince?: number;
   /** Set while the agent (not this app) is running an experiment: the record name. */
   following?: string;
-  /** Record length when the agent's run was last read; a longer record means a new capture to show. */
-  followSteps?: number;
   /** Whether the "done" card was pushed to the in-game guide for the current run. */
   markedDone?: boolean;
 }
@@ -234,6 +249,7 @@ export class MemoryStore {
   private runTimer?: ReturnType<typeof setInterval>;
   private runPollBusy = false;
   private runPollTick = 0;
+  private startingStep = false;
   private viewSeq = 0;
   private toastSeq = 0;
   private requested?: Target;
@@ -253,8 +269,8 @@ export class MemoryStore {
   // ── Lifecycle ────────────────────────────────────────────────────
 
   /**
-   * Arguments of the tool that opened the app: show_memory_view {path?, address?, type?, game?}. `mode` and `preset` /
-   * `experiment` are hints the dev harness passes to open the runner directly; the server ignores them today.
+   * Arguments of the tool that opened the app: show_memory_view {path?, address?, type?, mode?, preset?, experiment?, game?}.
+   * `mode` opens a tab; with experiments, `preset` opens that preset's setup and `experiment` a record's summary.
    */
   setToolInput(args: Record<string, unknown> | undefined) {
     const game = args?.game;
@@ -427,11 +443,8 @@ export class MemoryStore {
     else if (this.snap.selection && next.region && this.snap.selection.off >= next.region.size) this.set({ selection: undefined });
   }
 
-  /**
-   * One tool call through the host. `noGame` leaves the game argument out (tools without one). `soft`: a thrown error
-   * (host timeout on a long await_change) is reported but does not mark the bridge offline.
-   */
-  private async tool(name: string, args: Record<string, unknown>, opts: { noGame?: boolean; soft?: boolean } = {}): Promise<{ data: unknown } | { error: MemoryError }> {
+  /** One tool call through the host. `noGame` leaves the game argument out (tools without one). */
+  private async tool(name: string, args: Record<string, unknown>, opts: { noGame?: boolean } = {}): Promise<ToolOutcome> {
     try {
       const r = await this.call(name, { ...args, ...(this.gameArg && !opts.noGame ? { game: this.gameArg } : {}) });
       this.set({ calls: this.snap.calls + 1 });
@@ -444,7 +457,6 @@ export class MemoryStore {
       return { data: r.data };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (opts.soft) { this.set({ calls: this.snap.calls + 1 }); return { error: { error: "error", message: msg } }; }
       this.set({ conn: "offline", lastError: msg, calls: this.snap.calls + 1 });
       return { error: { error: "offline", message: msg } };
     }
@@ -713,7 +725,7 @@ export class MemoryStore {
     if (view === "run" && !this.snap.run.presets && !this.snap.run.presetsLoading) void this.loadPresets();
   }
 
-  // ── Guided experiments (experiment_presets / await_change / experiment_summary / guide) ──
+  // ── Guided experiments (experiment_presets / experiment_step_start / experiment_status / experiment_summary / guide) ──
 
   async loadPresets() {
     this.patchRun({ presetsLoading: true, presetsError: undefined });
@@ -722,34 +734,55 @@ export class MemoryStore {
     const data = r.data as PresetsResult;
     const presets = data.presets ?? [];
     const run: Partial<RunState> = { presetsLoading: false, presets, records: data.records ?? [] };
-    // Opened with a preset or record name (harness hint / future show_memory_view argument): go straight there.
+    // Opened with a preset or record name (show_memory_view mode=experiments preset=… / experiment=…): go straight there.
     const { experiment, phase, preset } = this.snap.run;
     if (!preset && experiment) {
-      const p = presets.find((x) => x.id === experiment) ?? presets.find((x) => experiment.startsWith(x.id));
+      const p = this.presetFor(experiment, presets);
       if (phase === "done") { run.preset = p; void this.loadSummary(experiment); }
       else if (p) { run.preset = p; run.phase = "setup"; run.checks = new Set(); run.stepIndex = 0; if (data.records?.some((x) => x.name === experiment)) void this.loadSummary(experiment); }
     }
     this.patchRun(run);
   }
 
+  /** The preset a record name belongs to: its id, or the id it was derived from ("stash-switch-tab-3"). */
+  private presetFor(experiment: string, presets = this.snap.run.presets ?? []): ExperimentPreset | undefined {
+    return presets.find((x) => x.id === experiment) ?? presets.find((x) => experiment.startsWith(x.id + "-") || experiment.startsWith(x.id));
+  }
+
+  /**
+   * The records list again, quietly (no loading state). In the pick phase a record that grew, or appeared, since the
+   * last look is a run this app didn't start: follow it.
+   */
+  private async refreshRecords() {
+    const before = this.snap.run.records;
+    const r = await this.tool("experiment_presets", {});
+    if ("error" in r) return;
+    const data = r.data as PresetsResult;
+    const records = data.records ?? [];
+    this.patchRun({ records, presets: data.presets ?? this.snap.run.presets });
+    if (!before || this.snap.run.phase !== "pick") return;
+    const grown = records.find((x) => { const prev = before.find((y) => y.name === x.name); return prev ? (x.steps ?? 0) > (prev.steps ?? 0) : (x.steps ?? 0) > 0; });
+    if (grown) this.followRun(grown.name);
+  }
+
   /** Pick a preset: the setup checklist comes next. The record name defaults to the preset id. */
   pickPreset(id: string) {
     const preset = this.snap.run.presets?.find((p) => p.id === id);
     if (!preset) return;
-    this.patchRun({ phase: "setup", preset, experiment: id, checks: new Set(), stepIndex: 0, attempts: [], summary: undefined, summaryError: undefined, markedDone: false, following: undefined });
+    this.patchRun({ phase: "setup", preset, experiment: id, checks: new Set(), stepIndex: 0, attempts: [], summary: undefined, summaryError: undefined, markedDone: false, following: undefined, ...NO_STEP });
     if (this.snap.run.records?.some((r) => r.name === id)) void this.loadSummary(id);
   }
 
   /** Read a record's summary without running anything (the "finish" view of an earlier run). */
   openRecord(name: string) {
-    const preset = this.snap.run.presets?.find((p) => p.id === name) ?? this.snap.run.presets?.find((p) => name.startsWith(p.id));
-    this.patchRun({ phase: "done", preset, experiment: name, attempts: [], summary: undefined, summaryError: undefined, markedDone: true, following: undefined });
+    const preset = this.presetFor(name);
+    this.patchRun({ phase: "done", preset, experiment: name, attempts: [], summary: undefined, summaryError: undefined, markedDone: true, following: undefined, ...NO_STEP });
     void this.loadSummary(name);
   }
 
   setExperimentName(name: string) {
     const experiment = name.trim();
-    this.patchRun({ experiment, summary: this.snap.run.summary?.experiment === experiment ? this.snap.run.summary : undefined });
+    this.patchRun({ experiment, summary: this.snap.run.summary?.experiment === experiment ? this.snap.run.summary : undefined, ...NO_STEP });
     if (/^[\w.-]{1,64}$/.test(experiment) && this.snap.run.records?.some((r) => r.name === experiment)) void this.loadSummary(experiment);
   }
 
@@ -780,15 +813,17 @@ export class MemoryStore {
     this.patchRun({ stepIndex: ((i % n) + n) % n });
   }
 
-  /** How many steps the record holds (server truth when read, else what this session captured). */
+  /** How many steps the record holds (the last status poll, else the summary, else what this session captured). */
   private recordedSteps(): number {
     const r = this.snap.run;
+    if (r.recordedSteps !== undefined) return r.recordedSteps;
     return r.summary?.experiment === r.experiment ? r.summary.record.steps.length : r.attempts.filter((a) => "changed" in a.result && a.result.changed).length;
   }
 
   /**
-   * One step: await_change blocks until the user acts or the timeout passes, and drives the in-game card itself. The
-   * host's own request timeout is about 60 s, so the app never asks for more than 45 s; a longer wait is the agent's.
+   * One step: experiment_step_start returns at once and the server waits (up to timeoutMs) for the user's action,
+   * driving the in-game card; the status poll (runPoll) carries the step's progress into the card and its result into
+   * the attempts when it ends.
    */
   async runStep() {
     const r = this.snap.run;
@@ -796,25 +831,46 @@ export class MemoryStore {
     if (!r.preset || !action || r.waiting || r.following) return;
     const step = this.recordedSteps() + 1;
     const steps = plannedSteps(r.preset.steps.length, step);
-    const startedAt = Date.now();
-    this.patchRun({ waiting: { label: action.label, startedAt, timeoutMs: r.timeoutMs, step, steps }, guideSince: startedAt });
-    const res = await this.tool("await_change", {
-      experiment: r.experiment, label: action.label, instruction: action.instruction, watch: r.preset.watch,
-      step, steps, timeoutMs: r.timeoutMs,
-    }, { soft: true });
-    const cur = this.snap.run;
-    if (cur.waiting?.startedAt !== startedAt) return;
-    const attempt: RunAttempt = "error" in res ? { at: Date.now(), label: action.label, result: { error: res.error.message ?? res.error.error } } : { at: Date.now(), label: action.label, result: res.data as AwaitResult };
-    this.patchRun({ waiting: undefined, attempts: [...cur.attempts, attempt] });
+    // A status poll landing between the start and our bookkeeping must not take our own step for someone else's.
+    this.startingStep = true;
+    let res: ToolOutcome;
+    try {
+      res = await this.tool("experiment_step_start", {
+        experiment: r.experiment, label: action.label, instruction: action.instruction, watch: r.preset.watch,
+        step, steps, timeoutMs: r.timeoutMs,
+      });
+    } finally { this.startingStep = false; }
+    if (this.snap.run.experiment !== r.experiment || this.snap.run.waiting) return;
     if ("error" in res) {
-      // The server keeps waiting after a host timeout and still records the step when the user acts: the record poll shows it.
       const msg = res.error.message ?? res.error.error;
-      this.toast("error", /time/i.test(msg) ? "The host stopped waiting; if you act now the step still lands in the record" : msg);
+      // "Already running" means someone else's step: the next status poll follows it rather than fighting it.
+      this.toast("error", msg);
+      return;
     }
-    void this.loadSummary(r.experiment);
+    const started = res.data as StepStarted;
+    const now = Date.now();
+    const pending: StepState = { experiment: r.experiment, label: action.label, instruction: action.instruction, step, steps, startedAt: started.startedAt, timeoutMs: started.timeoutMs, status: "starting" };
+    this.patchRun({ waiting: { label: action.label, startedAt: started.startedAt, timeoutMs: started.timeoutMs, step, steps }, step: pending, stepSince: now, stepRunning: true, guideSince: now });
+    // Don't wait a whole tick for the first "waiting" status.
+    setTimeout(() => void this.runPoll(), 250);
   }
 
-  /** The last await_change's outcome, for the card and the results. */
+  /** Stop the step this app started (experiment_step_cancel). Nothing is recorded; the status poll shows "cancelled". */
+  async cancelStep() {
+    const r = this.snap.run;
+    if (!r.waiting || r.waiting.cancelling) return;
+    this.patchRun({ waiting: { ...r.waiting, cancelling: true } });
+    const res = await this.tool("experiment_step_cancel", { experiment: r.experiment }, { noGame: true });
+    const cur = this.snap.run;
+    if (!cur.waiting || cur.waiting.startedAt !== r.waiting.startedAt) return;
+    if ("error" in res) { this.toast("error", res.error.message ?? res.error.error); this.patchRun({ waiting: { ...cur.waiting, cancelling: false } }); return; }
+    const c = res.data as StepCancelled;
+    // Not running in the server any more: it finished (the poll shows the result) or the server lost it (the poll ends it as stale).
+    if (!c.cancelled) this.toast("info", c.note ?? "No step of this experiment is running");
+    setTimeout(() => void this.runPoll(), 250);
+  }
+
+  /** The last step's outcome, for the card and the results. */
   get lastAttempt(): RunAttempt | undefined {
     const a = this.snap.run.attempts;
     return a.length ? a[a.length - 1] : undefined;
@@ -873,7 +929,7 @@ export class MemoryStore {
   /** Back to the presets (the record on disk stays). */
   resetRun() {
     if (this.snap.run.waiting) return;
-    this.patchRun({ phase: "pick", preset: undefined, experiment: "", checks: new Set(), stepIndex: 0, attempts: [], summary: undefined, summaryError: undefined, following: undefined, markedDone: false });
+    this.patchRun({ phase: "pick", preset: undefined, experiment: "", checks: new Set(), stepIndex: 0, attempts: [], summary: undefined, summaryError: undefined, following: undefined, markedDone: false, ...NO_STEP });
     void this.loadPresets();
   }
 
@@ -884,8 +940,22 @@ export class MemoryStore {
     this.patchRun({ phase: "setup", checks: new Set(), stepIndex: 0, attempts: [], markedDone: false });
   }
 
+  /** Stop following and go back to the presets; the agent's run itself continues. */
   stopFollowing() {
-    this.patchRun({ following: undefined, followSteps: undefined });
+    this.patchRun({ phase: "pick", preset: undefined, experiment: "", following: undefined, attempts: [], summary: undefined, summaryError: undefined, markedDone: false, ...NO_STEP });
+    void this.loadPresets();
+  }
+
+  /** Someone else (the agent) is running this experiment: the same screens follow it read-only. */
+  private followRun(name: string) {
+    const r = this.snap.run;
+    if (r.following === name || r.waiting) return;
+    this.patchRun({
+      following: name, experiment: name, phase: "run", attempts: [], markedDone: false,
+      summary: r.summary?.experiment === name ? r.summary : undefined,
+      preset: r.preset && (r.preset.id === name || name.startsWith(r.preset.id)) ? r.preset : this.presetFor(name),
+      ...(r.experiment === name ? {} : NO_STEP),
+    });
   }
 
   /** Context for the model: the run so far (phase, evidence, undo). */
@@ -901,57 +971,91 @@ export class MemoryStore {
     return { text, structured: { experiment: r.experiment, phase: r.phase, following: r.following, preset: r.preset?.id, evidence: rows.map((x) => ({ label: x.label, repeats: x.repeats, always: x.always.map((k) => k.full), sometimes: x.sometimes.map((k) => k.full) })), undo: undo.map((u) => u.text) } };
   }
 
-  // Polling: the in-game card (so the app's card mirrors it, including "change seen" while the app's own await_change
-  // blocks) and the record (so a run the agent drives shows up here step by step). Only while the runner is visible.
+  // Polling, only while the runner is visible. Every second: experiment_status for the chosen experiment (the step the
+  // server is running, ours or the agent's, and the record's length). Every other tick: guide_state, read-only, so the
+  // card mirrors the in-game one (and names a candidate record in the pick phase). Every fourth: the record itself.
   private setRunPolling(on: boolean) {
     clearInterval(this.runTimer);
     this.runTimer = undefined;
-    if (on) { this.runTimer = setInterval(() => void this.runPoll(), GUIDE_POLL_MS); void this.runPoll(); }
+    if (on) { this.runTimer = setInterval(() => void this.runPoll(), STATUS_POLL_MS); void this.runPoll(); }
   }
 
   private async runPoll() {
     if (this.runPollBusy || document.hidden || this.snap.conn === "offline") return;
     this.runPollBusy = true;
-    this.runPollTick++;
+    const tick = ++this.runPollTick;
     try {
-      const g = await this.tool("guide", {});
-      if (!("error" in g) && g.data && typeof g.data === "object" && "status" in (g.data as object)) {
-        const guide = g.data as GuideState;
-        const prev = this.snap.run.guide;
-        const changed = !prev || prev.rev !== guide.rev;
-        const newInstruction = !prev || prev.instruction !== guide.instruction || (prev.status !== guide.status && (guide.status === "waiting" || guide.status === "failed"));
-        const r = this.snap.run;
-        const patch: Partial<RunState> = { guide, guideAt: Date.now() };
-        if (newInstruction && !r.waiting) patch.guideSince = Date.now();
-        // The agent's run: the guide card names an experiment this app isn't waiting on.
-        const agent = isAgentRun(guide, r.experiment, !!r.waiting);
-        const exp = guideExperiment(guide);
-        if (agent && exp && r.following !== exp) {
-          patch.following = exp; patch.experiment = exp; patch.phase = "run"; patch.attempts = []; patch.summary = undefined; patch.followSteps = undefined;
-          patch.preset = r.presets?.find((p) => p.id === exp) ?? r.presets?.find((p) => exp.startsWith(p.id));
-        }
-        if (changed || patch.following) this.patchRun(patch);
-        else if (patch.guideSince) this.patchRun({ guideSince: patch.guideSince });
-      }
+      const r0 = this.snap.run;
+      if (tick % GUIDE_POLL_TICKS === 0 || !r0.guide) await this.pollGuide();
+      const r1 = this.snap.run;
+      // Which experiment to ask about: the one chosen here, or, in the pick phase, the one the in-game card names.
+      const name = r1.following ?? (r1.phase !== "pick" ? r1.experiment : guideExperiment(r1.guide));
+      if (name && /^[\w.-]{1,64}$/.test(name)) await this.pollStatus(name);
       const r = this.snap.run;
-      const name = r.following ?? (r.phase !== "pick" ? r.experiment : undefined);
-      // The record, every other tick, or at once when the card just reported a capture.
-      const captured = r.guide?.status === "captured" && r.summary && r.guideAt && r.summaryAt && r.guideAt > r.summaryAt;
-      if (name && !r.waiting && !r.summaryLoading && (this.runPollTick % Math.round(SUMMARY_POLL_MS / GUIDE_POLL_MS) === 0 || captured || !r.summary)) {
-        const before = r.summary?.record.steps.length ?? 0;
-        await this.loadSummary(name);
-        const after = this.snap.run.summary?.record.steps.length ?? 0;
-        if (r.following && after !== (r.followSteps ?? before)) this.patchRun({ followSteps: after });
-        // Steps arriving without this app asking for them: the agent is running the experiment.
-        if (!r.following && r.phase === "run" && after > before && !this.snap.run.waiting && r.summaryAt) this.patchRun({ following: name, followSteps: after });
-      }
-      if (r.following && r.guide && (r.guide.status === "done" || r.guide.status === "idle") && guideExperiment(r.guide) === r.following && r.guideAt && r.summaryAt && r.summaryAt >= r.guideAt) {
-        // The agent finished: show the finish view of its record.
+      const target = r.following ?? (r.phase !== "pick" ? r.experiment : undefined);
+      // The record: every fourth tick, at once when the step count moved past the summary, or when there is none yet.
+      const stale = !!r.summary && r.summary.experiment === target && r.recordedSteps !== undefined && r.recordedSteps !== r.summary.record.steps.length;
+      // No record on disk yet (a run before its first capture) is not an error worth asking about.
+      const haveRecord = r.recordedSteps === undefined ? !!r.summary : r.recordedSteps > 0;
+      if (target && haveRecord && !r.summaryLoading && (tick % SUMMARY_POLL_TICKS === 0 || stale || !r.summary)) await this.loadSummary(target);
+      if (r.phase === "pick" && tick % RECORDS_POLL_TICKS === 0 && !r.presetsLoading) await this.refreshRecords();
+      const f = this.snap.run;
+      if (f.following && f.phase === "run" && !f.stepRunning && f.guide && (f.guide.status === "done" || f.guide.status === "idle") && (guideExperiment(f.guide) ?? f.following) === f.following
+        && f.guideAt && f.summaryAt && f.summaryAt >= f.guideAt && f.summary?.experiment === f.following) {
+        // The agent finished (its card says done, no step running, record read since): the finish view of its record.
         this.patchRun({ phase: "done", markedDone: true });
       }
     } finally {
       this.runPollBusy = false;
     }
+  }
+
+  private async pollGuide() {
+    const g = await this.tool("guide_state", {});
+    if ("error" in g || !g.data || typeof g.data !== "object" || !("status" in (g.data as object))) return;
+    const guide = g.data as GuideState;
+    const prev = this.snap.run.guide;
+    const changed = !prev || prev.rev !== guide.rev;
+    const newInstruction = !prev || prev.instruction !== guide.instruction || (prev.status !== guide.status && (guide.status === "waiting" || guide.status === "failed"));
+    const patch: Partial<RunState> = { guide, guideAt: Date.now() };
+    if (newInstruction && !this.snap.run.waiting) patch.guideSince = Date.now();
+    if (changed || patch.guideSince) this.patchRun(patch);
+  }
+
+  /** experiment_status: the step's progress into the card, its result into the attempts, and someone else's run into follow-along. */
+  private async pollStatus(name: string) {
+    const res = await this.tool("experiment_status", { experiment: name }, { noGame: true });
+    if ("error" in res) return;
+    const st = res.data as StatusResult;
+    const r = this.snap.run;
+    const now = Date.now();
+    const sameExperiment = r.following === name || (r.phase !== "pick" && r.experiment === name);
+    const step = st.step;
+    const patch: Partial<RunState> = sameExperiment ? { statusAt: now, stepRunning: st.running, recordedSteps: st.recordedSteps } : {};
+    if (sameExperiment && step) {
+      patch.step = step;
+      // The countdown runs on the client clock from the server's own elapsed time; a finished step keeps what it had.
+      patch.stepSince = step.elapsedMs !== undefined ? now - step.elapsedMs : r.step?.startedAt === step.startedAt && r.stepSince ? r.stepSince : Date.parse(step.startedAt);
+    }
+    const ours = !!r.waiting && !!step && step.startedAt === r.waiting.startedAt;
+    if (r.waiting && sameExperiment && (ours ? stepOver(step) : !st.running)) {
+      // Our step ended (or the server no longer knows it): its outcome becomes the attempt.
+      const at = step?.finishedAt ? Date.parse(step.finishedAt) : now;
+      const result: RunAttempt["result"] = !ours || !step ? { error: "The server no longer reports this step (was it restarted?). Start it again." }
+        : step.status === "cancelled" ? { cancelled: true }
+        : step.result ? step.result
+        : { error: step.error ?? (step.status === "stale" ? "The server stopped reporting this step (it was restarted mid-step)." : "The step ended without a result.") };
+      patch.waiting = undefined;
+      patch.attempts = [...r.attempts, { at, label: r.waiting.label, result }];
+      this.patchRun(patch);
+      if (st.recordedSteps > 0) void this.loadSummary(name);
+      return;
+    }
+    if (Object.keys(patch).length) this.patchRun(patch);
+    // A step running that this app didn't start, or steps landing in the record without it asking: someone else's run.
+    const foreign = st.running && !r.waiting && !this.startingStep;
+    const grew = sameExperiment && !r.waiting && r.recordedSteps !== undefined && st.recordedSteps > r.recordedSteps;
+    if ((foreign || grew) && r.following !== name) this.followRun(name);
   }
 
   // ── Population ───────────────────────────────────────────────────
@@ -1103,6 +1207,9 @@ export class MemoryStore {
   }
   dismiss(id: number) { this.set({ toasts: this.snap.toasts.filter((t) => t.id !== id) }); }
 }
+
+/** Forget what experiment_status said about the previous experiment (switching records, presets, or back to the picker). */
+const NO_STEP: Pick<RunState, "step" | "stepSince" | "stepRunning" | "recordedSteps" | "statusAt"> = { step: undefined, stepSince: undefined, stepRunning: undefined, recordedSteps: undefined, statusAt: undefined };
 
 /** "step n / m" on the card: every action RUN_TARGET_REPEATS times, growing by whole rounds once the user goes past that. */
 export function plannedSteps(actions: number, step: number): number {

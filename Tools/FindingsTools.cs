@@ -156,6 +156,22 @@ public static class FindingsTools
                 o["functions"] = data["functions"];
                 break;
             }
+            case "data":
+            {
+                // expect: { "<row index>": "<text the row contains>" }, checked against the game's own data table.
+                var dataFile = check["file"]!.ToString();
+                var expectRows = (check["expect"] as JObject ?? []).Properties().ToList();
+                var (_, r) = await bridges.CallAsync(g, "data.read", new JObject { ["file"] = dataFile, ["offset"] = 0, ["limit"] = 500 }, ct);
+                var rows = (r["rows"] as JArray ?? []).OfType<JObject>().ToDictionary(x => x["index"]!.Value<int>().ToString(), x => string.Join(" | ", (x["strings"] as JArray ?? []).Concat(x["refs"] as JArray ?? [])));
+                var misses = expectRows.Where(e => !rows.TryGetValue(e.Name, out var t) || !t.Contains(e.Value.ToString(), StringComparison.OrdinalIgnoreCase))
+                    .Select(e => $"row {e.Name}: expected '{e.Value}', found '{(rows.TryGetValue(e.Name, out var t) ? t : "(none)")}'").ToList();
+                verdict = r["error"] != null ? "fail" : misses.Count == 0 ? "pass" : misses.Count < expectRows.Count ? "differs" : "fail";
+                where = $"{r["file"] ?? dataFile} ({r["count"]} rows)";
+                evidence = r["error"] != null ? $"{r["error"]}: {r["message"]}"
+                    : misses.Count == 0 ? $"all {expectRows.Count} expected rows match in {r["file"]}"
+                    : $"{misses.Count}/{expectRows.Count} rows differ: {string.Join("; ", misses.Take(6))}";
+                break;
+            }
             case "eval":
             {
                 var expr = check["expressionByGame"]?[g]?.ToString() ?? check["expression"]?.ToString()

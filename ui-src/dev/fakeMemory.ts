@@ -14,7 +14,7 @@
 // bridge's: {error: "no_address" | "no_struct" | "unreadable", message}.
 
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import type { Access, AccessFunction, AwaitResult, Candidate, CompareResult, CorrelateResult, Decompiled, ExperimentChange, ExperimentRecord, FieldAccessResult, Finding, FindingsResult, GuideState, LayoutField, LayoutResult, PopulationResult, PresetsResult, ReadResult, ReadSlot, SummaryResult, VerifyResult, WatchResult, WhereResult } from "../src/memory/types";
+import type { Access, AccessFunction, AwaitResult, Candidate, CompareResult, CorrelateResult, Decompiled, ExperimentChange, ExperimentRecord, FieldAccessResult, Finding, FindingsResult, GuideState, LayoutField, LayoutResult, PopulationResult, PresetsResult, ReadResult, ReadSlot, StatusResult, StepCancelled, StepStarted, StepState, SummaryResult, VerifyResult, WatchResult, WhereResult } from "../src/memory/types";
 import type { CallLogEntry } from "./fakeServer";
 import layoutLife from "./memory/layout-life.json";
 import layoutStash from "./memory/layout-stashtab.json";
@@ -36,8 +36,8 @@ import recordCtrlClick from "./memory/experiment-ctrl-click.json";
 import recordSwitchTab from "./memory/experiment-switch-tab.json";
 import guideFixture from "./memory/guide-state.json";
 
-/** What the fake user does when await_change waits: acts after actMs, never acts (timeout), or the host gives up first. */
-export type FakeUser = "acts" | "nothing" | "host-timeout";
+/** What the fake user does while a step waits: acts after actMs (or when act() is called), or nothing (the step fails). */
+export type FakeUser = "acts" | "nothing";
 
 /** ghidra-down: every find_field_access fails like the real server does when the headless Ghidra isn't up. */
 export type MemoryScenario = "live" | "offline" | "flaky" | "ghidra-down";
@@ -71,11 +71,13 @@ export class FakeMemory {
   private scanned = new Set<string>(["GameOffsets.ServerStashTabOffsets:61", "GameOffsets.ServerStashTabOffsets:63", "GameOffsets.ServerStashTabOffsets:56", "GameOffsets.ServerStashTabOffsets:52", "GameOffsets.ServerStashTabOffsets:50", "GameOffsets.ServerStashTabOffsets:49", "GameOffsets.ServerStashTabOffsets:48"]);
 
   // Guided experiments. The records are the two real PoE1 runs (stash-ctrl-click: 4 steps, stash-switch-tab: 2 steps);
-  // await_change appends synthesised steps shaped like them, and the fake guide card follows the same states the HUD's does.
-  /** The fake user: acts `actMs` after the card appears, or never, or the host times out first. */
+  // a step appends a synthesised one shaped like them, and the fake guide card follows the same states the HUD's does.
+  // experiment_step_start runs a step "in the server" (a promise kept per experiment, like the real .inflight.json) and
+  // experiment_status reports it; await_change is the same step awaited.
+  /** The fake user: acts `actMs` after the card appears (or at act()), or does nothing until the step's timeout. */
   user: FakeUser = "acts";
   actMs = 2500;
-  /** A "nothing happened" wait ends after this long (the real one honours timeoutMs). */
+  /** A "nothing happened" wait ends after this long, or at the step's timeout if that is sooner. */
   noActionMs = 5000;
   private records = new Map<string, ExperimentRecord>([
     ["stash-ctrl-click", structuredClone((recordCtrlClick as unknown as SummaryResult).record)],
@@ -87,6 +89,8 @@ export class FakeMemory {
   private game = { inv: 11, stash: 45, tab: 0, tabItems: 84, invId: 156, hover: 0 };
   private actNow?: () => void;
   private agentBusy = false;
+  /** The step running (or last run) per experiment, as experiment_status reports it, plus its cancel handle while running. */
+  private inflight = new Map<string, { state: StepState; startedMs: number; cancel?: () => void; done: Promise<void> }>();
 
   async handle(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
     const t0 = performance.now();
@@ -142,7 +146,11 @@ export class FakeMemory {
       case "find_field_access": return this.fieldAccess(a);
       case "experiment_presets": return this.presets(a);
       case "experiment_summary": return this.summary(a);
+      case "experiment_step_start": return this.stepStart(a);
+      case "experiment_status": return this.status(a);
+      case "experiment_step_cancel": return this.stepCancel(a);
       case "guide": return this.guideTool(a);
+      case "guide_state": return json(structuredClone(this.guide));
       default: throw new Error(`Unknown tool: ${name}`);
     }
   }
@@ -156,8 +164,8 @@ export class FakeMemory {
     const all = (presetsFixture as unknown as PresetsResult).presets;
     const game = a.game === "poe2" ? "poe2" : a.game === "poe1" ? "poe1" : undefined;
     const presets = all.filter((p) => !game || p.games.includes(game));
-    const records = [...this.records.keys()].map((name) => ({ name, updated: new Date(this.recordUpdated.get(name) ?? Date.now()).toISOString() })).sort((x, y) => y.updated.localeCompare(x.updated)).slice(0, 30);
-    return json({ presets, records });
+    const records = [...this.records.entries()].map(([name, r]) => ({ name, updated: new Date(this.recordUpdated.get(name) ?? Date.now()).toISOString(), steps: r.steps.length })).sort((x, y) => y.updated.localeCompare(x.updated)).slice(0, 30);
+    return json({ presets, records } satisfies PresetsResult);
   }
 
   private summary(a: Record<string, unknown>): CallToolResult {
@@ -198,36 +206,79 @@ export class FakeMemory {
     return json(structuredClone(this.guide));
   }
 
-  /** One step: the card goes waiting -> (the user acts) detected -> captured, or failed after the wait, like the real tool. */
+  /** await_change: the same step as experiment_step_start, awaited (blocking, like the real tool). */
   private async awaitChange(a: Record<string, unknown>): Promise<CallToolResult> {
+    const started = this.stepStart({ ...a, timeoutMs: Math.min(120_000, Number(a.timeoutMs ?? 60_000)) });
+    if (started.isError) return started;
+    const f = this.inflight.get(String(a.experiment))!;
+    await f.done;
+    if (f.state.status === "cancelled") throw new Error("The step was cancelled.");
+    return json(f.state.result!);
+  }
+
+  /**
+   * experiment_step_start: validates, registers the step as in flight and returns at once; the step runs on (the card goes
+   * waiting -> (the user acts) detected -> captured, or failed at the timeout, or cancelled) and experiment_status reports it.
+   */
+  private stepStart(a: Record<string, unknown>): CallToolResult {
     const experiment = String(a.experiment ?? "");
     const label = String(a.label ?? "step");
     if (!/^[\w.-]{1,64}$/.test(experiment)) return err("error", "experiment: letters, digits, '-', '_' or '.', up to 64 characters.");
     const watch = Array.isArray(a.watch) ? (a.watch as string[]) : [];
     if (!watch.length) return err("error", "Pass at least one watch spec (see experiment_presets).");
-    const timeoutMs = Math.min(120_000, Math.max(1000, Number(a.timeoutMs ?? 60_000)));
+    const running = this.inflight.get(experiment);
+    if (running && !running.state.finishedAt) return err("error", `A step of '${experiment}' is already running: experiment_status to follow it, experiment_step_cancel to stop it.`);
+    const timeoutMs = Math.min(600_000, Math.max(1000, Number(a.timeoutMs ?? 120_000)));
     const step = typeof a.step === "number" ? a.step : null, steps = typeof a.steps === "number" ? a.steps : null;
-    this.setGuide({ title: `Experiment: ${experiment}`, instruction: typeof a.instruction === "string" ? a.instruction : `Do the '${label}' action now`, status: "waiting", step, steps, detail: `Watching ${watch.length} value(s) for up to ${Math.round(timeoutMs / 1000)} s` });
+    const instruction = typeof a.instruction === "string" ? a.instruction : null;
+    const startedAt = new Date().toISOString();
+    const state: StepState = { experiment, label, instruction, step, steps, startedAt, timeoutMs, status: "starting", watch, updatedAt: startedAt };
+    let cancel!: () => void;
+    const cancelled = new Promise<"cancelled">((r) => { cancel = () => r("cancelled"); });
+    const done = this.runStep(state, cancelled).catch((e) => { state.status = "error"; state.error = String(e); }).finally(() => {
+      state.finishedAt = new Date().toISOString(); state.updatedAt = state.finishedAt;
+      const f = this.inflight.get(experiment); if (f) f.cancel = undefined;
+      this.onChange?.();
+    });
+    this.inflight.set(experiment, { state, startedMs: Date.now(), cancel, done });
+    return json({ started: true, experiment, label, startedAt, timeoutMs, next: "Poll experiment_status (every 1-3 s) until status is captured, failed, cancelled or error." } satisfies StepStarted);
+  }
+
+  private async runStep(state: StepState, cancelled: Promise<"cancelled">) {
+    const { experiment, label, timeoutMs } = state;
+    const watch = state.watch ?? [];
+    const set = (status: StepState["status"]) => { state.status = status; state.updatedAt = new Date().toISOString(); this.onChange?.(); };
+    await sleep(this.latencyMs);
+    this.setGuide({ title: `Experiment: ${experiment}`, instruction: state.instruction ?? `Do the '${label}' action now`, status: "waiting", step: state.step ?? null, steps: state.steps ?? null, detail: `Watching ${watch.length} value(s) for up to ${Math.round(timeoutMs / 1000)} s` });
     this.guideLog(`Claude: waiting for '${label}'`, "step");
+    set("waiting");
     const t0 = Date.now();
-    if (this.user === "host-timeout") {
-      await sleep(Math.min(timeoutMs, 4000));
-      throw new Error("MCP error -32001: Request timed out");
-    }
-    if (this.user === "nothing") {
-      await sleep(Math.min(timeoutMs, this.noActionMs));
+    const fail = (why: string) => {
       this.setGuide({ status: "failed", detail: "Nothing lasting changed - Claude will ask again" });
       this.guideLog(`No lasting change for '${label}'`, "warn");
-      return json({ experiment, label, changed: false, transientChanges: 3, note: `No lasting change within ${timeoutMs} ms (3 brief change(s) that reverted were ignored). Did the action happen in game (window focused, panel open), and do the watched values follow it? Run the step again.` } satisfies AwaitResult);
-    }
-    await Promise.race([sleep(this.actMs), new Promise<void>((r) => { this.actNow = r; })]);
+      state.result = { experiment, label, changed: false, transientChanges: 3, note: `No lasting change within ${timeoutMs} ms (3 brief change(s) that reverted were ignored). ${why}` } satisfies AwaitResult;
+      set("failed");
+    };
+    const stop = () => { this.setGuide({ status: "info", detail: "Step cancelled" }); set("cancelled"); };
+    // The user acts after actMs (or at act()), unless the timeout (or, for a user who does nothing, noActionMs) comes first.
+    const actsIn = this.user === "nothing" ? Infinity : this.actMs;
+    const endsIn = Math.min(timeoutMs, this.user === "nothing" ? this.noActionMs : Infinity);
+    const outcome = await Promise.race([
+      sleep(Math.min(actsIn, 1e9)).then(() => "acts" as const),
+      new Promise<"acts">((r) => { this.actNow = () => r("acts"); }),
+      sleep(endsIn).then(() => "timeout" as const),
+      cancelled,
+    ]);
     this.actNow = undefined;
+    if (outcome === "cancelled") return stop();
+    if (outcome === "timeout") return fail("Did the action happen in game (window focused, panel open), and do the watched values follow it? Run the step again.");
     const changedAfterMs = Date.now() - t0;
     this.setGuide({ status: "detected", detail: "Change seen - hold still" });
-    await sleep(600);
+    set("detected");
+    if ((await Promise.race([sleep(600).then(() => "settled" as const), cancelled])) === "cancelled") return stop();
     const changes = this.stepChanges(label, watch, this.records.get(experiment)?.steps.filter((s) => s.label === label).length ?? 0);
     const record = this.records.get(experiment) ?? { experiment, steps: [] };
-    record.steps.push({ label, at: new Date().toISOString(), game: "poe1", changedAfterMs, watch, changes });
+    record.steps.push({ label, instruction: state.instruction ?? null, at: new Date().toISOString(), game: "poe1", changedAfterMs, watch, changes });
     this.records.set(experiment, record);
     this.recordUpdated.set(experiment, Date.now());
     const repeats = record.steps.filter((s) => s.label === label).length;
@@ -237,7 +288,25 @@ export class FakeMemory {
     this.guideLog(`Captured '${label}': ${summary}`, "result");
     const o: Extract<AwaitResult, { changed: true }> = { experiment, label, changed: true, step: record.steps.length, repeatsOfThisLabel: repeats, changedAfterMs, changes };
     if (repeats >= 2) o.consistent = consistent(record, label);
+    state.result = o;
+    set("captured");
+  }
+
+  /** experiment_status: the in-flight (or last) step with its elapsed time while running, and the record's length. */
+  private status(a: Record<string, unknown>): CallToolResult {
+    const experiment = String(a.experiment ?? "");
+    const f = this.inflight.get(experiment);
+    const o: StatusResult = { experiment, running: !!f && !f.state.finishedAt, recordedSteps: this.records.get(experiment)?.steps.length ?? 0 };
+    if (f) o.step = { ...structuredClone(f.state), ...(f.state.finishedAt ? {} : { elapsedMs: Date.now() - f.startedMs }) };
     return json(o);
+  }
+
+  private stepCancel(a: Record<string, unknown>): CallToolResult {
+    const experiment = String(a.experiment ?? "");
+    const f = this.inflight.get(experiment);
+    const running = !!f?.cancel;
+    f?.cancel?.();
+    return json({ experiment, cancelled: running, note: running ? "Cancelling; experiment_status shows 'cancelled' shortly." : "No step of this experiment is running in this server process." } satisfies StepCancelled);
   }
 
   /** Changes shaped like the real records, per preset label; the second repeat adds a "sometimes" side effect. */
@@ -277,8 +346,11 @@ export class FakeMemory {
     return out;
   }
 
-  /** Simulate the agent running the switch-tab preset into a new record: the follow-along state, end to end. */
-  async agentRun(name = "stash-switch-tab-3") {
+  /**
+   * Simulate the agent running the switch-tab preset into a new record through experiment_step_start, as an agent
+   * would: the follow-along state, end to end. `actMs` is how long the fake user takes per step (the countdown shows).
+   */
+  async agentRun(name = "stash-switch-tab-3", actMs = 3000) {
     if (this.agentBusy) return;
     this.agentBusy = true;
     try {
@@ -289,9 +361,13 @@ export class FakeMemory {
       for (let i = 0; i < plan.length; i++) {
         const s = plan[i];
         const saved = { user: this.user, actMs: this.actMs };
-        this.user = "acts"; this.actMs = 3000;
-        try { await this.awaitChange({ experiment: name, label: s.label, instruction: s.instruction, watch: p.watch, step: i + 1, steps: plan.length, timeoutMs: 60_000 }); }
-        finally { this.user = saved.user; this.actMs = saved.actMs; }
+        this.user = "acts"; this.actMs = actMs;
+        try {
+          const r = this.stepStart({ experiment: name, label: s.label, instruction: s.instruction, watch: p.watch, step: i + 1, steps: plan.length, timeoutMs: 120_000 });
+          if (r.isError) return;
+          await this.inflight.get(name)!.done;
+          if (this.inflight.get(name)!.state.status !== "captured") return;
+        } finally { this.user = saved.user; this.actMs = saved.actMs; }
         await sleep(2200);
       }
       this.setGuide({ status: "done", instruction: "IndexVisibleStash, VisibleStash.ItemCount and ServerInventoryId follow the tab every time", detail: "Nothing to undo in game: you are back on the tab you started on", step: plan.length, steps: plan.length });

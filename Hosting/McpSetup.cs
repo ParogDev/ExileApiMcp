@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.15.0";
+    public const string Version = "3.17.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -41,6 +41,10 @@ internal static class McpSetup
         experiment_presets has ready-made stash experiments. Knowledge pack shared/working-with-users says how to word
         an instruction and what goes on the card, in detail and in chat. The Memory View's Experiments tab
         (show_memory_view) lets the user run a preset themselves or follow your run step by step.
+        Before asking the user, try what needs nobody: game_data (the game's data tables, e.g. the names behind an id or
+        bit; row n is usually id n), memory_correlate over a whole collection, find_field_access + code_struct_layout
+        (the struct as the game's code reads it, diffed with the HUD's). Ask for an in-game action only for what those
+        can't show.
         find_field_access explains a field from the game's code: the functions that read, write or bit-test it,
         decompiled from the Ghidra copy (static; never the running game). Needs Ghidra headless running.
         eval_path / describe_type walk the live HUD object model by reflection (namespaces differ per game).
@@ -99,7 +103,7 @@ internal static class McpSetup
                 // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
                 // Polls and the experiment tools stay out of it: await_change writes its own lines, and the Memory View's
                 // experiment runner re-reads the record and presets while it follows along.
-                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "bridge_status")
+                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "experiment_status" or "experiment_step_start" or "experiment_step_cancel" or "guide_state" or "bridge_status")
                     && request.Services?.GetService(typeof(BridgeRegistry)) is BridgeRegistry bridges)
                     _ = ExileApiMcp.Tools.GuideTools.LogAsync(bridges, null, $"Claude: {name}{CallHint(request.Params?.Arguments)}", "agent", CancellationToken.None);
                 try

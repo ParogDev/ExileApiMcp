@@ -21,6 +21,18 @@ How to see what the HUD maps in a game struct, what it doesn't, and confirm it i
   - then call `get_xrefs_to?address=`, `decompile_function?address=` and `read_memory?address=&length=`.
   - Use bearer `GHIDRA_MCP_AUTH_TOKEN` on every call.
 
+## Passive sources first (nobody needs to act)
+Most questions about a struct are settled without the user. Use these in this order:
+1. **`game_data`:** the game's own tables name ids, enums and bits, and say how they link. Row n is usually id n; foreign keys show as `File[row]`.
+   - Stash examples: `StashTabAffinityId.dat` names all 22 affinity bits, and matched every experiment. `StashType.dat` names the 25 tab types; the HUD enum is outdated. `StashTabAffinities.dat` gives the UI order, and `StashTabAffinityByItemClassCategory.dat` maps item class → affinity.
+   - Pointers into data rows also show as `data-row` in `memory_layout` (e.g. `Base` +24 → `ItemVisualIdentity.dat[...]`).
+2. **`code_struct_layout`** on the struct's network (de)serializer or constructor (found with `find_field_access`): every member with its size and the flag that gates it, diffed with the HUD's struct.
+   - For a stash tab, the deserializer `FUN_141d4d1f0` yields +0 (8 B, bit 5), +40 (inventory id), +58 (2 B), +60 (1 B, bit 4) as UNMAPPED, and Flags as 2 B vs the HUD's 1 B, with no experiment.
+3. **`memory_correlate`** over everything loaded (all tabs, all entities): which bits follow known properties.
+4. **Only then a guided experiment:** for what needs a change of state, or to settle what the above leave ambiguous.
+
+The one thing the passive sources can't do is create state. Children and inventories only exist after a tab or stash has been opened, so ask the user to open it once.
+
 ## Getting to empirical truth (the method)
 Don't name a byte from one sample. Each step below produces counts and counterexamples:
 1. **Hypothesis** from one observation (`memory_layout`, `watch_memory`).
