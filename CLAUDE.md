@@ -16,6 +16,7 @@ MCP server (C# SDK 2.2, spec 2026-07-28) exposing live PoE1/PoE2 HUD state throu
 | `Hud/HudTypes.cs`, `Tools/HudTypeTools.cs` | `hud_find_types`, `hud_type`: HUD DLL metadata via MetadataLoadContext (cached per HUD folder, rebuilt when ExileCore*/GameOffsets* change) |
 | `Tools/HudDevTools.cs` | `hud_plugins`, `hud_log`: offline dev-loop tools (no bridge) |
 | `Prompts/DevPrompts.cs` | Workflow prompts (`plugin_dev_loop`, `investigate_stat`). Keep them in step with the tools they name |
+| `Knowledge/{shared,poe1,poe2}/*.md`, `Tools/KnowledgeTools.cs` | Knowledge packs, embedded and served by the `knowledge` tool and `exile://knowledge/{game}/{topic}`. Add a pack when you verify something agents would otherwise rediscover. Keep it short, factual, and free of paths to private source trees |
 | `Apps/PlayerStatsApp.cs` | `ui://exile/player-stats` resource; HTML embedded from `ui/player-stats.html` |
 | `ui-src/` | The app's TypeScript/React source, dev harness and basic-host container. Built in Docker by `ui-src/build.ps1`. **Read `ui-src/README.md` before touching the UI** |
 | `run.cmd` | Launcher used by `.mcp.json` and Claude Desktop: builds, then runs a private copy so `bin\` is never locked |
