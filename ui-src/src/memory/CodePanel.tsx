@@ -214,7 +214,7 @@ function NoAnchored({ q, minKnown, onRetry }: { q: CodeQuery; minKnown: number; 
     <div className="mt-2 rounded-md border border-dashed border-line px-2.5 py-2 text-[11.5px]">
       <p className="font-medium text-fg">No function of this struct reaches {r.target.hex}</p>
       <p className="mt-1 leading-snug text-fg-2">
-        {r.programWideAccesses} instruction{r.programWideAccesses === 1 ? "" : "s"} program-wide use the displacement, but none through a base register that also touches {r.minKnown} of the anchor fields ({r.anchors.map((a) => `+${a.offset} ${a.field}`).join(", ")}).
+        {r.programWideAccesses} instruction{r.programWideAccesses === 1 ? "" : "s"} program-wide use the displacement, but none through a base register that also touches {r.minKnown} of the anchor fields ({r.anchors.filter((a) => !a.skipped).map((a) => `+${a.offset} ${a.field}`).join(", ")}).
       </p>
       <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-[11px] text-fg-2">
         <li>Lower <span className="font-code">minKnown</span> to 1: more hits, more false positives.</li>

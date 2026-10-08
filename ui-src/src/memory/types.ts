@@ -325,7 +325,8 @@ export interface FieldAccessResult {
   struct?: string | null;
   path?: string | null;
   target: { offset: number; hex: string; bit?: number | null };
-  anchors: { offset: number; field: string; accesses: number }[];
+  /** Known fields used to fingerprint the struct's code; `skipped` ones were too common (50000+ uses) to identify anything. */
+  anchors: { offset: number; field: string; accesses?: number; skipped?: string }[];
   minKnown: number;
   programWideAccesses: number;
   functions: AccessFunction[];

@@ -41,7 +41,7 @@ export function classifyCodeError(e: MemoryError): CodeErrorKind {
   if (e.error === "offline") return "offline";
   if (/ghidra isn't running|ghidra-headless/i.test(m)) return "ghidra";
   if (/offset 0 can't be searched/i.test(m)) return "offset0";
-  if (/need at least \d+ known offsets/i.test(m)) return "anchors";
+  if (/need at least \d+ known offsets|distinctive enough/i.test(m)) return "anchors";
   if (/no ghidra snapshot|patched since|couldn't load/i.test(m)) return "snapshot";
   return "error";
 }
