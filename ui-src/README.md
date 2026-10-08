@@ -5,16 +5,17 @@ Source for the interactive panels that ExileApiMcp serves as MCP Apps. The serve
 | Stack | TypeScript, React 19, Tailwind 4, Vite 8 + `vite-plugin-singlefile`, `@modelcontextprotocol/ext-apps` 2.0.1 |
 |---|---|
 | Toolchain | Docker only. No Node or npm on Windows; `node_modules` lives in a named Docker volume |
-| Output | `../ui/player-stats.html` (`ui://exile/player-stats`) and `../ui/data-explorer.html` (`ui://exile/data-explorer`), both committed |
+| Output | `../ui/player-stats.html` (`ui://exile/player-stats`), `../ui/data-explorer.html` (`ui://exile/data-explorer`) and `../ui/memory-view.html` (`ui://exile/memory-view`), all committed |
 
-Two apps share `src/styles.css`, `src/components.tsx` and `src/icons.tsx`:
+Three apps share `src/styles.css`, `src/components.tsx` and `src/icons.tsx`:
 
 | App | Entry | Source | Opened by |
 |---|---|---|---|
 | Player stats | `player-stats.html` → `src/main.tsx` | `src/*.tsx`, `src/sync.ts` | `show_player_stats` |
 | Data explorer | `data-explorer.html` → `src/explorer/main.tsx` | `src/explorer/*` | `show_data_explorer {path?, game?}` |
+| Memory view | `memory-view.html` → `src/memory/main.tsx` | `src/memory/*` | `show_memory_view {path?, address?, type?, game?}` |
 
-`vite build` takes one input per run (single-file plugin), so `npm run build` runs it three times: default (stats), `--mode explorer`, `--mode harness`. Tailwind scans the whole source tree, so a class added to one app can change the other app's CSS: rebuild and commit both bundles together.
+`vite build` takes one input per run (single-file plugin), so `npm run build` runs it four times: default (stats), `--mode explorer`, `--mode memory`, `--mode harness`. Tailwind scans the whole source tree, so a class added to one app can change another app's CSS: rebuild and commit all bundles together.
 
 ## Commands
 
@@ -27,21 +28,26 @@ From the scaffolding root (Windows PowerShell 5.1):
 | npm without npm, e.g. add a pinned package | `... build.ps1 -Npm "install -E pkg@1.2.3"` |
 | Real host against the real server: ext-apps **basic-host** on http://localhost:8080 | start the server with `run.cmd --http`, then `... ui-src\basic-host.ps1` (`-Stop`, `-Rebuild`) |
 
-After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuilds on every start. **CI rebuilds the UI and fails if `ui/player-stats.html` or `ui/data-explorer.html` doesn't match its source**, so commit the rebuilt files with the source change.
+After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuilds on every start. **CI rebuilds the UI and fails if any of `ui/player-stats.html`, `ui/data-explorer.html` or `ui/memory-view.html` doesn't match its source**, so commit the rebuilt files with the source change.
 
 ## Three ways to see the apps, fastest first
 
-1. **Dev harness** (`dist/harness.html`): a fake host plus a fake server per app. No game, HUD or server needed. Every state is reachable from the URL, so screenshots are deterministic. `app=stats` (default) or `app=explorer` picks the app; `bare=1` renders only the app's iframe, filling the viewport (pixel-exact captures in a narrow browser pane).
+1. **Dev harness** (`dist/harness.html`): a fake host plus a fake server per app. No game, HUD or server needed. Every state is reachable from the URL, so screenshots are deterministic. `app=stats` (default), `app=explorer` or `app=memory` picks the app; `bare=1` renders only the app's iframe, filling the viewport (pixel-exact captures in a narrow browser pane).
    ```
    /harness.html?app=stats&theme=dark&width=380&scenario=offline&latency=400&display=fullscreen&vars=none&simulate=0
    /harness.html?app=explorer&path=GameController.Player&theme=dark&width=380&scenario=flaky&bare=1
+   /harness.html?app=memory&path=GameController.IngameState.ServerData.PlayerStashTabs[0]&theme=dark&width=380
+   /harness.html?app=memory&address=0x41137889400&display=fullscreen
    ```
-   - `scenario`: stats: `live`, `offline`, `not-in-game`, `empty`, `flaky` (30% errors plus jitter); explorer: `live`, `offline`, `flaky`.
+   - `scenario`: stats: `live`, `offline`, `not-in-game`, `empty`, `flaky` (30% errors plus jitter); explorer and memory: `live`, `offline`, `flaky`.
    - `vars=none` drops the host style variables to test the app's own fallbacks.
    - `simulate=0` stops the simulated game (random vitals and stat changes; drifting Life values).
    - `path=` (explorer) is the `show_data_explorer` argument: where the tree opens. A bad path shows the error state.
+   - `path=` / `address=` / `type=` (memory) are the `show_memory_view` arguments. Error states: a path below Life such as `...GetComponent<Life>().CurHP` → `no_address`; `GameController` → `no_struct`; `address=0x0` → `unreadable`.
 
    The **stats** fake server is built from a real PoE2 character (`dev/poe2-stats.json`). The **explorer** fake server (`dev/fakeExplore.ts`) answers `explore_object`, `show_data_explorer`, `watch_object` and `eval_path` from `dev/explore/*.json`: 11 real PoE2 responses captured live (0 GameController, 1 Player, 2 Life component, 3 Life.Health, 4 Player.Stats, 5 Player.Buffs, 6 Buffs[0], 7 IngameUi, 8 Player.Pos, 9 Entities, 10 Entities[2]). Any other path is synthesised from how its parent listed it, so every node expands; unknown members fail like the bridge ("No public property or field 'X' on type 'Y'"). States injected so they can be seen without a game: `Player.Mods` (getter throws), `Player.NativeHandle` (blocked), IngameUi's last members arrive as budget-`skipped` (the "Load them" row), `Stats` / `Entities` / `ChatMessages` page, Life values drift between reads (refresh, auto-refresh, watch).
+
+   The **memory** fake server (`dev/fakeMemory.ts`) answers `show_memory_view`, `memory_layout`, `memory_read`, `memory_where`, `watch_memory`, `memory_population`, `memory_correlate`, `memory_compare`, `memory_snapshot`, `findings` and `verify_finding` from `dev/memory/*.json`, real PoE1 captures: `layout-life.json` (580-byte Life component: 16 mapped fields, 27 candidates, 64 bytes past the end), `layout-stashtab.json` (67-byte server stash tab: `Flags` bits 1,6, `Affinity` bit 12, inline UTF-16 name), `read-life.json` / `read-entity.json` (classified 8-byte slots; the entity is what Life's `Owner` pointer at +8 reaches), `where-vtable.json`, `watch-life.json` (nothing changed), `watch-stashtab.json` (a 60 s watch while stash tab affinities were toggled: `Flags` bit 6, `Affinity` bits 5, 10, 11 flipped — the hero example for the diff state), `population-stashtabs.json` (71 stash tabs × 67 bytes with Name / Affinity / TabType), `correlate-stashtabs.json` (`+61 bit 6 = Affinity != 0`, `+61 bit 1 = TabType != 0`, near misses at +47), `compare-affinity.json` + `snapshots-list.json` (the `aff-0-baseline … aff-7-mercenary` series: one affinity ticked on tab "19" per step, one Affinity bit each), `findings.json` and `verify-affinity.json`. Any other address reads as a synthesised object, so every pointer can be followed; Life's Health/Mana drift between reads; Life watches report the vitals plus an unmapped bit flip and a noisy timer; the stash tab watch applies its last bytes so the reload after it shows them; other collection paths fail like the bridge; snapshots saved in the harness join the list.
 
    Agents can drive it from a browser console or JS tool through `window.harness`:
    ```js
@@ -52,7 +58,11 @@ After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuil
    // explorer
    harness.server.bump()          // life drops by 60: refresh / watch show it
    harness.server.drift = false   // freeze values
-   // both
+   // memory
+   harness.server.bump()            // life drops by 500: Live mode / Read flash the bytes
+   harness.server.toggleAffinity()  // stash tab Flags bit 6 + Affinity bit 11
+   harness.server.quiet = true      // watches report nothing (the empty-diff state)
+   // all
    harness.setScenario("offline"); harness.setTheme("dark"); harness.setWidth(380)
    harness.log()        // every tool call the app made: name, args, ms, outcome
    harness.context()    // what the app sent with ui/update-model-context
@@ -112,6 +122,35 @@ A devtools-style object inspector over the live HUD object model, for mapping da
 - **Layout:** inline: path bar, a 22 rem tree, the snippet panel (when something is ticked), then the inspector card. Fullscreen: the tree fills the height next to a 20-26 rem column with inspector and snippet; below `sm` the column stacks under the tree. The type column hides below `xs`; object rows then show the type as their preview.
 - **Keyboard:** `/` focuses the filter; in the tree arrows move, Right/Left expand/collapse (Left on a leaf goes to the parent), Enter opens (or ticks a leaf), Space ticks, Home/End, Escape clears the filter, typing starts a filter.
 - **Model context:** the selected node (path, C#, type, value, namespace) and the ticked paths, debounced and deduplicated, so "this value" in the next prompt needs no tool call. "Send to Claude" sends it immediately.
+
+## How the memory view works
+
+A byte-level view of one game object for checking that the HUD's struct still fits live memory after a patch and for finding members the HUD doesn't map: what is mapped, what isn't, what in the unmapped bytes looks like structure, and what changes while the user does something in game.
+
+| File | Role |
+|---|---|
+| `src/memory/main.tsx` | ext-apps wiring, same pattern as the other apps. Seeds the first view from `show_memory_view`'s result (`ontoolresult`: a `memory_layout` or `memory_read` result, or an error); `ontoolinput` gives the requested path / address / type and game |
+| `src/memory/types.ts` | The `memory_layout` / `memory_read` / `memory_where` / `watch_memory` structuredContent shapes. **Mirrors `Tools/MemoryTools.cs` and the bridge's `MemoryInspector`; change both together** |
+| `src/memory/bytes.ts` | Pure helpers: the **region model** (one offset-ordered cover of the bytes: `field`, `cand`, `gap`, `slot`, collapsed `zeros`, with a per-byte cover array and nested-struct groups), BigInt address arithmetic, hex/decimal offsets, alternative interpretations of a byte range, .NET type decoding for live re-reads, and the mapping of `bitsFlipped` onto a selection |
+| `src/memory/paint.ts` | One colour vocabulary: mapped = blue (`--color-m-field`), candidate = violet (`--color-m-cand`), changed = magenta (`--color-m-change`), heap pointer = teal, numbers/text reuse the explorer kinds, unmapped = hatched. Check states: unusual/suspicious = warning, invalid = danger |
+| `src/memory/store.ts` | `MemoryStore`, framework-free: a history of views (a `layout` or a `read`, each with its target, crumb label, how it was reached and its region), selection and hover, watch results as per-byte changes, live re-reads, `memory_where`, toasts |
+| `src/memory/MemoryView.tsx` | Header (game, struct, connection, Live, fullscreen), inline vs fullscreen layout, coverage summary chips, error states per bridge code, model context and "Ask Claude" prompts |
+| `src/memory/TargetBar.tsx` | Back / forward, the pointer chain as crumbs (a followed pointer shows its source field), path-or-address input with Go, and the options row (struct type to overlay, `extend` for layouts, size for reads) |
+| `src/memory/StructMap.tsx` | The **strip** (the whole region as one byte-accurate bar, change ticks above, struct end marked), the legend, and the **rows**: offset (hex + decimal), size, swatch, name with the nested prefix dimmed and a sticky group header per nested struct, type, live value, set bits, check badge, Δ badge; double-click / Enter follows a pointer |
+| `src/memory/HexView.tsx` | 16 bytes per row with an ASCII column; bytes tinted by what covers them, selection and hover shared with the map, watch changes in magenta by recency, live changes flash. Click selects the covering field / candidate / slot, or an aligned 8-byte window in a gap; shift-click widens |
+| `src/memory/Inspector.tsx` | The selection: kind, name, offset, size, type, value and check, raw bytes, address and Ghidra address (copyable), **Follow pointer** / **Where is it?**, Send to Claude / Ask Claude, what changed here during the watch, the **bit grid** (one cell per bit, set bits lit, flipped bits outlined and labelled), and the same bytes read as uint/int 8-64, float, double, pointer, UTF-16, ASCII |
+| `src/memory/WatchPanel.tsx` | Watch 5 / 15 / 60 s (`watch_memory` at 100 ms), progress while sampling, then the changed ranges sorted discoveries-first: unmapped ranges, then mapped ranges with bit flips, noisy ones last; each row shows first → last bytes, ×changes and the flipped bits as chips. Clicking a range selects its field (or the raw bytes) |
+| `src/memory/findingsModel.ts` | Findings laid over a struct: which findings talk about the struct on screen (subject / check path), the offsets and bits their `where` names (`+61 bit 6`, `+63 (32-bit)`, `+0x178 / …`) and **bit tables** (`3 Currency, 4 Unique, …` on a `Subject.Field`), which name a field's bits |
+| `src/memory/Population.tsx` | **Population** mode: every item of a collection as a row and every byte as a column on a canvas (200 × 1024 stays cheap), the HUD's struct as a ribbon over the columns, a heatmap of the bits a label explains (`memory_correlate`; faint = varies between items), and a side panel for the picked byte/bit: who has it set, the 8 bits of the byte, the explanation with evidence and counterexamples, a breakdown by each label's values, and every explained bit as chips. Rows regroup by a label; a picked bit sorts the groups that have it first |
+| `src/memory/Experiments.tsx` | **Experiments** mode: saved snapshots (`memory_compare` with no names) picked in order, **Take a snapshot** (`memory_snapshot`), then the comparison as a timeline of steps and a matrix with one row per (item, byte) that ever changed and one column per step — bits turning on (▲) and off (▽), numbered relative to the covering field. The step detail decodes label deltas (`Affinity 0 → 32` = bit 5) and marks byte bits that match them |
+| `src/memory/Findings.tsx` | **Findings** mode: the registry as a matrix with a status badge per game (verified / differs / unverified / n/a; dashed "hypothesis" when verified on the other game only), "to check" highlighted, per-game details (where, evidence, bit tables), **Verify on this game** (`verify_finding`: pass / moved / differs / fail with the record to paste into `Knowledge/findings.json`), manual checks shown as the experiment to run, "show in struct" |
+
+- **Modes** (tabs under the header): **Struct** (one object), **Population** (every item of a collection), **Experiments** (snapshots compared step by step) and **Findings** (what is known, per game). Findings load once with the first struct view and annotate the map: a mapped field keeps its blue, but bits a finding names get violet chips (`b6 the tab has at least one affinity`), bit tables name the set bits (`Delve` instead of `bits 12`), and a gap a finding points at is painted violet like a candidate. The legend reads **HUD maps this** / **found, not mapped** / **unmapped**: that split is the point of the view.
+- **Calls:** `memory_layout {path|address, type?, extend}` for a struct view, `memory_read {path|address, offset?, size}` for a raw view and for every followed pointer (256 bytes), `watch_memory {path|address, size: the region, durationMs, intervalMs: 100}`, `memory_where {address}`; `memory_population {path, labels, limit: 200}` then `memory_layout {address: items[0].address, type: struct}` and `memory_correlate {path, labels}` for a population; `memory_compare {}` / `{names}` and `memory_snapshot {name, path, labels}` for experiments; `findings {}` and `verify_finding {id}`. **Live** mode (off by default) re-reads the region with one `memory_read` per second and decodes the mapped fields client-side from the bytes (`decodeDotNet`), because the bridge runs on the game thread; it pauses while a watch runs or the panel is hidden.
+- **Selection** is a byte range (`off`, `size`) plus the segment id when it is a field / candidate / slot. The strip, the rows, the hex view and the watch list all set it; the inspector reads it. A changed range selects the one field that covers it, so the bit grid shows the flipped bits in the field's own numbering (`bitsRelativeTo`).
+- **Layout:** inline: target bar, summary, the map card (strip, legend, filter All / Mapped / Candidates / Changed, rows at ≤ 20 rem), the inspector, the hex card (collapsible), the watch card. Fullscreen: map | hex | inspector + watch at `lg`; map | (inspector, watch, hex) between `sm` and `lg`; stacked below. A watch that found changes switches the map filter to Changed once.
+- **Keyboard:** in the rows, arrows / Home / End move the selection, Enter follows a pointer, Escape clears.
+- **Model context:** the view (struct, address, size, coverage), the selection (offset, address, kind, name, type, value, bytes, check, Ghidra address, bits) and the last watch's changed ranges, debounced and deduplicated. "Ask Claude" builds a question from the selection, e.g. "What is the unmapped std::vector at +40 in LifeComponentOffsets? Check it in Ghidra at 0x1435A64B0", and adds what changed there during the watch.
 
 ## Conventions
 

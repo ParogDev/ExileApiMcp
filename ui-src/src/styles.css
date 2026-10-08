@@ -49,6 +49,13 @@
   --color-k-bool: light-dark(#6d3fc2, #c3a2ff);
   --color-k-enum: light-dark(#0b7a6f, #5fd8c8);
 
+  /* Memory view: what covers a byte. Mapped = blue, candidate structure = violet, changed = magenta;
+     read-view slot kinds reuse these plus teal for heap pointers. Unmapped bytes are hatched fg-3. */
+  --color-m-field: light-dark(#2f6fd6, #7fa6f0);
+  --color-m-cand: light-dark(#7c3aed, #b794f6);
+  --color-m-change: light-dark(#d6336c, #ff6b9d);
+  --color-m-ptr: light-dark(#0f8a7e, #4fd1c5);
+
   /* Named ui/code (not sans/mono) so they never shadow the host's --font-sans/--font-mono. */
   --font-ui: var(--font-sans, ui-sans-serif, system-ui, "Segoe UI", sans-serif);
   --font-code: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
@@ -125,6 +132,17 @@ html, body {
   background: color-mix(in oklab, var(--color-warning) 18%, transparent);
 }
 
+/* Memory view: unmapped bytes are hatched so they read as "nothing here yet" in both themes. */
+.m-hatch {
+  background-image: repeating-linear-gradient(135deg, color-mix(in oklab, var(--color-fg-3) 45%, transparent) 0 1px, transparent 1px 4px);
+}
+/* A byte a live re-read saw change: flashes magenta once. */
+@keyframes m-flash { from { background-color: color-mix(in oklab, var(--color-m-change) 70%, transparent); color: var(--color-fg); } }
+.m-flash { animation: m-flash 1.8s ease-out; }
+/* The watch is sampling: the progress fill shimmers softly. */
+@keyframes m-sampling { 50% { opacity: 0.55; } }
+.m-sampling { animation: m-sampling 1.2s ease-in-out infinite; }
+
 /* Code blocks: wrap long accessors instead of forcing a horizontal scroll at 380 px. */
 .code-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 
@@ -133,7 +151,8 @@ html, body {
 .breathe { animation: breathe 1.2s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
-  .flash-up, .flash-down, .pulse-ring, .slide-up, .fade-in, .spin, .shimmer, .breathe { animation: none; }
+  .flash-up, .flash-down, .pulse-ring, .slide-up, .fade-in, .spin, .shimmer, .breathe, .m-flash, .m-sampling { animation: none; }
+  .m-flash { background-color: color-mix(in oklab, var(--color-m-change) 40%, transparent); }
   .flash-up { background: color-mix(in oklab, var(--color-success) 18%, transparent); }
   .flash-down { background: color-mix(in oklab, var(--color-danger) 18%, transparent); }
   .pulse-ring { box-shadow: inset 2px 0 0 var(--color-ring), 0 0 0 2px color-mix(in oklab, var(--color-ring) 55%, transparent); }

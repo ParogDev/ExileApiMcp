@@ -136,6 +136,10 @@ public static class BridgeTools
                 entry["status"] = "connected";
                 entry["port"] = b.Port;
                 entry["hello"] = await b.SendRequestAsync("query", new JObject { ["type"] = "hello" }, ct);
+                // Facts verified on the other game but not this one: check them before relying on them here.
+                if (FindingsTools.ToCheck(b.Game) is { Count: > 0 } pending)
+                    entry["findingsToCheck"] = $"{pending.Count} finding(s) verified on another game but not on {b.Game}: {string.Join(", ", pending)}. " +
+                                               "Run verify_finding before relying on them (findings lists all).";
             }
             catch (BridgeException ex)
             {
