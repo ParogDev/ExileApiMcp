@@ -30,6 +30,7 @@ Most questions about a struct are settled without the user. Use these in this or
    - Pointers into data rows also show as `data-row` in `memory_layout` (e.g. `Base` +24 → `ItemVisualIdentity.dat[...]`).
 2. **`code_struct_layout`** on the struct's network (de)serializer or constructor (found with `find_field_access`): every member with its size and the flag that gates it, diffed with the HUD's struct.
    - For a stash tab, the deserializer `FUN_141d4d1f0` yields +0 (8 B, bit 5), +40 (inventory id), +58 (2 B), +60 (1 B, bit 4) as UNMAPPED, and Flags as 2 B vs the HUD's 1 B, with no experiment.
+   - **`hud_property_map`** says which HUD property reads which offset, from the HUD's own IL (offline). On PoE1 it's the fastest way to name a field. ExileCore2 getters are protected stubs, so there it reports that instead.
 3. **`memory_correlate`** over everything loaded (all tabs, all entities): which bits follow known properties.
 4. **Only then a guided experiment:** for what needs a change of state, or to settle what the above leave ambiguous.
 
