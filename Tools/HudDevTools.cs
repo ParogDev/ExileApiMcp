@@ -120,6 +120,30 @@ public static partial class HudDevTools
         return ToolResults.Json(new JObject { ["huds"] = result });
     }
 
+
+    /// <summary>The plugin's average Tick and Render ms per frame over a 2 s pipeline trace (matched by name without spaces).</summary>
+    private static async Task<JObject> PluginCost(BridgeRegistry bridges, string? game, string plugin, CancellationToken ct)
+    {
+        try
+        {
+            var (bridge, started) = await bridges.CallAsync(game, "pipeline.trace", new JObject { ["durationMs"] = 2000, ["entities"] = 0 }, ct);
+            var id = started["id"]?.Value<string>();
+            if (id == null) return new JObject { ["error"] = started["message"] ?? started["error"] ?? "trace not started" };
+            var g = bridge.Game == "auto" ? game : bridge.Game;
+            await Task.Delay(2300, ct);
+            JToken r = started;
+            for (var i = 0; i < 20 && r["status"]?.Value<string>() != "done"; i++)
+            {
+                try { (_, r) = await bridges.CallAsync(g, "pipeline.trace_result", new JObject { ["id"] = id }, ct); } catch (McpException) { }
+                if (r["status"]?.Value<string>() != "done") await Task.Delay(250, ct);
+            }
+            static string Key(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+            double? Avg(string section) => (r[section] as JObject)?.Properties().FirstOrDefault(p => Key(p.Name) == Key(plugin))?.Value["avg"]?.Value<double>();
+            return new JObject { ["tickMs"] = Avg("pluginTickMs"), ["renderMs"] = Avg("pluginRenderMs"), ["hudFps"] = r["hudFps"], ["frameWorkMs"] = r["updateMs"]?["avg"] };
+        }
+        catch (Exception ex) { return new JObject { ["error"] = ex.Message }; }
+    }
+
     [McpServerTool(Name = "reload_plugin", Title = "Recompile a HUD plugin in place", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("Recompile and reload one source plugin in the running HUD, like its Reload button in the HUD menu - " +
                  "no HUD restart. Waits for the result (the HUD pauses while compiling, usually 1-10 s) and returns ok/error " +
@@ -129,9 +153,11 @@ public static partial class HudDevTools
         [Description("Plugin folder or display name, e.g. 'Whats A Mirage'")] string plugin,
         [Description("Wait for the compile to finish (default true); false returns as soon as it is queued")] bool wait = true,
         [Description("Reload even when the HUD setting 'Avoid locking plugin dlls' is off (only safe when the code is unchanged)")] bool force = false,
+        [Description("Also measure the plugin's per-frame Tick and Render cost for 2 s before and after the reload (pipeline_trace; needs 'Allow HUD Instrumentation'), to see whether an edit made it faster or slower")] bool perf = false,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
+        var before = perf ? await PluginCost(bridges, game, plugin, ct) : null;
         var started = DateTime.UtcNow;
         var (bridge, queued) = await bridges.CallAsync(game, "hud.reload_plugin", new JObject { ["name"] = plugin, ["force"] = force }, ct);
         if (queued["queued"]?.Value<bool>() != true || !wait) return ToolResults.Json(queued);
@@ -173,6 +199,11 @@ public static partial class HudDevTools
                 .Select(e => new JObject { ["level"] = e.Level, ["message"] = Clip(hud.ForAgent(e.Message)) })
                 .Take(10).ToList();
             result["loggedSinceReload"] = new JArray(logged);
+        }
+        if (perf && result["ok"]?.Value<bool>() == true)
+        {
+            var after = await PluginCost(bridges, game, plugin, ct);
+            result["perf"] = new JObject { ["before"] = before, ["after"] = after, ["note"] = "avg ms per frame over 2 s each; compare tickMs + renderMs" };
         }
         if (result["ok"]?.Value<bool>() == false)
         {
