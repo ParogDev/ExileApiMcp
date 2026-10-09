@@ -26,5 +26,6 @@ Measured on PoE2 (ExileCore2), 2026-10-09, in town with ~600 entities loaded, wi
 - **Classify slowly, project per frame.** Category, mods, buffs and stats change rarely: compute them at 10-20 Hz. Positions need every frame; use the held `Render` component's `Pos`.
 - **Hold component references** (`Life`, `Render`, `Positioned`) per tracked entity.
 - **One camera snapshot per frame.** It's cheaper per point, and every point uses the same camera.
+- **Lint before you profile:** `hud_plugin_lint plugin=<name>` lists these calls on Tick/Render paths offline, flags the ones in loops or per-item lambdas, and gives the cheaper equivalent. It's a static heuristic: code that only runs on demand (e.g. a query handler called from Render) shows up too, so confirm with `profile_plugin`.
 - **Benchmark cold, not warm.** A loop repeating one call on one object measures the cache. Time one pass over many entities instead.
 - At TargetFps 200+ every per-frame cost is multiplied by ~3.5. Measure with `pipeline_trace` (plugin Tick/Render) and `profile_plugin` (per method). See `shared/render-fidelity`.
