@@ -65,7 +65,7 @@ public static class ExperimentTools
         };
     }
 
-    [McpServerTool(Name = "await_change", Title = "Wait for the user's action and diff it", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "await_change", Title = "Wait for the user's action and diff it", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("One step of a guided experiment. Captures the watched state, waits (up to timeoutMs) until the USER does " +
                  "the instructed thing in game and the state changes, waits until it settles, and returns what changed: leaf " +
                  "values, bytes and bits (with HUD field names), collection items. The step is appended to the experiment record " +
@@ -331,7 +331,7 @@ public static class ExperimentTools
     // nothing waits on an agent being connected. experiment_queue_status collects finished steps into the same
     // experiment records as await_change (diffed here with the HUD's field names), so experiment_summary covers both.
 
-    [McpServerTool(Name = "experiment_queue", Title = "Queue a step for the user to start in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "experiment_queue", Title = "Queue a step for the user to start in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("Leave a guided step for the USER to start from the in-game guide card when they are ready (they may be " +
                  "away): nothing is recorded until they press Start, then the HUD records it itself (baseline, wait for a lasting " +
                  "change, settle) for each repeat - no agent needs to be connected. The queue survives HUD restarts, so " +

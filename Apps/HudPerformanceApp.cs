@@ -14,7 +14,7 @@ public static class HudPerformanceApp
 {
     public const string ResourceUri = "ui://exile/hud-performance";
 
-    [McpServerResource(UriTemplate = ResourceUri, Name = "hud-performance-ui", Title = "HUD performance", MimeType = McpApps.HtmlMimeType)]
+    [McpServerResource(UriTemplate = ResourceUri, Name = "hud-performance-ui", Title = "HUD performance", MimeType = McpApps.HtmlMimeType, IconSource = ExileApiMcp.Hosting.IconSet.HudPerformanceLight)]
     [McpMeta("ui", JsonValue = """{"prefersBorder":true}""")]
     [Description("Live HUD performance: frame timeline with GC pauses, plugins vs core, costliest plugins, next steps.")]
     public static string GetUi() => PlayerStatsApp.LoadEmbedded("ui/hud-performance.html") ?? Placeholder;

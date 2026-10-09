@@ -13,7 +13,7 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class HealthReportTools
 {
-    [McpServerTool(Name = "hud_health_report", Title = "Why is the HUD slow, laggy or not drawing?", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "hud_health_report", Title = "Why is the HUD slow, laggy or not drawing?", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.HudPerformanceLight)]
     [Description("""
         One-call diagnosis of the running HUD, cheapest checks first:
         1. desktop: is the display on and the game in front (else the overlay isn't visible at all);
@@ -126,7 +126,7 @@ public static class HealthReportTools
 
     private static JObject Action(string label, string tool, JObject args) => new() { ["label"] = label, ["tool"] = tool, ["args"] = args };
 
-    [McpServerTool(Name = "show_hud_performance", Title = "Open the HUD performance panel", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "show_hud_performance", Title = "Open the HUD performance panel", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.HudPerformanceLight)]
     [ModelContextProtocol.Extensions.Apps.McpAppUi(ResourceUri = Apps.HudPerformanceApp.ResourceUri)]
     [McpMeta("ui/resourceUri", Apps.HudPerformanceApp.ResourceUri)]
     [Description("Open a live panel of the running HUD's performance (clients that support MCP Apps): a frame timeline with GC " +

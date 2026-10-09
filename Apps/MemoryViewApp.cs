@@ -14,7 +14,7 @@ public static class MemoryViewApp
 {
     public const string ResourceUri = "ui://exile/memory-view";
 
-    [McpServerResource(UriTemplate = ResourceUri, Name = "memory-view-ui", Title = "Memory view", MimeType = McpApps.HtmlMimeType)]
+    [McpServerResource(UriTemplate = ResourceUri, Name = "memory-view-ui", Title = "Memory view", MimeType = McpApps.HtmlMimeType, IconSource = ExileApiMcp.Hosting.IconSet.MemoryViewLight)]
     [McpMeta("ui", JsonValue = """{"prefersBorder":true}""")]
     [Description("Interactive memory view: what the HUD maps in a struct vs live memory, unmapped structure, pointers, bit flags.")]
     public static string GetUi() => PlayerStatsApp.LoadEmbedded("ui/memory-view.html") ?? Placeholder;

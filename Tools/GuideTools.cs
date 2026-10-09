@@ -15,7 +15,7 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class GuideTools
 {
-    [McpServerTool(Name = "guide", Title = "Show the user what to do in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "guide", Title = "Show the user what to do in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("Show an instruction in the in-game agent guide panel (sticky 'do this now' card) and/or add a line to its " +
                  "log. Use it before asking the user to do anything in game - they may not be looking at the chat. " +
                  "await_change sets the instruction and status by itself when you pass instruction. Statuses: waiting (user " +
@@ -55,7 +55,7 @@ public static class GuideTools
         CancellationToken ct = default) =>
         ToolResults.Json((await bridges.CallAsync(game, "guide.state", null, ct)).Result);
 
-    [McpServerTool(Name = "highlight", Title = "Point at things in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "highlight", Title = "Point at things in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("Draw attention to things on the user's screen (never clicks): items in the inventory or the visible stash tab " +
                  "(by name, all matches), any UI element (walker path) or a screen area. Each target has a tier - primary " +
                  "(click/look here, animated), secondary (related) or context (an area to orient the eye) - and optionally an " +

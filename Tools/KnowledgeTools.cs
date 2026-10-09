@@ -43,7 +43,7 @@ public static class KnowledgeTools
         return list.OrderBy(p => p.Game == "shared" ? 0 : 1).ThenBy(p => p.Game).ThenBy(p => p.Topic).ToList();
     }
 
-    [McpServerTool(Name = "knowledge", Title = "HUD dev knowledge packs", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "knowledge", Title = "HUD dev knowledge packs", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.KnowledgeLight)]
     [Description("Verified facts for ExileApi (PoE1) / ExileCore2 (PoE2) plugin development: how the HUD compiles and reloads " +
                  "plugins, PoE2 API differences, obfuscated PoE2 offsets, player-stat identity and resistance layers, and " +
                  "how to ask the user for in-game help (shared/working-with-users). " +
@@ -88,7 +88,7 @@ public static class KnowledgeTools
         });
     }
 
-    [McpServerResource(UriTemplate = "exile://knowledge/{game}/{topic}", Name = "knowledge-pack", MimeType = "text/markdown")]
+    [McpServerResource(UriTemplate = "exile://knowledge/{game}/{topic}", Name = "knowledge-pack", MimeType = "text/markdown", IconSource = ExileApiMcp.Hosting.IconSet.KnowledgeLight)]
     [Description("A knowledge pack: game is 'shared', 'poe1' or 'poe2'. The knowledge tool lists them.")]
     public static string KnowledgeResource(string game, string topic) =>
         Packs.Value.FirstOrDefault(p => p.Game.Equals(game, StringComparison.OrdinalIgnoreCase) && p.Topic.Equals(topic, StringComparison.OrdinalIgnoreCase))?.Text

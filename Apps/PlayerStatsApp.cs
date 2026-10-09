@@ -16,7 +16,7 @@ public static class PlayerStatsApp
 {
     public const string ResourceUri = "ui://exile/player-stats";
 
-    [McpServerResource(UriTemplate = ResourceUri, Name = "player-stats-ui", Title = "Player stats", MimeType = McpApps.HtmlMimeType)]
+    [McpServerResource(UriTemplate = ResourceUri, Name = "player-stats-ui", Title = "Player stats", MimeType = McpApps.HtmlMimeType, IconSource = ExileApiMcp.Hosting.IconSet.PlayerStatsLight)]
     // JsonValue, not the (name, value) constructor: that one emits the JSON as a *string*
     // ("ui":"{\"prefersBorder\":true}"), and hosts expect _meta.ui to be an object.
     [McpMeta("ui", JsonValue = """{"prefersBorder":true}""")]
