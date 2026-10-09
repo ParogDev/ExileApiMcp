@@ -59,6 +59,14 @@ public static class HealthReportTools
         if (r["gc"] is JObject gc)
         {
             sb.AppendLine($"GC: {gc["allocMBPerSecond"]} MB/s allocated ({gc["fetchedMBPerSecond"]} MB/s fetched from the game), {gc["gen0"]} gen0 / {gc["gen1"]} gen1 / {gc["gen2"]} gen2 in 3 s, {gc["pauseMsTotal"]} ms paused");
+            // The page cache returns its pages to ArrayPool<byte>.Shared every frame; the pool keeps only arraysPerSize of them.
+            var keeps = gc["sharedArrayPool"]?["arraysPerSize"]?.Value<int?>();
+            var cycled = gc["fetchedPagesPerFrame"]?.Value<double?>();
+            if (keeps is { } k && cycled is { } c && c > k && gc["allocMBPerSecond"]?.Value<double>() > 50)
+                findings.Add($"the shared ArrayPool keeps {k} pages per size but the page cache cycles ~{c:F0} per frame, so most become garbage: " +
+                             "start the HUD with DOTNET_SYSTEM_BUFFERS_SHAREDARRAYPOOL_MAXARRAYSPERPARTITION=256 (decimal; scaffolding: <HUD>\\hud-env.txt, research/hud-gc.md)");
+            else if (gc["sharedArrayPool"]?["broken"]?.Value<string>() is { } broken)
+                findings.Add($"cannot check the ArrayPool limits: {broken}");
             if (gc["pauseMsTotal"]?.Value<double>() > 60) findings.Add($"GC pauses {gc["pauseMsTotal"]} ms per 3 s: see research/hud-gc.md (page cache churn) and plugin allocation below");
         }
         var plugins = new List<(string name, double tick, double render, double alloc)>();
