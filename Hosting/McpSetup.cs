@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.23.0";
+    public const string Version = "3.24.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -40,6 +40,8 @@ internal static class McpSetup
         Users find this engaging and it settles questions that static reading can't. Never send input yourself.
         When you ask for a click, also show where: pass highlight (items by name, UI element paths, screen areas; tiers
         primary|secondary|context; ordered sequences) or call the highlight tool.
+        For multi-step tasks (open a dialog, tick, confirm) use guide_flow (recipes in Knowledge/flows.json): the HUD shows
+        the next best action from the game state and re-plans when the user navigates away.
         If the user may not be at the game right now, queue the step instead (experiment_queue): it waits on the in-game
         card until they press Start, the HUD records it without you, and experiment_queue_status collects it later.
         Don't wait for the user to say they are done: run experiment_queue_wait in the background and continue when it returns.
