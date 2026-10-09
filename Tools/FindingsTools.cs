@@ -89,6 +89,12 @@ public static class FindingsTools
         // Resolve which game we are on (the bridge that answers).
         var (bridge, _) = await bridges.QueryAsync(game, "hello", ct);
         var g = bridge.Game;
+        // Per-game overrides (check.byGame.<game>): e.g. a data table whose rows differ between the games.
+        if (check["byGame"]?[g] is JObject over)
+        {
+            check = (JObject)check.DeepClone();
+            foreach (var p in over.Properties()) check[p.Name] = p.Value.DeepClone();
+        }
         var recorded = f["games"]?[g] as JObject;
         var o = new JObject { ["id"] = id, ["game"] = g, ["kind"] = check["kind"], ["recorded"] = recorded };
         string verdict, where = "", evidence;
