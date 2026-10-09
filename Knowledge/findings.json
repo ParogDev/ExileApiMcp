@@ -82,6 +82,16 @@
       "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 5, "expectAll": ["0x3d) & 0x20"] }
     },
     {
+      "id": "stash.flags.public",
+      "title": "Stash tab Flags bit 3 = Public (the Edit Stash Tab dialog's only checkbox: the tab is listed for trade)",
+      "subject": "ServerStashTab",
+      "games": {
+        "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 3", "evidence": "Code: the Edit Stash Tab dialog reader FUN_14025ad60 copies its single checkbox into descriptor +0x24, which FUN_14025ac30 fills from (Flags >> 3) & 1. Experiment stash-public (Dump leveling, tab 33): ticking Public + confirm changed only Flags 02 -> 0A (bit 3); unticking changed only 0A -> 02. No other tab has the bit (none is public)" },
+        "poe2": { "status": "unverified" }
+      },
+      "check": { "kind": "manual", "how": "Watch memory:GameController.IngameState.ServerData.PlayerStashTabs[<n>]:72 (experiment_queue or await_change) while the user ticks and unticks Public in Edit Stash Tab on tab n: only +61 bit 3 may flip." }
+    },
+    {
       "id": "stash.child.page-key",
       "title": "Child tab +0 (u64) = which page it is: Map stash pages are tagged (low 5 bits = kind, rest = value); Unique stash pages are a plain category number",
       "subject": "ServerStashTab (child tabs, Flags bit 5)",

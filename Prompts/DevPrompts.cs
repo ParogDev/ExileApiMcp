@@ -114,6 +114,8 @@ public static class DevPrompts
            with the key and the mouse target>" step=n steps=m watch=[...] timeoutMs=45000-60000. Count repeats as steps.
            The card shows DO THIS NOW, then CAPTURED with what changed, or TRY AGAIN. In chat, one line per capture;
            never narrate the waiting or repeat the instruction. Call the next await_change right after a capture.
+           If the user isn't at the game right now, experiment_queue the steps instead (note = why, repeats = 2-3):
+           they press Start on the in-game card when ready, and experiment_queue_status collects the recordings later.
         4. Repeat each action 2-3 times. experiment_summary shows what changed EVERY time (the evidence) vs sometimes
            (side effects, or watches you added later). Item-dependent effects (stacks, slots) show up as "sometimes":
            ask what the user did when a result is surprising. Stop when the evidence is clear.
