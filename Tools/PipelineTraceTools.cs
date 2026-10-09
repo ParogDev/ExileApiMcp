@@ -135,6 +135,7 @@ public static class PipelineTraceTools
     public static async Task<CallToolResult> RenderLab(BridgeRegistry bridges,
         [Description("Raycast wall highlight on/off")] bool? walls = null,
         [Description("Path to target on/off")] bool? path = null,
+        [Description("HealthBars comparison markers on/off: a gold bracket at HealthBars' own anchor per nearby monster/player, from fresh time-aligned data")] bool? bars = null,
         [Description("'waypoint', 'transition', or an entity path substring")] string? target = null,
         [Description("Time alignment in ms (0-100)")] double? delayMs = null,
         [Description("Instead of toggling: compare Radar-style and lab path drawing offline on this area's grid (simulated walk to target): backwards starts, jaggedness, line jumps")] bool compare = false,
@@ -147,7 +148,7 @@ public static class PipelineTraceTools
             return ToolResults.Json(c);
         }
         var p = new JObject();
-        if (walls != null) p["walls"] = walls; if (path != null) p["path"] = path;
+        if (walls != null) p["walls"] = walls; if (path != null) p["path"] = path; if (bars != null) p["bars"] = bars;
         if (target != null) p["target"] = target; if (delayMs != null) p["delayMs"] = delayMs;
         var (_, r) = await bridges.CallAsync(game, p.Count == 0 ? "lab.state" : "lab.set", p, ct);
         return ToolResults.Json(r);
