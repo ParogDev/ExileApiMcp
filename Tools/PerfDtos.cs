@@ -80,16 +80,6 @@ public sealed class PipelineTraceResult
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
-public sealed class DesktopInfo
-{
-    public long? IdleSeconds { get; set; }
-    public long? DisplayTimeoutSeconds { get; set; }
-    public bool? DisplayLikelyOff { get; set; }
-    public bool? GameForeground { get; set; }
-    public string? Warning { get; set; }
-    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
-}
-
 public sealed class PerfPlugin
 {
     public string Name { get; set; } = "";
