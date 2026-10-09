@@ -189,6 +189,7 @@ public static class PipelineTraceTools
         if (r["status"]?.Value<string>() != "done") return ToolResults.Json(r);
         var sb = new StringBuilder();
         sb.AppendLine($"{r["plugin"]}: {r["methodsPatched"]} methods for {r["durationMs"]} ms, {r["calls"]} calls, {r["selfTotalMsPerSecond"]} ms of CPU per second in its code");
+        if (r["hookOverhead"] is JObject oh) sb.AppendLine($"(the profiler's own cost, {oh["usPerCall"]} us and {oh["bytesPerCall"]} B per call, is already subtracted)");
         sb.AppendLine("self ms/s | incl ms/s | us/call | calls | method");
         foreach (var m in r["top"] as JArray ?? [])
             sb.AppendLine($"{m["selfMsPerSecond"],9} | {m["inclMsPerSecond"],9} | {m["selfUsPerCall"],7} | {m["calls"],5} | {m["method"]}");
