@@ -93,11 +93,11 @@
     },
     {
       "id": "ui.poe2.quest-complete-notice",
-      "title": "PoE2: the 'Quest Complete' notice is a top-level IngameUi child the HUD doesn't map (QuestRewardWindow is a different panel)",
+      "title": "PoE2: the quest notification (new objective / quest complete) is a top-level IngameUi child the HUD doesn't map (QuestRewardWindow and QuestTracker are different panels)",
       "subject": "IngameUi.Children",
       "games": {
         "poe1": { "status": "unverified" },
-        "poe2": { "status": "unverified", "note": "Seen once by passive observation (2026-10-08): child [43] opened with text 'Quest Complete' while QuestRewardWindow [63] was open after an NPC dialog in Clearfell Encampment, and closed afterwards. Identify by text; confirm on the next quest turn-in" }
+        "poe2": { "status": "unverified", "note": "Seen twice by passive observation (2026-10-08), both as child [43]: text 'Quest Complete' while QuestRewardWindow [63] was open after an NPC dialog in Clearfell Encampment, and 'Kill the Mad Wolf' (a new objective) in Ogham Manor. A 540x270 element near the bottom centre with one child. Identify by position or text" }
       },
       "check": { "kind": "manual", "how": "observe action=start, turn in a quest, then observe_events kinds=[ui]: an unmapped panel with text 'Quest Complete' alongside QuestRewardWindow." }
     },
