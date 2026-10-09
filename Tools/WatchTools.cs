@@ -17,12 +17,13 @@ public static class WatchTools
 {
     private const int MaxChanges = 200;
 
-    [McpServerTool(Name = "watch_object", Title = "Watch an object for changes", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "watch_object", Title = "Watch an object for changes", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(WatchObjectResult))]
     [Description("Sample an object path (same syntax as eval_path, e.g. 'GameController.IngameState.IngameUi.InventoryPanel' or " +
                  "'GameController.Player.GetComponent<Life>()') repeatedly for durationMs and report only the values that " +
                  "changed: per leaf path, how often it changed, first/last values and when. Use it to discover which field " +
                  "reflects an in-game event (ask the user to do the thing while it runs, or watch passive changes like " +
-                 "regen). Leaves that change on nearly every sample are flagged 'noisy' (timers, counters).")]
+                 "regen). Leaves that change on nearly every sample are flagged 'noisy' (timers, counters). Result: WatchObjectResult.")]
     public static async Task<CallToolResult> WatchObject(BridgeRegistry bridges,
         [Description("Object path starting with GameController (see eval_path / describe_type)")] string expression,
         [Description("How long to watch, ms (500-60000, default 5000)")] int durationMs = 5000,
@@ -103,7 +104,7 @@ public static class WatchTools
         if (stats.Count > MaxChanges) o["truncated"] = $"{stats.Count - MaxChanges} more changed leaves; watch a narrower path.";
         if (errors > 0) o["errors"] = $"{errors} failed samples; last: {lastError}";
         if (stats.Count == 0) o["note"] = "Nothing changed. The walker serializes 2 levels deep: watch a deeper path for nested values.";
-        return ToolResults.Json(o);
+        return Dto.Result(Dto.From<WatchObjectResult>(o), o.ToString(Newtonsoft.Json.Formatting.None));
     }
 
     internal static void Flatten(JToken? token, string path, Dictionary<string, string> into)

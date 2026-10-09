@@ -13,7 +13,8 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class ApiDiffTools
 {
-    [McpServerTool(Name = "hud_api_diff", Title = "What a HUD update changed, and what it breaks", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "hud_api_diff", Title = "What a HUD update changed, and what it breaks", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ApiDiffResult))]
     [Description("Snapshot the installed HUD build's API (public types and members, offsets struct fields with [FieldOffset], " +
                  "the IL property map) and diff it with the previous snapshot: types/members removed, renamed or with a new " +
                  "signature, offsets that moved or changed type, properties that now read different memory - plus the impact: " +
@@ -68,11 +69,7 @@ public static class ApiDiffTools
                 ["impact"] = new JArray(impact.Select(h => new JObject { ["name"] = h.name, ["where"] = h.where })),
             };
         }
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(result.ToString(Newtonsoft.Json.Formatting.None)),
-        };
+        return Dto.Result(Dto.From<ApiDiffResult>(result), sb.ToString());
     }
 
     /// <summary>A build id of this game, a full snapshot path, or 'poe1'/'poe2' = that game's latest snapshot.</summary>

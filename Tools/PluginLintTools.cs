@@ -12,7 +12,8 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class PluginLintTools
 {
-    [McpServerTool(Name = "hud_plugin_lint", Title = "Expensive HUD API calls in a plugin's per-frame code (offline)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "hud_plugin_lint", Title = "Expensive HUD API calls in a plugin's per-frame code (offline)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(PluginLintResult))]
     [Description("""
         Static check of compiled plugins (offline: reads the DLL's IL, nothing runs, no HUD needed): every call to a
         known-expensive HUD member (Entity.DistancePlayer, Entity.Pos, Stats, Buffs, GetComponent, GameController.Entities,
@@ -50,11 +51,7 @@ public static class PluginLintTools
                 });
             }
         if (sb.Length == 0) sb.Append("No matching source plugins.");
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(new JObject { ["plugins"] = result }.ToString(Newtonsoft.Json.Formatting.None)),
-        };
+        return Dto.Result(Dto.From<PluginLintResult>(new JObject { ["plugins"] = result }), sb.ToString());
     }
 
     /// <summary>The HUD's compiled output of a source plugin: Plugins\Temp\&lt;folder&gt; (ExileCore2) or Plugins\Compiled\&lt;folder&gt; (ExileCore).</summary>

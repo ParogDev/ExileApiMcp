@@ -22,7 +22,8 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static partial class CodeAccessTools
 {
-    [McpServerTool(Name = "find_field_access", Title = "Find code that accesses a struct field (static, Ghidra)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "find_field_access", Title = "Find code that accesses a struct field (static, Ghidra)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(FieldAccessResult))]
     [Description("Find the game code that reads, writes or bit-tests a struct field - to explain an unmapped or unknown field " +
                  "(e.g. stash tab Flags +61 bit 6) from the code that uses it. Static analysis of the Ghidra snapshot matching " +
                  "the installed exe; never touches the running game. The struct's functions are found by fingerprint: code " +
@@ -151,11 +152,7 @@ public static partial class CodeAccessTools
             ["decompiled"] = decompiled,
             ["unanchored"] = $"{scored.Count - anchored.Count} other instructions use +0x{target:X} on a base that touches fewer than {minKnown} known fields (other structs, or code we can't tie to this one)",
         };
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = Outline(result) }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(result.ToString(Formatting.None)),
-        };
+        return Dto.Result(Dto.From<FieldAccessResult>(result), Outline(result));
     }
 
     // ── Instruction parsing ──────────────────────────────────────────

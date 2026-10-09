@@ -16,7 +16,8 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class GameDataTools
 {
-    [McpServerTool(Name = "game_data", Title = "Read the game's data tables", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "game_data", Title = "Read the game's data tables", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(GameDataResult))]
     [Description("List or read the game's data files (Data/*.dat) as loaded in memory. Without file: lists files whose name " +
                  "contains filter (default '.dat'). With file: rows with their index, every text field decoded (+slot:text) " +
                  "and the first int32s, optionally only rows whose text contains find. Use it to name ids and enums found in " +
@@ -35,7 +36,8 @@ public static class GameDataTools
         {
             var (_, list) = await bridges.CallAsync(game, "data.files", new JObject { ["filter"] = filter ?? ".dat", ["limit"] = 500 }, ct);
             Check(list);
-            return ToolResults.Json(list);
+            if (list["error"] != null) return ToolResults.Json(list);
+            return Dto.Result(Dto.From<GameDataResult>(list), list.ToString(Newtonsoft.Json.Formatting.None));
         }
         var p = new JObject { ["file"] = file, ["offset"] = offset, ["limit"] = limit };
         if (find != null) p["find"] = find;
@@ -51,14 +53,11 @@ public static class GameDataTools
         }
         if (r["truncated"] != null) sb.AppendLine($"({r["truncated"]})");
         sb.Append("Row index is usually the id the game stores. structuredContent has hex and int32 columns per row.");
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = sb.ToString() }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(r.ToString(Newtonsoft.Json.Formatting.None)),
-        };
+        return Dto.Result(Dto.From<GameDataResult>(r), sb.ToString());
     }
 
-    [McpServerTool(Name = "find_in_game_data", Title = "Which data table column holds these ids?", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "find_in_game_data", Title = "Which data table column holds these ids?", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(FindInGameDataResult))]
     [Description("Scan every loaded data table (Data/*.dat) for a set of values found in memory and rank the columns that hold " +
                  "them: the answer to 'what are these ids?'. Pass several values from the same field across a population (e.g. " +
                  "the +0 of every Map stash page): a column holding nearly all of them is the source, and its rows name them. " +
@@ -102,11 +101,7 @@ public static class GameDataTools
         }
         if ((r["missing"] as JArray)?.Count > 0 && cols.Count > 0) sb.AppendLine($"  not in the top column: {string.Join(", ", r["missing"]!)}");
         sb.Append(r["note"]);
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = sb.ToString() }],
-            StructuredContent = JsonSerializer.Deserialize<JsonElement>(r.ToString(Newtonsoft.Json.Formatting.None)),
-        };
+        return Dto.Result(Dto.From<FindInGameDataResult>(r), sb.ToString());
     }
 
     private static void Check(JToken? r)

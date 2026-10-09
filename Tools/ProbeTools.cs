@@ -30,7 +30,8 @@ public static class ProbeTools
 
     // ── Correlate ────────────────────────────────────────────────────
 
-    [McpServerTool(Name = "memory_correlate", Title = "Correlate memory bits with known properties", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "memory_correlate", Title = "Correlate memory bits with known properties", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(MemoryCorrelateResult))]
     [Description("Test hypotheses about unknown bytes across a whole population instead of one sample. Reads the same byte " +
                  "range from every item of a collection (e.g. GameController.IngameState.ServerData.PlayerStashTabs) and, for " +
                  "each known property (labels, e.g. Affinity, TabType, Name), reports: bits that equal the property's " +
@@ -131,7 +132,7 @@ public static class ProbeTools
         report["findings"] = findings;
         sb.AppendLine().Append("Bits that repeat the label's own storage are expected. Evidence is strong when both sides of the count are large; " +
                                "confirm a finding with a one-variable experiment (memory_snapshot -> change one thing -> memory_snapshot -> memory_compare).");
-        return Result(sb.ToString(), report);
+        return Result<MemoryCorrelateResult>(sb.ToString(), report);
     }
 
     /// <summary>Binary features of a label: non-zero/true, each set bit of a mask, and equality with each common value.</summary>
@@ -183,7 +184,8 @@ public static class ProbeTools
         return new JArray(hits.OfType<JObject>().GroupBy(h => h["offset"]!.Value<int>()).Select(g => g.Last()));
     }
 
-    [McpServerTool(Name = "memory_population", Title = "Raw bytes of every item in a collection", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "memory_population", Title = "Raw bytes of every item in a collection", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(MemoryPopulationResult))]
     [Description("The same byte range from every item of a collection, with per-item labels, as hex - the raw data behind " +
                  "memory_correlate, for viewing it as a grid (items x bytes) or checking a hypothesis by eye. Prefer " +
                  "memory_correlate for conclusions.")]
@@ -212,12 +214,13 @@ public static class ProbeTools
         foreach (var i in items.OfType<JObject>().Take(40))
             sb.Append($"  [{i["index"]}] {i["labels"]?.ToString(Formatting.None)} {i["hex"]}\n");
         if (items.Count > 40) sb.Append($"  ... {items.Count - 40} more (structuredContent has all)");
-        return Result(sb.ToString().TrimEnd(), o);
+        return Result<MemoryPopulationResult>(sb.ToString().TrimEnd(), o);
     }
 
     // ── Snapshots ────────────────────────────────────────────────────
 
-    [McpServerTool(Name = "memory_snapshot", Title = "Save a named memory snapshot", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "memory_snapshot", Title = "Save a named memory snapshot", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(MemorySnapshotResult))]
     [Description("Save a region - or, for a collection path, the same region of every item - under a name, for controlled " +
                  "experiments: snapshot 'baseline', ask the user to change exactly one thing, snapshot 'after', then " +
                  "memory_compare. Labels (e.g. Name) identify collection items across snapshots even if the list reorders. " +
@@ -257,10 +260,12 @@ public static class ProbeTools
         Directory.CreateDirectory(SnapshotDir);
         await File.WriteAllTextAsync(Path.Combine(SnapshotDir, name + ".json"), snap.ToString(Formatting.None), ct);
         var count = snap["items"] is JArray a ? $"{a.Count} items" : $"{snap["size"]} bytes";
-        return ToolResults.Json(new JObject { ["saved"] = name, ["kind"] = snap["kind"], ["what"] = count, ["path"] = path, ["takenAt"] = snap["takenAt"] });
+        var saved = new JObject { ["saved"] = name, ["kind"] = snap["kind"], ["what"] = count, ["path"] = path, ["takenAt"] = snap["takenAt"] };
+        return Result<MemorySnapshotResult>(saved.ToString(Formatting.None), saved);
     }
 
-    [McpServerTool(Name = "memory_compare", Title = "Compare memory snapshots", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "memory_compare", Title = "Compare memory snapshots", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(MemoryCompareResult))]
     [Description("Diff named snapshots in order (e.g. baseline, mercenary-on, mercenary-off): for each step, which items and " +
                  "bytes changed, the bits that flipped (numbered from the byte's offset), and how labels changed alongside. " +
                  "A bit that flips on the 'on' step and back on the 'off' step, while nothing else does, is the answer. " +
@@ -273,7 +278,8 @@ public static class ProbeTools
         {
             var list = new JArray(new DirectoryInfo(SnapshotDir).GetFiles("*.json").OrderByDescending(f => f.LastWriteTime).Take(50)
                 .Select(f => new JObject { ["name"] = Path.GetFileNameWithoutExtension(f.Name), ["savedAt"] = f.LastWriteTime.ToString("O") }));
-            return ToolResults.Json(new JObject { ["snapshots"] = list });
+            var listing = new JObject { ["snapshots"] = list };
+            return Result<MemoryCompareResult>(listing.ToString(Formatting.None), listing);
         }
         if (names.Length < 2) throw new McpException("Pass 2 or more snapshot names, in order.");
         var snaps = names.Select(n =>
@@ -339,7 +345,7 @@ public static class ProbeTools
             ["name"] = s["name"], ["path"] = s["path"], ["kind"] = s["kind"], ["struct"] = s["struct"], ["offset"] = s["offset"],
             ["size"] = s["size"], ["labels"] = s["labels"], ["game"] = s["game"], ["takenAt"] = s["takenAt"],
         }));
-        return Result(sb.ToString(), new JObject { ["snapshots"] = new JArray(names), ["snapshotInfo"] = meta, ["steps"] = steps });
+        return Result<MemoryCompareResult>(sb.ToString(), new JObject { ["snapshots"] = new JArray(names), ["snapshotInfo"] = meta, ["steps"] = steps });
     }
 
     /// <summary>Matching regions of two snapshots: by the first label (e.g. Name) for collections, else by index.</summary>
@@ -387,9 +393,6 @@ public static class ProbeTools
         return o;
     }
 
-    private static CallToolResult Result(string outline, JObject full) => new()
-    {
-        Content = [new TextContentBlock { Text = outline }],
-        StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(full.ToString(Formatting.None)),
-    };
+    /// <summary>The outline as text, the result as typed structuredContent (matching the tool's output schema).</summary>
+    private static CallToolResult Result<T>(string outline, JObject full) => Dto.Result(Dto.From<T>(full), outline);
 }

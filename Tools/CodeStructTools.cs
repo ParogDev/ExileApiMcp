@@ -20,7 +20,8 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static partial class CodeStructTools
 {
-    [McpServerTool(Name = "code_struct_layout", Title = "Struct layout from the game's code vs the HUD", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "code_struct_layout", Title = "Struct layout from the game's code vs the HUD", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(CodeStructLayoutResult))]
     [Description("Derive a struct's layout from one game function and compare it with the HUD's struct: every offset the " +
                  "function reads or writes through the struct pointer, with its size (from casts and (de)serializer size " +
                  "arguments) and the flag test that gates it, matched to the HUD's fields - mapped, mapped with a different " +
@@ -106,11 +107,7 @@ public static partial class CodeStructTools
             ["note"] = "Heuristic: offsets from the decompiled C (casts, pointer strides, (de)serializer size arguments). " +
                        "A gate is the flag test of the enclosing if-block. Confirm discoveries with memory_correlate or a guided experiment.",
         };
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = Outline(result, layout != null) }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(result.ToString(Formatting.None)),
-        };
+        return Dto.Result(Dto.From<CodeStructLayoutResult>(result), Outline(result, layout != null));
     }
 
     // ── Parsing decompiled C ─────────────────────────────────────────

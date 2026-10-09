@@ -21,7 +21,8 @@ public static class HudTypeTools
     private const string GameOpt = "'poe1' or 'poe2'; omit to search every HUD installed";
     private const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
-    [McpServerTool(Name = "hud_find_types", Title = "Find HUD API types", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "hud_find_types", Title = "Find HUD API types", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(HudFindTypesResult))]
     [Description("Search the HUD's assemblies for types by name, or for types that have a member with a given name " +
                  "(e.g. member='ActiveWeaponSetIndex'). Reads DLL metadata from disk: works with the game and HUD closed. " +
                  "Follow up with hud_type for members.")]
@@ -79,10 +80,11 @@ public static class HudTypeTools
         }
         var o = new JObject { ["total"] = total, ["results"] = results };
         if (total > results.Count) o["truncated"] = $"Showing {results.Count} of {total}; narrow the query or raise max.";
-        return ToolResults.Json(o);
+        return Dto.Result(Dto.From<HudFindTypesResult>(o), o.ToString(Newtonsoft.Json.Formatting.None));
     }
 
-    [McpServerTool(Name = "hud_type", Title = "HUD API type members", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "hud_type", Title = "HUD API type members", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(HudTypeResult))]
     [Description("Members of one HUD type from DLL metadata: fields (with [FieldOffset] for GameOffsets structs), " +
                  "properties, methods with signatures, enum values, base types, interfaces, nested types. Can include " +
                  "non-public members and inherited ones. Works with the game and HUD closed. Note: GameOffsets2 (PoE2) " +
@@ -113,7 +115,8 @@ public static class HudTypeTools
                 ? $"'{name}' is ambiguous; pass a full name: {string.Join(", ", candidates.Take(20))}"
                 : $"No type '{name}'. Search with hud_find_types query='{name}'.");
         }
-        return ToolResults.Json(new JObject { ["types"] = new JArray(found.Select(f => TypeDetail(f.Hud, f.Type, nonPublic, inherited, filter, max))) });
+        var result = new JObject { ["types"] = new JArray(found.Select(f => TypeDetail(f.Hud, f.Type, nonPublic, inherited, filter, max))) };
+        return Dto.Result(Dto.From<HudTypeResult>(result), result.ToString(Newtonsoft.Json.Formatting.None));
     }
 
     // ── Shapes ───────────────────────────────────────────────────────
