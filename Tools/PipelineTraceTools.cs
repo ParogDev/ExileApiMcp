@@ -189,6 +189,11 @@ public static class PipelineTraceTools
         sb.AppendLine("self ms/s | incl ms/s | us/call | calls | method");
         foreach (var m in r["top"] as JArray ?? [])
             sb.AppendLine($"{m["selfMsPerSecond"],9} | {m["inclMsPerSecond"],9} | {m["selfUsPerCall"],7} | {m["calls"],5} | {m["method"]}");
+        if (r["topAlloc"] is JArray { Count: > 0 } ta)
+        {
+            sb.AppendLine($"Allocation: {r["allocTotalKBPerSecond"]} KB/s in its code (garbage = GC pauses at high fps). Top:");
+            foreach (var m in ta.Take(8)) sb.AppendLine($"  {m["allocSelfKBPerSecond"],8} KB/s | {m["bytesPerCall"],7} B/call | {m["calls"],5} calls | {m["method"]}");
+        }
         if (r["refused"] is JArray { Count: > 0 } refused) sb.AppendLine("Not profiled: " + string.Join("; ", refused));
         return new CallToolResult
         {
