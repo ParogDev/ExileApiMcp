@@ -23,7 +23,9 @@ public static class ObserveTools
     [McpServerTool(Name = "observe", Title = "Passive observation on/off", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = IconSet.TimelineLight)]
     [Description("Turn the HUD's passive observation on or off, or read its status (action=status). While on, the bridge records " +
                  "its layers (observe_layers: server-sent state and stats by default), top-level UI panels opening/closing (with the " +
-                 "HUD property mapping them, or none), area and level changes, and new entity kinds. Read-only, never input; the " +
+                 "HUD property mapping them, or none, at 10 Hz), area and level changes, new entity kinds, the HUD's own hiccups (hud: " +
+                 "frame spikes with their GC share, plugin reloads) and what agents asked of the HUD or the user (agent: guide, " +
+                 "highlight, experiment, reload, settings calls). Read-only, never input; the " +
                  "state survives HUD restarts. Tell the user before turning it on.")]
     public static async Task<CallToolResult> Observe(BridgeRegistry bridges,
         [Description("start | stop | status")] string action = "status",
@@ -40,12 +42,13 @@ public static class ObserveTools
         UseStructuredContent = true, OutputSchemaType = typeof(ObserveEventsResult), IconSource = IconSet.TimelineLight)]
     [Description("Events recorded by passive observation after sequence number since (0 = all in memory, up to 1000), as typed " +
                  "ObserveEvent: layer (layer, mode, unit, name or null when unmapped, old, new, plus off/len/i32/i64 for struct " +
-                 "and delta/change for props/dict/list), layer.noisy, ui, area, level, entity. Each has seq, at (UTC), t and frame. " +
+                 "and delta/change for props/dict/list/each), layer.noisy, ui, area, level, entity, hud (cause spike: intervalMs, gcMs, " +
+                 "gen0-2; cause reload: plugin, ok, durationMs), agent (method, params). Each has seq, at (UTC), t and frame. " +
                  "Pass the returned seq as since next time. To be told when there are new ones instead of asking, subscribe to " +
                  "the resource exile://observe/{game}/events.")]
     public static async Task<CallToolResult> ObserveEvents(BridgeRegistry bridges,
         [Description("Only events after this sequence number")] long since = 0,
-        [Description("Only these kinds: layer | layer.noisy | ui | area | level | entity")] string[]? kinds = null,
+        [Description("Only these kinds: layer | layer.noisy | ui | area | level | entity | hud | agent")] string[]? kinds = null,
         [Description("Only events of these layers (e.g. server, stats)")] string[]? layers = null,
         [Description("Max events (1-500, default 100)")] int limit = 100,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
@@ -69,7 +72,7 @@ public static class ObserveTools
                  "on timeout (extra.waiting = true).")]
     public static async Task<CallToolResult> ObserveWait(BridgeRegistry bridges,
         [Description("Sequence number already handled (from the last observe_* result)")] long since = 0,
-        [Description("Wake for these kinds (default: ui-new, area, level). ui-new = an unmapped panel opening for the first time; ui = every panel change; area; level; entity; layer")] string[]? kinds = null,
+        [Description("Wake for these kinds (default: ui-new, area, level). ui-new = an unmapped panel opening for the first time; ui = every panel change; area; level; entity; layer; hud; agent")] string[]? kinds = null,
         [Description("Wake once at least this many noteworthy events are waiting (default 1)")] int minEvents = 1,
         [Description("Max wait, seconds (5-3600, default 1800)")] int timeoutSec = 1800,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
@@ -105,19 +108,22 @@ public static class ObserveTools
     [McpServerTool(Name = "observe_layers", Title = "What the observer watches (layers as specs)", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(LayersResult), IconSource = IconSet.TimelineLight)]
     [Description("List, add or remove observer layers. A layer is a spec, not code: any walker path (as in eval_path / explore_object) " +
-                 "watched in one of four modes - struct (the object's cached offsets struct read raw and diffed, each changed range " +
+                 "watched in one of five modes - struct (the object's cached offsets struct read raw and diffed, each changed range " +
                  "named by the runtime layout or null when the HUD doesn't map it: for server-sent state), props (its scalar " +
                  "properties), dict (a dictionary's keys and values, e.g. Stats.StatDictionary), list (a collection's items added and " +
-                 "removed, by key, default Address). Defaults: server (ServerData, struct) and stats (StatDictionary, dict). " +
+                 "removed, by key, default Address), each (a collection, props = a few dotted sub-paths per item keyed by key: one " +
+                 "layer over all the player's inventories). Defaults: server (ServerData, struct), stats (StatDictionary, dict), life " +
+                 "(Life, props), buffs (BuffsList, list by Name), inventories (PlayerInventories, each: Inventory.Hash and ItemCount by TypeId). " +
                  "set preflights the path and mode in game and names the broken link. Specs persist in the HUD.")]
     public static async Task<CallToolResult> ObserveLayers(BridgeRegistry bridges,
         [Description("list | set | remove")] string action = "list",
         [Description("Layer id (set / remove), e.g. buffs")] string? id = null,
         [Description("set: walker path starting at GameController, e.g. GameController.Player.GetComponent<Buffs>().BuffsList")] string? path = null,
-        [Description("set: struct | props | dict | list")] string? mode = null,
+        [Description("set: struct | props | dict | list | each")] string? mode = null,
         [Description("set: samples per second (0.2-30, default 4)")] double hz = 4,
         [Description("set: false to keep the spec but pause it")] bool enabled = true,
-        [Description("set, list mode: the item property identifying an item (default Address)")] string? key = null,
+        [Description("set, list / each mode: the item property identifying an item (each: dotted sub-path; default Address)")] string? key = null,
+        [Description("set, each mode: values to watch on every item, as dotted sub-paths, e.g. [\"Inventory.Hash\", \"Inventory.ItemCount\"]")] string[]? props = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
@@ -128,6 +134,7 @@ public static class ObserveTools
                 if (id == null || path == null || mode == null) throw new McpException("set needs id, path and mode.");
                 var spec = new JObject { ["id"] = id, ["path"] = path, ["mode"] = mode, ["hz"] = hz, ["enabled"] = enabled };
                 if (key != null) spec["key"] = key;
+                if (props is { Length: > 0 }) spec["props"] = new JArray(props);
                 (_, r) = await bridges.CallAsync(game, "observe.layer_set", spec, ct);
                 break;
             case "remove":

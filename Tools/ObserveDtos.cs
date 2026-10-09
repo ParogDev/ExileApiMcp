@@ -17,7 +17,7 @@ public sealed class ObserveEvent
     public double? T { get; set; }
     /// <summary>HUD (ImGui) frame number.</summary>
     public long? Frame { get; set; }
-    /// <summary>layer | layer.noisy | ui | area | level | entity (older journals: server | server.noisy).</summary>
+    /// <summary>layer | layer.noisy | ui | area | level | entity | hud | agent (older journals: server | server.noisy).</summary>
     public string Kind { get; set; } = "";
 
     // layer
@@ -53,6 +53,27 @@ public sealed class ObserveEvent
     public string? Type { get; set; }
     public string? EntityType { get; set; }
 
+    // hud: the HUD's own hiccups, so they aren't mistaken for game events
+    /// <summary>spike (a frame much longer than recent ones) | reload (a plugin recompiled).</summary>
+    public string? Cause { get; set; }
+    public double? IntervalMs { get; set; }
+    public double? TypicalMs { get; set; }
+    /// <summary>GC pause time within the spike's frame.</summary>
+    public double? GcMs { get; set; }
+    public int? Gen0 { get; set; }
+    public int? Gen1 { get; set; }
+    public int? Gen2 { get; set; }
+    /// <summary>Spikes since the previous spike event that weren't logged (one per 2 s at most).</summary>
+    public int? Suppressed { get; set; }
+    public string? Plugin { get; set; }
+    public bool? Ok { get; set; }
+    public double? DurationMs { get; set; }
+
+    // agent: what an agent asked of the HUD or the user (guide, highlight, experiment, reload, settings...)
+    public string? Method { get; set; }
+    /// <summary>The call's params, long values clipped and secrets redacted.</summary>
+    public JsonElement? Params { get; set; }
+
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 
     /// <summary>Older journals wrote the server layer as kind server/server.noisy with off: read them as layer events.</summary>
@@ -75,6 +96,8 @@ public sealed class ObserveEvent
         "area" => "area change",
         "level" => "level up",
         "entity" => $"entity {Type}",
+        "hud" => Cause == "reload" ? $"hud reload {Plugin}" : $"hud {Cause}",
+        "agent" => $"agent {Method}",
         _ => Kind,
     };
 
@@ -89,8 +112,15 @@ public sealed class ObserveEvent
         "area" => $"area {From} -> {To}",
         "level" => $"level {From} -> {To}{(Area != null ? $" in {Area}" : "")}",
         "entity" => $"entity {Type}{(EntityType != null ? $" ({EntityType})" : "")}",
+        "hud" => Cause == "reload"
+            ? $"hud: {Plugin} reloaded {(Ok == true ? "ok" : "FAILED")} in {DurationMs} ms (the HUD paused)"
+            : $"hud: frame {IntervalMs} ms (typical {TypicalMs}), GC {GcMs} ms (gen0 {Gen0}, gen1 {Gen1}, gen2 {Gen2})"
+              + (Suppressed is > 0 ? $", {Suppressed} more spike(s) since the last one" : ""),
+        "agent" => $"agent {Method} {(Params is { } p ? Clip(p.GetRawText(), 160) : "")}",
         _ => Kind,
     };
+
+    private static string Clip(string s, int max) => s.Length <= max ? s : s[..max] + "...";
 }
 
 public sealed class ObserveEventsResult
@@ -108,12 +138,14 @@ public sealed class LayerSpec
     public string Id { get; set; } = "";
     /// <summary>A walker path starting at GameController (as in eval_path / explore_object).</summary>
     public string Path { get; set; } = "";
-    /// <summary>struct | props | dict | list.</summary>
+    /// <summary>struct | props | dict | list | each.</summary>
     public string Mode { get; set; } = "props";
     public double Hz { get; set; } = 4;
     public bool Enabled { get; set; } = true;
-    /// <summary>list mode: the item property identifying an item (default Address).</summary>
+    /// <summary>list / each mode: the item property identifying an item (each: a dotted sub-path; default Address).</summary>
     public string? Key { get; set; }
+    /// <summary>each mode: the values watched on every item, as dotted sub-paths (e.g. Inventory.Hash).</summary>
+    public List<string>? Props { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
