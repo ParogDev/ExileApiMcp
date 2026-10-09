@@ -24,7 +24,7 @@ MCP server (C# SDK 2.2, spec 2026-07-28) exposing live PoE1/PoE2 HUD state throu
 ## Rules
 
 - **Every game tool takes an optional `game`** (`BridgeRegistry.GameParamDescription`).
-- **Return `ToolResults.Json(...)`**, which gives JSON text plus structuredContent and sets isError for bridge errors.
+- **Typed results.** A tool returning data declares `UseStructuredContent = true, OutputSchemaType = typeof(TheDto)` and returns `Dto.Result(value, text)` (`Tools/Dto.cs` has the pattern). The DTO mirrors the JSON on the wire (MCP Apps parse it), lives in `Tools/<Family>Dtos.cs` with a family-prefixed name (one namespace for all DTOs: two branches once each defined `DesktopInfo` and broke main), and keeps unknown fields in `[JsonExtensionData] Extra`, so fields the bridge adds later pass through. Bridge errors stay isError results carrying the error object (`Tools/TypedReply.cs`; apps read the codes). Open data stays `JsonElement`. `ToolResults.Json` remains for the few tools whose result has several shapes.
 - **stdio:** never write to stdout. Logs go to stderr only.
 - **Stateless:** no per-connection or per-session state in the server. Shared state lives in the HUD plugin (`stats.*`); recordings are addressed by file name.
 - **Client capabilities in stateless HTTP:** `server.ClientCapabilities` is null. Read `context.JsonRpcRequest.Context?.ClientCapabilities ?? server.ClientCapabilities`.
