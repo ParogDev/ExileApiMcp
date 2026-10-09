@@ -57,6 +57,17 @@ public sealed class TraceGc
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
+/// <summary>Was the game the foreground window during a measurement? In the background the overlay is hidden and the game may cap its fps.</summary>
+public sealed class TraceForeground
+{
+    public double? Share { get; set; }
+    public bool? AtStart { get; set; }
+    public bool? AtEnd { get; set; }
+    public int? Samples { get; set; }
+    public string? Note { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
 /// <summary>A pipeline trace (bridge pipeline.trace_result). Only the fields tools reason about are typed.</summary>
 public sealed class PipelineTraceResult
 {
@@ -74,6 +85,8 @@ public sealed class PipelineTraceResult
     public Dictionary<string, TraceStats>? PluginRenderMs { get; set; }
     public TraceGc? Gc { get; set; }
     public TraceSeries? Series { get; set; }
+    /// <summary>How much of the measurement had the game in front (the bridge samples it every 100 ms).</summary>
+    public TraceForeground? Foreground { get; set; }
     /// <summary>Set when the trace couldn't run (instrumentation_disabled, busy, harmony_unavailable).</summary>
     public string? Error { get; set; }
     public string? Message { get; set; }

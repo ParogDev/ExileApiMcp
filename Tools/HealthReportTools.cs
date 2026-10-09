@@ -64,6 +64,21 @@ public static class HealthReportTools
         var fps = r["hudFps"]?.Value<double>() ?? 0;
         sb.AppendLine($"Frames: {fps} fps, interval {S("frameIntervalMs")} ms (max {S("frameIntervalMs", "max")}, sd {S("frameIntervalMs", "sd")}); work {S("updateMs")} ms = plugins {S("pluginsMs")} + HUD core {S("coreMs")}");
         var findings = new List<string>();
+        // A measurement with the game in the background measures a hidden overlay and, often, a game capped to 30 fps.
+        if (r["foreground"]?["share"]?.Value<double?>() is { } share && share < 0.95)
+        {
+            string? cap = null;
+            try
+            {
+                var (_, cfg) = await bridges.CallAsync(game, "game.config", new JObject(), ct);
+                if (cfg["settings"]?["background_framerate_limit_enabled"]?.ToString() == "true")
+                    cap = $" The game caps itself to {cfg["settings"]?["background_framerate_limit"]} fps in the background (Options > Graphics).";
+            }
+            catch (McpException) { }
+            sb.AppendLine($"Foreground: the game was in front {share:P0} of the trace.");
+            findings.Add($"the game wasn't in front for {(1 - share):P0} of the trace, so the overlay was hidden and these numbers aren't representative.{cap} " +
+                         "Ask the user to keep the game in front and run it again (focus_game brings it forward if they agree).");
+        }
         if (r["frameIntervalMs"]?["max"]?.Value<double>() is { } mx && fps > 0 && mx > 1.5 * 1000 / fps)
             findings.Add($"frame spikes up to {mx:F0} ms (expected {1000 / fps:F0}): GC pauses or a heavy plugin frame");
         if (r["gc"] is JObject gc)
