@@ -1,0 +1,46 @@
+{
+  "about": "Reusable guided flows (guide_flow recipe=<id>). The MCP expands a recipe into a flow (pure: params + game data in, flow out) and the HUD bridge runs it: the current step is recomputed from the game state every 100 ms, so the guide follows the user. ${name} substitutes a param or derived value; ${name?yes:no} picks by a true/false param. derive: values read from the game's data tables (table row whose text at textAt equals a value; refAt = the row index its foreign key at that offset points to). ${bit_mask} = 1 << bit.",
+  "recipes": [
+    {
+      "id": "stash-tab-affinity",
+      "title": "Add or remove a stash tab affinity",
+      "games": ["poe2"],
+      "params": {
+        "tab": "Stash tab name as shown on the tab, e.g. DUMP",
+        "affinity": "Affinity as named in the Edit Stash Tab dialog, e.g. Ritual, Waystone, Augment",
+        "set": "true to add it, false to remove it"
+      },
+      "derive": {
+        "bit": { "table": "StashTabAffinities.dat", "textAt": 16, "equals": "${affinity}", "refAt": 0 }
+      },
+      "flow": {
+        "title": "${set?Add:Remove} ${affinity} ${set?on:from} ${tab}",
+        "goal": { "memory": { "collection": "GameController.IngameState.ServerData.PlayerStashTabs", "where": { "Name": "${tab}" }, "offset": 63, "size": 4, "mask": "${bit_mask}", "equals": "${set?${bit_mask}:0}" } },
+        "steps": [
+          {
+            "label": "Open ${tab}'s Edit dialog",
+            "done": { "text": { "panel": "Stash Tab Settings", "child": [0, 1, 2, 1, 0, 0] }, "equals": "${tab}" },
+            "options": [
+              { "label": "Right-click ${tab}", "target": { "text": "${tab}", "within": "GameController.IngameState.IngameUi.StashElement", "clipTo": "GameController.IngameState.IngameUi.StashElement.Children[2].Children[0].Children[0].Children[0].Children[1].Children[0]", "action": "rightclick" } },
+              { "label": "Click ${tab} in the tab list", "target": { "text": "${tab}", "within": "GameController.IngameState.IngameUi.StashElement.ViewAllStashPanel", "action": "click" } },
+              { "label": "Open the tab list", "target": { "path": "GameController.IngameState.IngameUi.StashElement.ViewAllStashButton", "action": "click" } }
+            ]
+          },
+          {
+            "label": "${set?Tick:Untick} ${affinity}",
+            "done": { "${set?checked:unchecked}": { "text": "${affinity}", "within": "Stash Tab Settings", "rel": ["^", "1"] } },
+            "options": [
+              { "label": "${set?Tick:Untick} ${affinity}", "target": { "text": "${affinity}", "within": "Stash Tab Settings", "rel": ["^", "1"], "action": "click" } }
+            ]
+          },
+          {
+            "label": "Confirm",
+            "options": [
+              { "label": "Confirm", "target": { "panel": "Stash Tab Settings", "child": [0, 1, 10, 0], "action": "click" } }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

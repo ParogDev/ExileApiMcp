@@ -349,6 +349,9 @@ public static class ExperimentTools
         [Description("Settle time, ms (100-5000, default 500)")] int settleMs = 500,
         [Description("Start this step by itself as soon as the previous step of the same experiment is captured, so one Start press runs a whole series (queue the first step without chain)")] bool chain = false,
         [Description("Highlight while the step records (shown after Start, removed after): JSON targets as for the highlight tool")] string? highlight = null,
+        [Description("Guide the step as a flow (see guide_flow): a recipe id from Knowledge/flows.json, run from Start until the step ends")] string? recipe = null,
+        [Description("Recipe params, e.g. tab=DUMP;affinity=Ritual;set=false (or JSON)")] string? recipeArgs = null,
+        [Description("Or a full flow JSON (see guide_flow)")] string? flow = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
@@ -358,6 +361,9 @@ public static class ExperimentTools
             ["repeats"] = repeats, ["timeoutMs"] = timeoutMs, ["settleMs"] = settleMs, ["by"] = "Claude", ["chain"] = chain,
         };
         if (!string.IsNullOrWhiteSpace(highlight)) p["highlight"] = JArray.Parse(highlight);
+        if (!string.IsNullOrWhiteSpace(flow)) p["flow"] = JObject.Parse(flow);
+        else if (recipe != null)
+            p["flow"] = await FlowTools.ExpandAsync(bridges, game, recipe, ParseRecipeArgs(recipeArgs), ct);
         if (note != null) p["note"] = note;
         if (title != null) p["title"] = title;
         foreach (var w in watch) Spec.Parse(w);
@@ -472,6 +478,23 @@ public static class ExperimentTools
         var (_, r) = await bridges.CallAsync(game, "experiment.cancel", new JObject { ["id"] = id }, ct);
         NeedQueue(r);
         return ToolResults.Json(r);
+    }
+
+    private static Dictionary<string, string> ParseRecipeArgs(string? s)
+    {
+        var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(s)) return d;
+        if (s.TrimStart().StartsWith('{'))
+        {
+            foreach (var p in JObject.Parse(s).Properties()) d[p.Name] = p.Value.ToString();
+            return d;
+        }
+        foreach (var kv in s.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var i = kv.IndexOf('=');
+            if (i > 0) d[kv[..i].Trim()] = kv[(i + 1)..].Trim();
+        }
+        return d;
     }
 
     private static void NeedQueue(JToken? r)

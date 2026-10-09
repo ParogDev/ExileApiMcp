@@ -13,13 +13,33 @@ How an agent asks a developer for help with a guided experiment: when to ask, ho
 - **Targets:**
   - `item`: a name; every match in the inventory and the visible stash tab is shown.
   - `path`: any UI element, such as a tab, button or checkbox (find it with `explore_object`).
+  - `panel` + `child`: a control inside a panel the HUD doesn't map. `panel` is text inside the panel (e.g. "Stash Tab Settings") and `child` is the index path inside it, e.g. `[0,1,7,1,11,1]`. Prefer it over `IngameUi.Children[n]` paths: the top-level indexes shift, as the dialog moved from [121] to [122] between two openings.
   - `rect`: a screen area.
 - **Tiers:**
   - `primary`: click or look here. It is the only animated one, so give one or two at most.
   - `secondary`: related.
   - `context`: an area to orient the eye.
+  - `text`: an element by its exact label, such as a stash tab called "DUMP" or a button. Every visible match is shown; add `within` (text inside a panel) to narrow it down.
+- **Show the action:** `action: rightclick` or `click` draws a mouse cue showing which button to press.
+- **Sequences follow the user:** a later step becomes current as soon as its target appears (e.g. the dialog opened), and `until: checked | unchecked | gone` ends a step. Make every sub-action its own step, so the highlight never runs ahead of or behind the user.
+  - Example: 1 `text: DUMP` (`action: rightclick`), 2 the Ritual checkbox (`until: checked`), 3 the Confirm button.
 - **Sequences:** give targets an `order` for "1 then 2 then 3". `highlight advance=true` moves to the next step. Clear highlights when the step is done; steps clear their own.
 - Never use a highlight to make the user act faster than they want, and keep it short-lived.
+
+## Multi-step tasks: guided flows, not fixed sequences
+For anything with more than one action (open a dialog, tick something, confirm), use a **flow** (`guide_flow`, or `recipe` / `flow` on `experiment_queue`). Don't use a fixed highlight sequence.
+
+**What the flow does:**
+- **The game's state decides the next step.** Every 100 ms the current step is the first one whose `done` condition doesn't hold. If the user navigates away (closes the dialog, switches tab), it goes back by itself. The `goal` ends the flow, whatever path the user took.
+- **Each step lists options best-first, each with a `when`** (default: its target is on screen). The first that's possible now is shown. The ones above it are what it unlocks, which gives the live plan: e.g. "Open the tab list → Click DUMP in the list → Right-click DUMP → Untick Ritual → Confirm". The plan shortens when a shortcut is on screen.
+- **Conditions only check what can be checked.** A checkbox is read only while its dialog is open; otherwise the step that opens the dialog is current anyway.
+
+**Rules for a good flow:**
+- One physical action per option.
+- The tab row is not the tab list: right-click the tab in the row (clipped to the row's visible part), and only click it in the list to bring it into view.
+- **Recipes** live in `Knowledge/flows.json`, with params and values derived from game tables (e.g. an affinity name → its bit via `StashTabAffinities.dat`). Add a recipe when a flow is worth reusing.
+- **Conditions:** `visible`, `checked` / `unchecked`, `text` + `equals`, `eval` + `equals`, `memory` (a collection item `where` a property equals a value; offset / size / mask / equals), combined with `all` / `any` / `not`.
+- **Targets** as in highlights, plus `rel` (`"^"` = parent, `"n"` = child n) to go from a label to its checkbox, and `clipTo`.
 
 ## Live step or queued step
 - **Live (`await_change`):** use it when the user is at the game and answering you now. Capture starts at once, and the step fails if they are slow.

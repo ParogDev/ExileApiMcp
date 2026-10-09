@@ -62,7 +62,7 @@ public static class GuideTools
                  "order for a sequence (numbered; the current step is emphasised, advance=true moves on). Targets follow the UI. " +
                  "Use it with the guide card whenever you ask the user to click something. clear=true removes it.")]
     public static async Task<CallToolResult> Highlight(BridgeRegistry bridges,
-        [Description("Targets: [{item:'Chaos Orb' | path:'GameController.IngameState.IngameUi.StashElement' | rect:[x,y,w,h], label?, tier?: primary|secondary|context, order?}]")] System.Text.Json.JsonElement? targets = null,
+        [Description("Targets: [{item:'Chaos Orb' | panel:'Stash Tab Settings', child:[0,1,7,1,11,1] | path:'GameController.IngameState.IngameUi.StashElement' | rect:[x,y,w,h], label?, tier?: primary|secondary|context, order?}]. For unmapped panels prefer panel (text inside it) + child (indexes inside it): top-level IngameUi.Children indexes shift. text:'DUMP' (+ within:'panel text') targets elements by their exact label (stash tabs, buttons). action: click|rightclick draws a mouse cue. until: checked|unchecked|gone ends a step; sequences advance by themselves as the user acts (a later step appearing, a met until, the current target leaving)")] System.Text.Json.JsonElement? targets = null,
         [Description("Shortcut: item names to highlight as primary targets")] string[]? items = null,
         [Description("Optional heading, e.g. 'Move these to the stash'")] string? title = null,
         [Description("Sequence step to show as current (default: the lowest order)")] int? current = null,
