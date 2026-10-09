@@ -54,7 +54,7 @@ export function WatchPanel({ store, snap, view, region, now, variant }: { store:
 
       {watch?.status === "running" && (
         <div className="mt-2">
-          <div className="h-1.5 overflow-hidden rounded bg-surface-3" role="progressbar" aria-valuenow={Math.round(pct * 100)} aria-valuemin={0} aria-valuemax={100}>
+          <div className="h-1.5 overflow-hidden rounded-sm bg-surface-3" role="progressbar" aria-valuenow={Math.round(pct * 100)} aria-valuemin={0} aria-valuemax={100}>
             <div className="m-sampling h-full transition-[width] duration-500 ease-linear" style={{ width: `${pct * 100}%`, background: "var(--color-m-change)" }} />
           </div>
           <p className="mt-1.5 text-[11.5px] text-fg-2">Now do the thing in game. Changed bytes will light up in the map and the hex view when the watch ends.</p>
@@ -106,21 +106,21 @@ function RangeRow({ c, region, selected, onSelect }: { c: ChangedRange; region: 
         <span className="tnum flex items-baseline gap-1 font-code text-[11px]"><span className="text-fg-2">+{hexOff(c.off)}</span><span className="text-[9.5px] text-fg-3">{c.off}</span></span>
         <span className="flex min-w-0 items-center gap-1.5">
           {unmapped ? (
-            <span className="shrink-0 rounded px-1 font-code text-[10px] font-semibold uppercase text-m-cand" style={{ background: mix("cand", 14) }}>{past ? "past end" : "unmapped"}</span>
+            <span className="shrink-0 rounded-sm px-1 font-code text-[10px] font-semibold uppercase text-m-cand" style={{ background: mix("cand", 14) }}>{past ? "past end" : "unmapped"}</span>
           ) : c.field ? (
             <span className="truncate font-code text-[11.5px] font-medium text-fg" title={c.field}>{c.field}</span>
           ) : (
             <span className="font-code text-[11px] text-fg-3">{c.size} B</span>
           )}
-          {c.noisy && <span className="shrink-0 rounded bg-warning/15 px-1 text-[10px] text-warning" title="Changed on most samples: a timer or position, probably">noisy</span>}
+          {c.noisy && <span className="shrink-0 rounded-sm bg-warning/15 px-1 text-[10px] text-warning" title="Changed on most samples: a timer or position, probably">noisy</span>}
         </span>
-        <span className="tnum shrink-0 rounded px-1 font-code text-[10px] font-semibold text-surface" style={{ background: mix("change", c.noisy ? 55 : 85) }} title={`Changed ${c.changes} time${c.changes === 1 ? "" : "s"}`}>×{c.changes}</span>
+        <span className="tnum shrink-0 rounded-sm px-1 font-code text-[10px] font-semibold text-surface" style={{ background: mix("change", c.noisy ? 55 : 85) }} title={`Changed ${c.changes} time${c.changes === 1 ? "" : "s"}`}>×{c.changes}</span>
         <span className="tnum col-span-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 font-code text-[10.5px]">
           <span className="truncate"><span className="text-fg-3">{c.first}</span> <span className="text-fg-3">→</span> <span className="font-semibold text-fg">{c.last}</span></span>
           {c.bitsFlipped && c.bitsFlipped.length > 0 && (
             <span className="flex flex-wrap items-center gap-1">
               <span className="text-fg-3">bit{c.bitsFlipped.length === 1 ? "" : "s"}</span>
-              {c.bitsFlipped.map((b) => <span key={b} className="rounded px-1 font-semibold text-m-change" style={{ background: mix("change", 14) }} title={`1 << ${b} = 0x${(1n << BigInt(b)).toString(16).toUpperCase()}${c.bitsRelativeTo ? ` of ${c.bitsRelativeTo}` : ""}`}>{b}</span>)}
+              {c.bitsFlipped.map((b) => <span key={b} className="rounded-sm px-1 font-semibold text-m-change" style={{ background: mix("change", 14) }} title={`1 << ${b} = 0x${(1n << BigInt(b)).toString(16).toUpperCase()}${c.bitsRelativeTo ? ` of ${c.bitsRelativeTo}` : ""}`}>{b}</span>)}
             </span>
           )}
         </span>
@@ -132,5 +132,5 @@ function RangeRow({ c, region, selected, onSelect }: { c: ChangedRange; region: 
 function Chip({ tone, children }: { tone: "plain" | "cand" | "change" | "warning"; children: React.ReactNode }) {
   const cls = tone === "plain" ? "bg-surface-3 text-fg-2" : tone === "cand" ? "text-m-cand" : tone === "change" ? "text-m-change" : "text-warning";
   const bg = tone === "plain" ? undefined : mix(tone, 14);
-  return <span className={`tnum rounded px-1.5 py-0.5 font-medium ${cls}`} style={{ background: bg }}>{children}</span>;
+  return <span className={`tnum rounded-sm px-1.5 py-0.5 font-medium ${cls}`} style={{ background: bg }}>{children}</span>;
 }

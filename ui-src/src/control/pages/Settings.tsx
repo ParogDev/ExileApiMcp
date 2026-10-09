@@ -10,6 +10,7 @@ import type { ControlStore, Snapshot } from "../store";
 import { T } from "../tour/ids";
 import { useTours } from "../tour/engine";
 import type { PluginSettings, SettingNode } from "../types";
+import { capsLine } from "../../format";
 import { Badge, Button, Confirm, Kbd, Select, ShowMe, Slider, Switch, TextInput, agoShort } from "../ui";
 
 const UNDO_MS = 8000;
@@ -215,12 +216,18 @@ function UndoBar({ store, label, previous }: { store: ControlStore; label: strin
   const [busy, setBusy] = useState(false);
   return (
     <div className="slide-up fixed inset-x-3 bottom-3 z-40 flex justify-center" data-tour={T.settingsUndo}>
-      <div className="relative flex max-w-md items-center gap-3 overflow-hidden rounded-lg border border-line bg-surface px-3 py-2 text-[12px] shadow-xl">
-        <Icon name="check" className="size-3.5 shrink-0 text-success" />
-        <span className="min-w-0 truncate">Changed <b className="font-semibold">{label}</b></span>
-        <Button size="sm" icon="arrowLeft" busy={busy} onClick={async () => { setBusy(true); await store.undoLast(); setBusy(false); }} title={`Put back ${JSON.stringify(previous)}`}>Undo</Button>
-        <button type="button" aria-label="Dismiss" onClick={() => store.dismissUndo()} className="grid size-6 place-items-center rounded-md text-fg-3 hover:bg-surface-3 hover:text-fg"><Icon name="x" className="size-3" /></button>
-        <span className="drain absolute inset-x-0 bottom-0 h-0.5 bg-ring/60" aria-hidden />
+      <div className="relative flex w-full max-w-sm items-center gap-2.5 overflow-hidden rounded-sm border border-toast-line border-l-[3px] border-l-toast-success bg-toast py-1.5 pl-3 pr-1 text-toast-fg">
+        <Icon name="circleCheck" className="size-[18px] shrink-0 text-toast-success" strokeWidth="1.6" />
+        <span className="min-w-0 flex-1">
+          <span className="ds-toast-title block truncate">Changed</span>
+          <span className="ds-toast-msg block truncate text-toast-fg-2">{capsLine(label)}</span>
+        </span>
+        <button type="button" disabled={busy} onClick={async () => { setBusy(true); await store.undoLast(); setBusy(false); }} title={`Put back ${JSON.stringify(previous)}`}
+          className="ds-chip inline-flex h-6 shrink-0 items-center gap-1 rounded-sm border border-toast-line px-2 text-toast-fg transition-colors hover:bg-toast-line focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+          <Icon name={busy ? "sync" : "arrowLeft"} className={`size-3 ${busy ? "spin" : ""}`} />Undo
+        </button>
+        <button type="button" aria-label="Dismiss" onClick={() => store.dismissUndo()} className="grid size-6 shrink-0 place-items-center rounded-sm text-toast-fg-2 hover:bg-toast-line hover:text-toast-fg"><Icon name="x" className="size-3" /></button>
+        <span className="drain absolute inset-x-0 bottom-0 h-0.5 bg-toast-success/70" aria-hidden />
       </div>
     </div>
   );

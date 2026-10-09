@@ -88,7 +88,7 @@ function LayerRow({ l, store, first, selected, fresh, preflight }: { l: LayerSta
   const [busy, setBusy] = useState(false);
   const s = l.spec;
   return (
-    <li className={`flex flex-col gap-1.5 px-3 py-2 transition-colors ${selected ? "bg-surface-2/70" : ""} ${fresh ? "flash-accent" : ""}`}>
+    <li className={`flex flex-col gap-1.5 border-l-[3px] px-3 py-2 transition-colors ${l.broken ? "border-l-danger" : l.notNow ? "border-l-fg-3" : !s.enabled ? "border-l-line-2" : "border-l-success"} ${selected ? "bg-surface-2/70" : ""} ${fresh ? "flash-accent" : ""}`}>
       <div className="flex items-center gap-2">
         <Switch size="sm" checked={s.enabled} label={`${s.id} ${s.enabled ? "watching" : "paused"}`} disabled={busy} onChange={async (v) => { setBusy(true); await store.setLayer({ ...s, key: s.key ?? undefined, enabled: v }); setBusy(false); }} />
         <span className="font-code text-[12.5px] font-semibold">{s.id}</span>
@@ -232,7 +232,7 @@ export function EventsFeed({ store, snap, compact, limit = 100 }: { store: Contr
             const n = o.events.filter((e) => e.kind === k).length;
             return (
               <button key={k} type="button" onClick={() => toggleKind(k)} aria-pressed={kinds.has(k)} disabled={!n}
-                className={`inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-[10.5px] transition-colors disabled:opacity-40 ${kinds.has(k) ? "border-fg bg-fg text-surface" : "border-line text-fg-2 hover:border-line-2"}`}>
+                className={`ds-badge inline-flex h-5 items-center gap-1 rounded-sm border px-1.5 transition-colors disabled:opacity-40 ${kinds.has(k) ? "border-fg bg-fg text-surface" : "border-line text-fg-2 hover:border-line-2"}`}>
                 {k}<span className="tnum opacity-70">{n}</span>
               </button>
             );

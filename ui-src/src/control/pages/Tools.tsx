@@ -87,12 +87,12 @@ function ToolsList({ store, snap, theme }: { store: ControlStore; snap: Snapshot
           <Icon name="search" className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-fg-3" />
           <input ref={searchRef} type="search" value={snap.toolQuery} onChange={(e) => store.setToolQuery(e.target.value)} placeholder={`Search ${c.tools.length} tools, ${c.resources.length} resources, ${c.prompts.length} prompts  (/)`} aria-label="Search tools" data-tour={T.toolSearch}
             className="h-7 w-full rounded-md border border-line bg-surface pl-7 pr-7 text-[12.5px] placeholder:text-fg-3 hover:border-line-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-          {snap.toolQuery && <button type="button" aria-label="Clear search" onClick={() => store.setToolQuery("")} className="absolute right-1.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded text-fg-3 hover:bg-surface-3 hover:text-fg"><Icon name="x" className="size-3" /></button>}
+          {snap.toolQuery && <button type="button" aria-label="Clear search" onClick={() => store.setToolQuery("")} className="absolute right-1.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-sm text-fg-3 hover:bg-surface-3 hover:text-fg"><Icon name="x" className="size-3" /></button>}
         </div>
         <div role="tablist" className="inline-flex h-7 rounded-md border border-line bg-surface-2 p-0.5">
           {([["tools", c.tools.length], ["resources", c.resources.length], ["prompts", c.prompts.length]] as [Tab, number][]).map(([k, n]) => (
             <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => { setTab(k); store.go("tools", k === "tools" ? undefined : k); }}
-              className={`inline-flex items-center gap-1 rounded-[5px] px-2 text-[12px] font-medium capitalize transition-colors ${tab === k ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface-2 hover:text-fg"}`}>
+              className={`inline-flex items-center gap-1 rounded-xs px-2 text-[12px] font-medium capitalize transition-colors ${tab === k ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface-2 hover:text-fg"}`}>
               {k} <span className="tnum text-[10.5px] text-fg-3">{n}</span>
             </button>
           ))}
@@ -279,7 +279,7 @@ function ToolPage({ store, snap, theme, name }: { store: ControlStore; snap: Sna
       <header className="flex items-start gap-3">
         <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-surface-2"><CatalogIconImg icons={t.icons} theme={theme} size={22} fallback={familyIcon(t.family)} className="size-5 text-fg-2" /></span>
         <div className="min-w-0 flex-1">
-          <h1 className="text-[13px] font-semibold leading-tight">{t.title ?? t.name}</h1>
+          <h1 className="ds-title leading-tight">{t.title ?? t.name}</h1>
           <div className="mt-0.5 flex items-center gap-1"><code className="truncate font-code text-[12px] text-fg-2">{t.name}</code><Copy text={t.name} label="Copy tool name" /></div>
           <div className="mt-1.5" data-tour={T.toolBadges}><ToolBadges t={t} /></div>
         </div>
@@ -389,7 +389,7 @@ export function RunResult({ run, tool }: { run: ToolRun; tool?: CatalogTool }) {
   if (!run.endedAt) {
     return (
       <div className="flex flex-col gap-2 py-2">
-        <div className="h-0.5 w-full overflow-hidden rounded bg-surface-3"><div className="shimmer h-full w-full" /></div>
+        <div className="h-0.5 w-full overflow-hidden rounded-sm bg-surface-3"><div className="shimmer h-full w-full" /></div>
         <p className="flex items-center gap-2 text-[12px] text-fg-2"><Spinner />Calling <code className="font-code">{run.tool}</code> with <span className="truncate font-code text-fg-3">{argsLine(run.args)}</span></p>
       </div>
     );

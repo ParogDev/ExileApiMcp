@@ -29,7 +29,7 @@ export function RunCard({ run, now, onDismiss, onRetry, onAsk }: { run: ActionRu
         ) : (
           <span className="tnum text-[10.5px] text-fg-3" title="How long the call took">{fmtElapsed(elapsed)}</span>
         )}
-        <button type="button" onClick={onDismiss} aria-label="Dismiss result" className="grid size-5 place-items-center rounded text-fg-3 hover:bg-surface-3 hover:text-fg"><Icon name="x" className="size-3" /></button>
+        <button type="button" onClick={onDismiss} aria-label="Dismiss result" className="grid size-5 place-items-center rounded-sm text-fg-3 hover:bg-surface-3 hover:text-fg"><Icon name="x" className="size-3" /></button>
       </header>
       {open && (
         <div className="border-t border-line px-2.5 py-2">
@@ -171,7 +171,7 @@ function Lint({ r, onAsk }: { r: LintResult; onAsk?: (text: string) => void }) {
               <span className="text-fg-3">calls</span>
               <span className="truncate font-code text-[11px] font-medium" title={f.call}>{f.call}</span>
               {f.count > 1 && <span className="tnum text-fg-3">x{f.count}</span>}
-              {f.inLoop && <span className="rounded border border-warning/40 bg-warning/10 px-1 text-[10px] font-medium text-warning">in a loop</span>}
+              {f.inLoop && <span className="rounded-sm border border-warning/40 bg-warning/10 px-1 text-[10px] font-medium text-warning">in a loop</span>}
               {f.costNs > 0 && <span className="tnum ml-auto text-fg-3">~{fmtNs(f.costNs)}</span>}
             </div>
             <p className="mt-0.5 text-fg-2">{f.advice}</p>

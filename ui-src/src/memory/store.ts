@@ -1154,7 +1154,7 @@ export class MemoryStore {
     if ("error" in r) { this.patchExp({ saving: false, saveError: r.error.message ?? r.error.error }); return; }
     const saved = r.data as SnapshotSaved;
     this.patchExp({ saving: false, saved, selected: [...this.snap.exp.selected.filter((n) => n !== saved.saved), saved.saved] });
-    this.toast("info", `Saved snapshot "${saved.saved}" (${saved.what})`);
+    this.toast("success", `"${saved.saved}" (${saved.what})`, "Snapshot saved");
     await this.listSnapshots();
   }
 
@@ -1200,8 +1200,8 @@ export class MemoryStore {
     return v?.region ? addrPlus(v.region.address, off) : undefined;
   }
 
-  toast(kind: Toast["kind"], text: string) {
-    const toast: Toast = { id: ++this.toastSeq, kind, text };
+  toast(kind: Toast["kind"], text: string, title?: string) {
+    const toast: Toast = { id: ++this.toastSeq, kind, text, title };
     this.set({ toasts: [...this.snap.toasts, toast].slice(-3) });
     setTimeout(() => this.dismiss(toast.id), kind === "error" ? 6000 : 2500);
   }

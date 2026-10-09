@@ -75,7 +75,7 @@ function Shell({ store, snap }: { store: ControlStore; snap: ReturnType<ControlS
   const header = (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3">
       <GameBadge game={snap.game} />
-      <h1 className="truncate text-[13px] font-semibold">Control center</h1>
+      <h1 className="ds-title truncate">Control center</h1>
       {snap.catalog && <span className="hidden truncate text-[11px] text-fg-3 sm:inline">{snap.catalog.server.title ?? snap.catalog.server.name} {snap.catalog.server.version}</span>}
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <HudChips store={store} games={snap.games} game={snap.game} gamesAt={snap.gamesAt} />
@@ -139,7 +139,7 @@ function HudChips({ store, games, game, gamesAt }: { store: ControlStore; games:
         return (
           <button key={g.game} type="button" role="radio" aria-checked={selected} onClick={() => store.setGame(g.game as Game)}
             title={`${g.game}: ${g.status}${g.port ? ` on :${g.port}` : ""}${g.error ? ` — ${g.error}` : ""}${gamesAt ? ` · checked ${agoShort(Date.now() - gamesAt)}` : ""}. Click to act on this HUD.`}
-            className={`flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? "border-ring bg-surface-2 text-fg" : "border-line text-fg-2 hover:border-line-2"}`}>
+            className={`flex h-6 items-center gap-1.5 ds-chip rounded-sm border px-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected ? "border-ring bg-surface-2 text-fg" : "border-line text-fg-2 hover:border-line-2"}`}>
             <span className={`size-1.5 rounded-full ${up ? "bg-success" : g.status === "unreachable" ? "bg-danger" : "bg-fg-3"}`} />
             <span>{g.game === "poe2" ? "PoE 2" : "PoE 1"}</span>
             <span className={`hidden xs:inline ${tone}`}>{up ? "up" : g.status === "unreachable" ? "unreachable" : g.status === "checking" ? "…" : "down"}</span>
@@ -163,7 +163,7 @@ function LivePill({ store, listen, watching, lastEventAt, healthAt }: { store: C
     ? `Standalone: the server pushes resource updates over subscriptions/listen (observer events and layers${watching ? ", the perf report" : ""}); the app re-reads on each. ${last ? `Last update ${agoShort(now - last)}.` : ""}`
     : `Inside the host: observer events are polled every 2.5 s${watching ? " and perf_watch is held open for the next report" : ""}. ${last ? `Last update ${agoShort(now - last)}.` : ""}`;
   return (
-    <span data-tour={T.livePill} title={title} role="status" className={`hidden h-6 items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium xs:flex ${tone}`}>
+    <span data-tour={T.livePill} title={title} role="status" className={`hidden h-6 items-center gap-1.5 ds-chip rounded-sm border px-2 xs:flex ${tone}`}>
       {icon}{label}
       {last > 0 && <span className="tnum hidden text-[10.5px] opacity-70 sm:inline">{agoShort(now - last)}</span>}
     </span>
@@ -186,7 +186,7 @@ function ShowMeMenu() {
       <Button size="sm" tone={open ? "ghost" : "ghost"} active={open} icon="sparkle" onClick={() => setOpen((o) => !o)} tour={T.showMe} title="Short guided tours of the key tasks"><span className="hidden sm:inline">Show me</span></Button>
       {open && (
         <div role="menu" className="fade-in absolute right-0 top-full z-30 mt-1.5 w-72 rounded-lg border border-line bg-surface p-1 shadow-xl">
-          <p className="px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-fg-3">Show me how to</p>
+          <p className="px-2 py-1.5 ds-label text-fg-3">Show me how to</p>
           {tours.tours.map((t) => (
             <button key={t.id} type="button" role="menuitem" onClick={() => { setOpen(false); tours.start(t.id); }}
               className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">

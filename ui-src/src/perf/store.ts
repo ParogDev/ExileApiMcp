@@ -241,9 +241,9 @@ export class PerfStore {
 
   // ── Toasts ───────────────────────────────────────────────────────
 
-  toast(kind: Toast["kind"], text: string) {
+  toast(kind: Toast["kind"], text: string, title?: string) {
     const id = ++this.toastSeq;
-    this.set({ toasts: [...this.snap.toasts, { id, kind, text }] });
+    this.set({ toasts: [...this.snap.toasts, { id, kind, text, title }] });
     setTimeout(() => this.dismissToast(id), kind === "error" ? 6000 : 2500);
   }
   dismissToast(id: number) {

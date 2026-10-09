@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* The display face (Barlow Condensed 500 and 700, Latin subset): titles, section labels, chips, badges and toasts.
+   Imported from the npm package so Vite inlines the woff2 files as data URIs into every single-file bundle:
+   MCP Apps run in host iframes whose CSP may block Google Fonts, and the look must not depend on the host. */
+@import "@fontsource/barlow-condensed/latin-500.css";
+@import "@fontsource/barlow-condensed/latin-700.css";
 
 /*
  * Theme: the host sends MCP Apps style variables (--color-background-primary, --font-sans, ...)
@@ -16,6 +21,16 @@
 @theme {
   /* Inline panels are 380-760 px wide; "xs" splits the compact and roomy layouts. */
   --breakpoint-xs: 30rem;
+  /* Sharp corners: the brand's radius scale is 1 / 2 / 2 / 2 / 3 / 4 px. rounded-sm, -md and -lg all land on 2 px
+     (buttons, chips, cards, banners, toasts); rounded-xs is the 1 px of meters and swatches. Pills stay for dots,
+     knobs and the empty-state disc only. */
+  --radius-xs: 1px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 3px;
+  --radius-2xl: 4px;
+  --radius-3xl: 4px;
 }
 
 @theme inline {
@@ -65,10 +80,24 @@
   --color-p-core: light-dark(#0f8a7e, #4fd1c5);
 
 
+  /* Toasts are the same object everywhere (apps, control center, in game): a fixed slate ink with a blue tint, its
+     hairline one step lighter, a near-white title (15.9:1) and a muted message grey (6.4:1), whatever the theme.
+     The tones on it are the dark-theme tones, so they read on the ink in the light theme too. */
+  --color-toast: #15171c;
+  --color-toast-line: #2b2e36;
+  --color-toast-fg: #f2f1ee;
+  --color-toast-fg-2: #9c9b95;
+  --color-toast-danger: #f87171;
+  --color-toast-warning: #fbbf24;
+  --color-toast-success: #4ade80;
+  --color-toast-info: #9c9b95;
+
   /* Named ui/code (not sans/mono) so they never shadow the host's --font-sans/--font-mono. */
   --font-ui: var(--font-sans, ui-sans-serif, system-ui, "Segoe UI", sans-serif);
   --font-code: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
-  --radius-card: var(--border-radius-md, 8px);
+  /* The condensed display face: shipped in the bundle (above); the fallbacks are the condensed faces hosts have. */
+  --font-display: "Barlow Condensed", "Roboto Condensed", "Arial Narrow", "Liberation Sans Narrow", sans-serif-condensed, sans-serif;
+  --radius-card: 2px;
 }
 
 html, body {
@@ -166,15 +195,30 @@ html, body {
 @keyframes breathe { 50% { opacity: 0.55; } }
 .breathe { animation: breathe 1.2s ease-in-out infinite; }
 
+/* ── Sharp type ─────────────────────────────────────────────────── */
+/* The display face for what names or labels a thing: condensed, bold, caps, tracked. Plain classes (not utilities)
+   so they win over the size and weight utilities a line may still carry; the colour stays the line's own class. */
+.ds-title { font-family: var(--font-display); font-size: 16px; line-height: 1.1; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.ds-card-title { font-family: var(--font-display); font-size: 13.5px; line-height: 1.15; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.ds-label { font-family: var(--font-display); font-size: 11.5px; line-height: 1.2; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.ds-chip { font-family: var(--font-display); font-size: 11.5px; line-height: 1; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.ds-badge { font-family: var(--font-display); font-size: 10.5px; line-height: 1; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+/* Toasts: the title at 15 px, the message at 11.5 px; the message is put in caps by capsLine() (identifiers keep
+   their case), so there is no text-transform on it. */
+.ds-toast-title { font-family: var(--font-display); font-size: 15px; line-height: 1.1; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.ds-toast-msg { font-family: var(--font-display); font-size: 11.5px; line-height: 1.2; font-weight: 500; letter-spacing: .06em; margin-top: 2px; }
+
 /* ── Control center ─────────────────────────────────────────────── */
 
 /* Entering lists: rows rise in with a small stagger (--i set inline, capped by the component). */
 @keyframes rise { from { transform: translateY(6px); opacity: 0; } }
 .rise { animation: rise 0.28s cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 28ms); }
 
-/* A page mounting: content fades and lifts once. */
+/* A page mounting: content fades and lifts once. Fill "backwards", not "both": a filled transform (even the identity
+   one left after the animation) would make the page the containing block of its fixed children, and the settings
+   page's undo bar would then sit at the bottom of the page content instead of the viewport. */
 @keyframes page-in { from { transform: translateY(4px); opacity: 0; } }
-.page-in { animation: page-in 0.22s ease-out both; }
+.page-in { animation: page-in 0.22s ease-out backwards; }
 
 /* Live event rows: slide in from the left and glow briefly. */
 @keyframes event-in { from { transform: translateX(-6px); opacity: 0; background: color-mix(in oklab, var(--color-ring) 18%, transparent); } }

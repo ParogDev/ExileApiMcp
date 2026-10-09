@@ -17,7 +17,7 @@ Five apps share `src/styles.css`, `src/components.tsx` and `src/icons.tsx`:
 | HUD performance | `hud-performance.html` → `src/perf/main.tsx` | `src/perf/*` | `show_hud_performance {game?}` |
 | Control center | `control-center.html` → `src/control/main.tsx` | `src/control/*` (the four apps above become its pages standalone) | `show_control_center` as an MCP App; standalone at `http://127.0.0.1:<port>/app#t=<token>` |
 
-`vite build` takes one input per run (single-file plugin), so `npm run build` runs it six times: default (stats), `--mode explorer`, `--mode memory`, `--mode perf`, `--mode control`, `--mode harness`. Tailwind scans the whole source tree, so a class added to one app can change another app's CSS: rebuild and commit all bundles together.
+`vite build` takes one input per run (single-file plugin), so `npm run build` runs it six times: default (stats), `--mode explorer`, `--mode memory`, `--mode perf`, `--mode control`, `--mode harness`. Tailwind scans the whole source tree, so a class added to one app can change another app's CSS: rebuild and commit all bundles together. The display face (Barlow Condensed 500 and 700, Latin subset, from `@fontsource/barlow-condensed`) is imported by `src/styles.css` and inlined into every bundle as data URIs (`assetsInlineLimit` in `vite.config.ts`): MCP Apps run in host iframes whose CSP may block Google Fonts, so no bundle loads a font by URL.
 
 ## Commands
 

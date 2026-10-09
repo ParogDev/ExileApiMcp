@@ -40,7 +40,7 @@ export function TargetBar({ store, snap, view }: { store: MemoryStore; snap: Sna
                 {i > 0 && <Icon name={v.via ? "arrowUpRight" : "chevronRight"} className={`mx-0.5 size-3 shrink-0 ${v.via ? "text-m-ptr" : "text-fg-3"}`} />}
                 <button type="button" onClick={() => (last ? input.current?.select() : store.goTo(i))} aria-current={last ? "page" : undefined}
                   title={[v.via ? `followed ${v.via}` : null, v.target.path ?? v.target.address, v.mode === "layout" ? (v.target.type ?? (v.data && "struct" in v.data ? v.data.struct : "struct layout")) : `raw read, ${v.target.size ?? READ_SIZE} bytes`].filter(Boolean).join("\n")}
-                  className={`inline-flex h-6 items-center gap-1 rounded px-1 font-code text-[11.5px] hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${last ? "font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>
+                  className={`inline-flex h-6 items-center gap-1 rounded-sm px-1 font-code text-[11.5px] hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${last ? "font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}>
                   {v.mode === "read" && <Icon name="grid" className="size-3 text-fg-3" />}
                   {v.label}
                   {v.via && <span className="text-[10px] font-normal text-fg-3">{v.via.replace(/^\+\d+ /, "")}</span>}

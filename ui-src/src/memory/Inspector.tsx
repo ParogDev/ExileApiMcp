@@ -43,8 +43,8 @@ export function Inspector({ store, snap, view, region, sel, host, variant, sf, c
   const [showBits, setShowBits] = useState<boolean | undefined>();
 
   const copy = async (text: string, what: string) => {
-    try { await navigator.clipboard.writeText(text); store.toast("info", `Copied ${what}`); }
-    catch { store.toast("error", "Clipboard blocked by the host; select the text instead"); }
+    try { await navigator.clipboard.writeText(text); store.toast("success", what, "Copied"); }
+    catch { store.toast("error", "Select the text instead", "Clipboard blocked"); }
   };
 
   // Title and type line.
@@ -90,9 +90,9 @@ export function Inspector({ store, snap, view, region, sel, host, variant, sf, c
       <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-fg-3">
         <span className={`size-1.5 rounded-full ${seg?.kind === "gap" ? "m-hatch bg-surface-3" : ""}`} style={seg?.kind === "gap" ? undefined : { background: tone === "none" ? "var(--color-fg-3)" : mix(tone, 90) }} aria-hidden />
         {label}
-        {seg?.kind === "cand" && <span className="rounded px-1 font-semibold normal-case tracking-normal text-m-cand" style={{ background: mix("cand", 14) }}>not mapped by the HUD</span>}
+        {seg?.kind === "cand" && <span className="rounded-sm px-1 font-semibold normal-case tracking-normal text-m-cand" style={{ background: mix("cand", 14) }}>not mapped by the HUD</span>}
         {check && check !== "ok" && (
-          <span className={`rounded px-1 font-semibold normal-case tracking-normal ${TONE_TEXT[checkTone(check)]}`} style={{ background: mix(checkTone(check), 14) }} title={seg?.field?.why}>{CHECK_LABEL[check]}</span>
+          <span className={`rounded-sm px-1 font-semibold normal-case tracking-normal ${TONE_TEXT[checkTone(check)]}`} style={{ background: mix(checkTone(check), 14) }} title={seg?.field?.why}>{CHECK_LABEL[check]}</span>
         )}
         <span className="tnum ml-auto font-code font-normal normal-case tracking-normal">{offPair(sel.off)} · {fmtBytes(sel.size)}</span>
       </div>
@@ -169,7 +169,7 @@ export function Inspector({ store, snap, view, region, sel, host, variant, sf, c
               <li key={`${m.finding.id}:${i}`} className="text-[11px]">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <MarkChip m={m} />
-                  <span className={`tnum rounded-full border px-1.5 text-[10px] ${m.status === "verified" ? "border-success/30 text-success" : m.status === "differs" ? "border-warning/30 text-warning" : "border-line text-fg-3"}`}>{m.status === "unverified" ? "hypothesis here" : m.status}</span>
+                  <span className={`tnum rounded-sm border px-1.5 text-[10px] ${m.status === "verified" ? "border-success/30 text-success" : m.status === "differs" ? "border-warning/30 text-warning" : "border-line text-fg-3"}`}>{m.status === "unverified" ? "hypothesis here" : m.status}</span>
                 </div>
                 <p className="mt-0.5 leading-snug text-fg-2">{m.finding.title}</p>
               </li>
@@ -180,7 +180,7 @@ export function Inspector({ store, snap, view, region, sel, host, variant, sf, c
 
       {codeHere.length > 0 && (
         <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[10.5px] text-fg-2">
-          <span className="inline-flex items-center gap-1 rounded border border-dashed px-1 font-medium text-m-cand" style={{ borderColor: mix("cand", 55), background: mix("cand", 8) }}><Icon name="code" className="size-2.5" />used by code</span>
+          <span className="inline-flex items-center gap-1 rounded-sm border border-dashed px-1 font-medium text-m-cand" style={{ borderColor: mix("cand", 55), background: mix("cand", 8) }}><Icon name="code" className="size-2.5" />used by code</span>
           <span>{codeHere.map((m) => `${m.fns.slice(0, 2).join(", ")}${m.fns.length > 2 ? ` +${m.fns.length - 2}` : ""}${m.widths.length ? ` (${m.widths.map((w) => `${w} B`).join(" / ")})` : ""}`).join("; ")}{seg?.kind === "gap" ? ": the HUD's struct doesn't map this, the game's code uses it." : "."} Details in the Code card.</span>
         </p>
       )}
@@ -219,8 +219,8 @@ function ChangedHere({ ranges, sel }: { ranges: ChangedRange[]; sel: Selection }
             <span className="tnum font-code text-fg-2">+{hexOff(c.off)}</span>
             {c.off !== sel.off || c.size !== sel.size ? <span className="text-fg-3"> ({c.size} of the bytes)</span> : null}
             <span className="tnum ml-2 font-code"><span className="text-fg-3">{c.first}</span> <span className="text-fg-3">→</span> <span className="font-semibold">{c.last}</span></span>
-            <span className="tnum ml-2 rounded bg-surface-3 px-1 text-[10px] text-fg-2">×{c.changes}</span>
-            {c.noisy && <span className="ml-1 rounded bg-warning/15 px-1 text-[10px] text-warning">noisy</span>}
+            <span className="tnum ml-2 rounded-sm bg-surface-3 px-1 text-[10px] text-fg-2">×{c.changes}</span>
+            {c.noisy && <span className="ml-1 rounded-sm bg-warning/15 px-1 text-[10px] text-warning">noisy</span>}
             {c.bitsFlipped && c.bitsFlipped.length > 0 && (
               <span className="ml-2 text-fg-2">bits <span className="font-code text-m-change">{c.bitsFlipped.join(", ")}</span>{c.bitsRelativeTo && <span className="text-fg-3"> of {c.bitsRelativeTo.replace(/^field /, "")}</span>}</span>
             )}
@@ -251,7 +251,7 @@ export function BitGrid({ bytes, off, size, set, flipped, tone, names, namesFrom
     <div className="mt-3">
       <SectionLabel right={<span className="tnum font-code">0x{v.toString(16).toUpperCase()}{set.length ? ` · set ${set.join(", ")}` : " · no bits set"}</span>}>
         <Icon name="binary" className="size-3" />Bits <span className="tnum font-normal">{nbits}</span>
-        {picked !== undefined && <span className="rounded px-1 font-semibold normal-case tracking-normal text-warning" style={{ background: mix("warning", 14) }}>bit {picked} picked</span>}
+        {picked !== undefined && <span className="rounded-sm px-1 font-semibold normal-case tracking-normal text-warning" style={{ background: mix("warning", 14) }}>bit {picked} picked</span>}
       </SectionLabel>
       <div className="mt-1.5 space-y-1.5">
         {Array.from({ length: rows }, (_, r) => {
@@ -268,7 +268,7 @@ export function BitGrid({ bytes, off, size, set, flipped, tone, names, namesFrom
                     <Cell key={bit} type={onPick ? "button" : undefined} role={onPick ? "radio" : undefined} aria-checked={onPick ? pk : undefined}
                       onClick={onPick ? () => onPick(pk ? undefined : bit) : undefined}
                       title={`bit ${bit} = 0x${(1n << BigInt(bit)).toString(16).toUpperCase()}${nm ? ` · ${nm} (finding)` : ""}${on ? " · set" : ""}${fl ? " · flipped during the watch" : ""}${lt ? " · named by the code under the pointer" : ""}${onPick ? pk ? " · picked: click to clear" : " · click to look up code for this bit" : ""}`}
-                      className={`h-4 rounded-[2px] ${bit % 8 === 7 && i !== n - 1 ? "mr-1" : ""} ${ring ? "ring-2 ring-inset" : on ? "" : "bg-surface-3"} ${onPick ? "cursor-pointer hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : ""} ${pk ? "scale-y-110" : ""}`}
+                      className={`h-4 rounded-xs ${bit % 8 === 7 && i !== n - 1 ? "mr-1" : ""} ${ring ? "ring-2 ring-inset" : on ? "" : "bg-surface-3"} ${onPick ? "cursor-pointer hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : ""} ${pk ? "scale-y-110" : ""}`}
                       style={{ background: on ? mix(tone, fl || pk ? 95 : 80) : pk || lt ? mix("warning", lt && !pk ? 18 : 28) : nm ? mix("cand", 10) : undefined, ...(ring ? { ["--tw-ring-color" as string]: ring } : {}) }} />
                   );
                 })}
@@ -289,7 +289,7 @@ export function BitGrid({ bytes, off, size, set, flipped, tone, names, namesFrom
       {names && names.size > 0 && (
         <ul className="mt-1.5 flex flex-wrap gap-1">
           {[...names.entries()].sort((a, b) => a[0] - b[0]).map(([bit, nm]) => (
-            <li key={bit} className={`tnum inline-flex items-center gap-1 rounded px-1 font-code text-[10px] ${setS.has(bit) ? "text-fg" : "text-fg-3"}`} style={{ background: mix("cand", setS.has(bit) ? 22 : 8) }} title={`bit ${bit}: ${nm}${setS.has(bit) ? " (set)" : ""}`}>
+            <li key={bit} className={`tnum inline-flex items-center gap-1 rounded-sm px-1 font-code text-[10px] ${setS.has(bit) ? "text-fg" : "text-fg-3"}`} style={{ background: mix("cand", setS.has(bit) ? 22 : 8) }} title={`bit ${bit}: ${nm}${setS.has(bit) ? " (set)" : ""}`}>
               <span className="opacity-70">{bit}</span>{nm.length > 28 ? nm.slice(0, 27) + "…" : nm}
             </li>
           ))}
@@ -305,7 +305,7 @@ function WherePanel({ where, onClose }: { where: NonNullable<Snapshot["where"]>;
   return (
     <div className="mt-3">
       <SectionLabel right={<IconButton icon="x" label="Hide" size="sm" onClick={onClose} className="-my-1" />}><Icon name="search" className="size-3" />Where is <span className="tnum font-code font-normal normal-case tracking-normal">{where.address}</span></SectionLabel>
-      {where.loading ? <div className="mt-1.5 space-y-1.5"><div className="shimmer h-2.5 w-3/4 rounded" /><div className="shimmer h-2.5 w-1/2 rounded" /></div>
+      {where.loading ? <div className="mt-1.5 space-y-1.5"><div className="shimmer h-2.5 w-3/4 rounded-sm" /><div className="shimmer h-2.5 w-1/2 rounded-sm" /></div>
         : where.error ? <p className="mt-1.5 text-danger">{where.error}</p>
         : d ? (
           <dl className="mt-1.5 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-[11px]">

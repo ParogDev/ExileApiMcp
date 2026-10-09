@@ -14,8 +14,8 @@ export function SnippetPanel({ store, snap, variant }: { store: ExplorerStore; s
   const text = tab === "csharp" ? snippet.csharp : snippet.paths;
 
   const copy = async () => {
-    try { await navigator.clipboard.writeText(text); store.toast("info", tab === "csharp" ? "Copied C# snippet" : "Copied paths"); }
-    catch { store.toast("error", "Clipboard blocked by the host; select the code instead"); }
+    try { await navigator.clipboard.writeText(text); store.toast("success", tab === "csharp" ? "The C# snippet" : "The paths", "Copied"); }
+    catch { store.toast("error", "Select the code instead", "Clipboard blocked"); }
   };
 
   return (
@@ -31,9 +31,9 @@ export function SnippetPanel({ store, snap, variant }: { store: ExplorerStore; s
 
       <div className="mt-2 flex flex-wrap gap-1">
         {items.sort((a, b) => a.path.localeCompare(b.path)).map((i) => (
-          <span key={i.path} className="inline-flex h-5 max-w-full items-center gap-1 rounded-full border border-line bg-surface pl-2 pr-0.5 font-code text-[10.5px]" title={i.path}>
+          <span key={i.path} className="inline-flex h-5 max-w-full items-center gap-1 rounded-sm border border-line bg-surface pl-2 pr-0.5 font-code text-[10.5px]" title={i.path}>
             <span className="truncate">{i.name.startsWith("[") ? shortPath(i.path, 2) : i.name}</span>
-            <button type="button" aria-label={`Remove ${i.name}`} onClick={() => store.setChecked(i, false)} className="grid size-4 place-items-center rounded-full text-fg-3 hover:bg-surface-3 hover:text-fg"><Icon name="x" className="size-2.5" /></button>
+            <button type="button" aria-label={`Remove ${i.name}`} onClick={() => store.setChecked(i, false)} className="grid size-4 place-items-center rounded-sm text-fg-3 hover:bg-surface-3 hover:text-fg"><Icon name="x" className="size-2.5" /></button>
           </span>
         ))}
       </div>

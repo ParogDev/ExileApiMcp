@@ -116,3 +116,19 @@ export const CATEGORY_DOT: Record<Category, string> = {
   vitals: "bg-life", resistances: "bg-fire", defense: "bg-es", offense: "bg-lightning",
   charges: "bg-chaos", movement: "bg-cold", other: "bg-fg-3",
 };
+
+/**
+ * A toast message in caps, the way the brand book says: words become capitals, identifiers keep their case so
+ * they stay recognisable (a word with an inner "_", ".", "/", ":", "[", "<", "{" or "#", a CamelCase bump, or a
+ * 0x prefix: fire_damage_resistance_%, findings.json, GameController.Player, ReAgent, 0x3D). Trailing
+ * punctuation does not count. The in-game toasts use the same rule (GuideCaps in the bridge).
+ */
+export function capsLine(text: string): string {
+  return text.split(" ").map((w) => (isIdentifier(w.replace(/[.,;:!?)]+$/, "")) ? w : w.toUpperCase())).join(" ");
+}
+
+function isIdentifier(w: string): boolean {
+  if (/^[+-]?0x/.test(w)) return true;
+  if (/^.+[_./:\[<{#].+$/.test(w)) return true;
+  return /[a-z][A-Z]/.test(w);
+}

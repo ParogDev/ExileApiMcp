@@ -64,7 +64,7 @@ export function Population({ store, snap, fullscreen, host }: { store: MemorySto
             <div className="mt-2"><SmallButton icon="sync" onClick={() => void store.loadPopulation(pop.path, pop.labels)}>Retry</SmallButton></div>
           </EmptyState>
         )}
-        {pop.loading && !pop.data && <div className="space-y-1.5 p-3" aria-hidden>{Array.from({ length: 8 }, (_, i) => <div key={i} className="shimmer h-2.5 rounded" style={{ width: `${95 - (i % 3) * 10}%` }} />)}</div>}
+        {pop.loading && !pop.data && <div className="space-y-1.5 p-3" aria-hidden>{Array.from({ length: 8 }, (_, i) => <div key={i} className="shimmer h-2.5 rounded-sm" style={{ width: `${95 - (i % 3) * 10}%` }} />)}</div>}
         {pop.data && pop.bytes && <Grid store={store} pop={pop} fullscreen={fullscreen} />}
       </section>
       <aside className={fullscreen ? "scroll-thin flex min-h-0 flex-col gap-3 overflow-y-auto pr-1" : "flex flex-col gap-2.5"}>
@@ -269,7 +269,7 @@ function Grid({ store, pop, fullscreen }: { store: MemoryStore; pop: PopState; f
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 text-[10.5px] text-fg-3">
         <span className="tnum"><span className="font-medium text-fg-2">{total}</span> items × <span className="font-medium text-fg-2">{size}</span> bytes{data.struct && <span className="font-code"> · {data.struct.split(".").pop()}</span>}{data.truncated && <span className="text-warning"> · {data.truncated}</span>}</span>
         <label className="flex items-center gap-1">Group by
-          <select value={pop.groupBy ?? ""} onChange={(e) => store.setGroupBy(e.target.value || undefined)} className="h-5 rounded border border-line bg-surface px-1 text-[10.5px] text-fg">
+          <select value={pop.groupBy ?? ""} onChange={(e) => store.setGroupBy(e.target.value || undefined)} className="h-5 rounded-sm border border-line bg-surface px-1 text-[10.5px] text-fg">
             <option value="">index</option>
             {pop.labels.map((l) => <option key={l} value={l}>{l}</option>)}
           </select>
@@ -289,7 +289,7 @@ function Grid({ store, pop, fullscreen }: { store: MemoryStore; pop: PopState; f
             <div className="relative h-5" style={{ width: size * cw }}>
               {fields.map((f) => (
                 <span key={f.off} title={`${f.name} (${f.type}) at +${hexOff(f.off)}, ${f.size} B`}
-                  className="absolute bottom-0.5 h-3.5 overflow-hidden truncate rounded-[2px] px-0.5 font-code text-[9px] leading-[0.9rem] text-fg"
+                  className="absolute bottom-0.5 h-3.5 overflow-hidden truncate rounded-xs px-0.5 font-code text-[9px] leading-[0.9rem] text-fg"
                   style={{ left: f.off * cw, width: Math.max(2, f.size * cw - 1), background: mix("field", 30) }}>
                   {f.size * cw >= 22 ? f.name.split(".").pop() : ""}
                 </span>
@@ -415,7 +415,7 @@ function BitPanel({ store, pop, host, variant }: { store: MemoryStore; pop: PopS
               <span className="tnum text-[15px] font-semibold text-m-change">{setIdx.length}</span>
               <span className="text-fg-2">of {data.items.length} items have it set</span>
             </div>
-            <div className="mt-1.5 h-1.5 overflow-hidden rounded bg-surface-3"><div className="h-full" style={{ width: `${(setIdx.length / data.items.length) * 100}%`, background: "var(--color-m-change)" }} /></div>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-sm bg-surface-3"><div className="h-full" style={{ width: `${(setIdx.length / data.items.length) * 100}%`, background: "var(--color-m-change)" }} /></div>
             {setIdx.length > 0 && setIdx.length <= 16 && <p className="code-wrap mt-1.5 font-code text-[10.5px] text-fg-2">{setIdx.map((i) => labelText(data.items[i].labels?.Name ?? `[${data.items[i].index}]`)).join(", ")}</p>}
           </div>
 
@@ -450,7 +450,7 @@ function BitPanel({ store, pop, host, variant }: { store: MemoryStore; pop: PopS
                   <li key={i} className="rounded-md border px-2 py-1.5" style={{ borderColor: labelColor(pop, x.f.label), background: `color-mix(in oklab, ${labelColor(pop, x.f.label)} 8%, transparent)` }}>
                     <div className="flex items-center gap-1.5">
                       <span className="font-code text-[11.5px] font-semibold">{x.near ? "≈" : "="} {x.e.equals}</span>
-                      {x.near ? <span className="rounded bg-warning/15 px-1 text-[10px] text-warning">{x.e.counterexamples} counterexample{x.e.counterexamples === 1 ? "" : "s"}</span> : <span className="rounded bg-success/15 px-1 text-[10px] text-success">0 counterexamples</span>}
+                      {x.near ? <span className="rounded-sm bg-warning/15 px-1 text-[10px] text-warning">{x.e.counterexamples} counterexample{x.e.counterexamples === 1 ? "" : "s"}</span> : <span className="rounded-sm bg-success/15 px-1 text-[10px] text-success">0 counterexamples</span>}
                     </div>
                     {x.e.evidence && <p className="tnum mt-0.5 text-[10.5px] text-fg-2">{x.e.evidence}</p>}
                     {x.e.setFor && <p className="code-wrap mt-0.5 font-code text-[10.5px] text-fg-2">set for {x.e.setFor}</p>}
@@ -470,7 +470,7 @@ function BitPanel({ store, pop, host, variant }: { store: MemoryStore; pop: PopS
                 {b.rows.map(([k, g]) => (
                   <li key={k} className="grid grid-cols-[minmax(0,1fr)_3.5rem_4rem] items-center gap-2 text-[10.5px]">
                     <span className="truncate font-code" title={k}>{k}</span>
-                    <span className="h-1.5 overflow-hidden rounded bg-surface-3"><span className="block h-full" style={{ width: `${(g.set / g.n) * 100}%`, background: "var(--color-m-change)" }} /></span>
+                    <span className="h-1.5 overflow-hidden rounded-sm bg-surface-3"><span className="block h-full" style={{ width: `${(g.set / g.n) * 100}%`, background: "var(--color-m-change)" }} /></span>
                     <span className={`tnum text-right ${g.set === g.n ? "text-m-change" : g.set ? "text-warning" : "text-fg-3"}`}>{g.set}/{g.n}</span>
                   </li>
                 ))}
@@ -508,7 +508,7 @@ function ExplainedList({ pop, onPick }: { pop: PopState; onPick: (b: { byte: num
     items.push(
       <li key={f.label} className="mt-1.5">
         <div className="flex items-center gap-1.5 text-[10.5px]">
-          <span className="size-2 rounded-[2px]" style={{ background: color }} />
+          <span className="size-2 rounded-xs" style={{ background: color }} />
           <span className="font-semibold">{f.label}</span>
           <span className="tnum text-fg-3">{f.distinctValues} distinct values</span>
           {f.storedAt.length > 0 && <span className="tnum ml-auto font-code text-fg-2" title="Where the label's own value is stored">stored at {f.storedAt.map((s) => `+${s.offset - c.offset} (${s.type})`).join(", ")}</span>}
@@ -530,7 +530,7 @@ function Chip({ e, off, color, near, active, onPick }: { e: ExplainedBit; off: n
     <li>
       <button type="button" onClick={() => onPick({ byte: e.byte - off, bit: e.bit })} aria-pressed={active}
         title={`${e.equals}${e.evidence ? ` · ${e.evidence}` : ""}${e.setFor ? ` · set for ${e.setFor}` : ""} · ${e.counterexamples} counterexamples`}
-        className={`tnum rounded border px-1.5 py-0.5 font-code text-[10px] ${active ? "border-ring bg-ring/10 text-fg" : "border-transparent text-fg-2 hover:text-fg"} ${near ? "opacity-70" : ""}`}
+        className={`tnum rounded-sm border px-1.5 py-0.5 font-code text-[10px] ${active ? "border-ring bg-ring/10 text-fg" : "border-transparent text-fg-2 hover:text-fg"} ${near ? "opacity-70" : ""}`}
         style={{ background: active ? undefined : `color-mix(in oklab, ${color} ${near ? 8 : 14}%, transparent)` }}>
         +{e.byte - off}.{e.bit} {near ? "≈" : "="} {e.equals.replace(/^a function of /, "f(") + (e.equals.startsWith("a function of") ? ")" : "")}
       </button>

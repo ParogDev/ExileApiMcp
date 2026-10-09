@@ -122,7 +122,7 @@ export function StatTable({ stats, loaded, view, changes, now, remote, selection
         onClick={() => onSort(by, active ? !view.sortDesc : by === "value")}
         aria-sort={active ? (view.sortDesc ? "descending" : "ascending") : "none"}
         title={`Sort by ${label.toLowerCase()} (shared with the HUD)`}
-        className={`flex min-w-0 items-center gap-1 rounded hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${right ? "justify-end" : ""} ${active ? "text-fg" : ""}`}
+        className={`flex min-w-0 items-center gap-1 rounded-sm hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${right ? "justify-end" : ""} ${active ? "text-fg" : ""}`}
       >
         {label}
         {active && <Icon name={view.sortDesc ? "down" : "up"} className="size-3" />}
@@ -153,7 +153,7 @@ export function StatTable({ stats, loaded, view, changes, now, remote, selection
             className="h-7 w-full rounded-md border border-transparent bg-surface pl-7 pr-7 text-[12px] placeholder:text-fg-3 focus:border-ring focus:outline-none [&::-webkit-search-cancel-button]:hidden"
           />
           {draft && <IconButton icon="x" label="Clear search" size="sm" onClick={() => changeDraft("")} className="absolute right-0.5 top-1/2 -translate-y-1/2" />}
-          <kbd className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-line px-1 font-code text-[10px] text-fg-3 ${draft ? "hidden" : "hidden xs:block"}`}>/</kbd>
+          <kbd className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-sm border border-line px-1 font-code text-[10px] text-fg-3 ${draft ? "hidden" : "hidden xs:block"}`}>/</kbd>
         </div>
         <div className="relative shrink-0">
           <select
@@ -181,7 +181,7 @@ export function StatTable({ stats, loaded, view, changes, now, remote, selection
         <IconButton icon="code" label={keysMode ? "Show in-game text" : "Show raw stat keys"} active={keysMode} onClick={toggleKeys} className={keysMode ? "" : "bg-surface"} />
       </div>
 
-      <div className={`grid ${COLS} items-center gap-2 border-b border-line px-1 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-fg-3`}>
+      <div className={`grid ${COLS} items-center gap-2 border-b border-line px-1 py-1 ds-label text-fg-3`}>
         <span className="grid place-items-center">
           {view.sortBy !== "category" && <IconButton icon="layers" label="Group by category" size="sm" onClick={() => onSort("category", false)} />}
         </span>
@@ -231,7 +231,7 @@ export function StatTable({ stats, loaded, view, changes, now, remote, selection
             return (
               <div key={s.key}>
                 {header && (
-                  <div className="sticky top-0 z-[1] flex items-center gap-1.5 border-b border-line bg-surface/95 px-2 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-fg-3 backdrop-blur">
+                  <div className="sticky top-0 z-[1] flex items-center gap-1.5 border-b border-line bg-surface/95 px-2 py-1 ds-label text-fg-3 backdrop-blur">
                     <span className={`size-1.5 rounded-full ${CATEGORY_DOT[s.category]}`} aria-hidden />
                     {CATEGORY_LABEL[s.category]}
                     <span className="tnum font-normal">{groupCounts[s.category]}</span>
@@ -294,7 +294,7 @@ const Row = memo(function Row({ s, selected, pinned, keysMode, flash, flashAt, d
           </>
         )}
       </div>
-      <span key={flashAt} className={`tnum rounded px-1 text-right font-semibold ${s.value < 0 ? "text-danger" : ""} ${flash}`}>{fmtStat(s.key, s.value)}</span>
+      <span key={flashAt} className={`tnum rounded-sm px-1 text-right font-semibold ${s.value < 0 ? "text-danger" : ""} ${flash}`}>{fmtStat(s.key, s.value)}</span>
       <span className={`tnum text-right text-[10.5px] ${delta === undefined ? "invisible" : delta > 0 ? "text-success" : "text-danger"}`}>
         {delta === undefined ? "·" : signed(delta)}
       </span>

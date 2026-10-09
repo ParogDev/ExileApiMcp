@@ -29,7 +29,11 @@ export interface StatChange {
 
 export interface Toast {
   id: number;
-  kind: "error" | "info";
+  /** The stripe, glyph and default title: error (red), warning (amber), success (green), info (neutral). */
+  kind: "error" | "warning" | "success" | "info";
+  /** The caps title line; without one the kind is the title (Error, Warning, Done, Note). */
+  title?: string;
+  /** The message line, set in caps by the component (identifiers keep their case). */
   text: string;
 }
 
@@ -326,14 +330,14 @@ export class StatsStore {
 
   // ── Toasts ────────────────────────────────────────────────────────
 
-  private withToast(kind: Toast["kind"], text: string): Toast[] {
-    const toast = { id: this.nextId++, kind, text };
+  private withToast(kind: Toast["kind"], text: string, title?: string): Toast[] {
+    const toast = { id: this.nextId++, kind, text, title };
     setTimeout(() => this.dismiss(toast.id), 6000);
     return [...this.snap.toasts.slice(-2), toast];
   }
 
-  toast(kind: Toast["kind"], text: string) {
-    this.set({ toasts: this.withToast(kind, text) });
+  toast(kind: Toast["kind"], text: string, title?: string) {
+    this.set({ toasts: this.withToast(kind, text, title) });
   }
 
   dismiss(id: number) {

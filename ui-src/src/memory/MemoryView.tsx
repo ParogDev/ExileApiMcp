@@ -114,12 +114,12 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
   }, [host, describe, view?.id, sel?.off, sel?.size, watchForView?.startedAt, watchForView?.status, codeQ?.key, codeQ?.status]);
 
   const codeHost = useMemo<CodeHost>(() => ({
-    send: host.updateModelContext ? (text, structured) => { host.updateModelContext!(text, { game, ...structured }); store.toast("info", "Sent to Claude's context"); } : undefined,
+    send: host.updateModelContext ? (text, structured) => { host.updateModelContext!(text, { game, ...structured }); store.toast("success", "Now in Claude's context", "Sent"); } : undefined,
     ask: host.ask,
   }), [host, game, store]);
 
   const inspectorHost = useMemo<InspectorHost>(() => ({
-    send: host.updateModelContext ? () => { const d = describe(); if (d) { host.updateModelContext!(d.text, d.structured); store.toast("info", "Sent to Claude's context"); } } : undefined,
+    send: host.updateModelContext ? () => { const d = describe(); if (d) { host.updateModelContext!(d.text, d.structured); store.toast("success", "Now in Claude's context", "Sent"); } } : undefined,
     ask: host.ask && view && region && sel ? () => host.ask!(askText(view, region, sel, selSeg, game, watchForView?.result?.changedRanges ?? [])) : undefined,
   }), [host, describe, store, view, region, sel, selSeg, game, watchForView]);
 
@@ -208,7 +208,7 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
   const watchPanel = region && view && <WatchPanel store={store} snap={snap} view={view} region={region} now={now} variant={fullscreen ? "panel" : "card"} />;
 
   const textHost = useMemo(() => ({
-    send: host.updateModelContext ? (text: string) => { host.updateModelContext!(text, { game, mode: snap.mode, text }); store.toast("info", "Sent to Claude's context"); } : undefined,
+    send: host.updateModelContext ? (text: string) => { host.updateModelContext!(text, { game, mode: snap.mode, text }); store.toast("success", "Now in Claude's context", "Sent"); } : undefined,
     ask: host.ask,
   }), [host, game, snap.mode, store]);
 
@@ -222,7 +222,7 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
             className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${active ? "bg-surface-3 text-fg" : "text-fg-2 hover:bg-surface-2 hover:text-fg"}`}>
             <Icon name={m.icon} className={`size-3.5 ${active ? "" : "text-fg-3"}`} />
             <span className={m.id === "experiments" || m.id === "population" ? "hidden xs:inline" : ""}>{m.label}</span>
-            {badge !== undefined && <span className="tnum rounded-full bg-info px-1.5 text-[9.5px] font-semibold text-surface" title={`${badge} finding${badge === 1 ? "" : "s"} to check on this game`}>{badge}</span>}
+            {badge !== undefined && <span className="tnum rounded-sm bg-info px-1.5 text-[9.5px] font-semibold text-surface" title={`${badge} finding${badge === 1 ? "" : "s"} to check on this game`}>{badge}</span>}
           </button>
         );
       })}
@@ -240,11 +240,11 @@ export function MemoryView({ store, host }: { store: MemoryStore; host: HostApi 
         <span className="grid h-6 shrink-0 place-items-center rounded-md bg-fg px-1.5 text-[11px] font-bold tracking-tight text-surface" title={gameLabel}>
           {game === "poe2" ? "PoE 2" : game === "poe1" ? "PoE 1" : "PoE"}
         </span>
-        <h1 className="truncate text-[13px] font-semibold">Memory view</h1>
+        <h1 className="ds-title truncate">Memory view</h1>
         {layout && <span className="hidden truncate font-code text-[11px] text-fg-3 xs:inline" title={`${layout.struct}${layout.source ? ` — ${layout.source}` : ""}${layout.object ? `\n${layout.object}` : ""}`}>{typeLabel(layout.struct)}</span>}
         {read && !layout && <span className="hidden truncate font-code text-[11px] text-fg-3 xs:inline" title={read.region}>raw · {read.module?.name}</span>}
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          <span className={`hidden items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium xs:flex ${offline ? "border-danger/30 bg-danger/10 text-danger" : snap.conn === "live" ? "border-success/30 bg-success/10 text-success" : "border-line text-fg-3"}`} role="status"
+          <span className={`hidden items-center gap-1.5 ds-chip rounded-sm border px-2 xs:flex ${offline ? "border-danger/30 bg-danger/10 text-danger" : snap.conn === "live" ? "border-success/30 bg-success/10 text-success" : "border-line text-fg-3"}`} role="status"
             title={offline ? "The HUD bridge is unreachable" : snap.conn === "live" ? "The HUD bridge answers; this is the connection, not a live re-read (that's the Live toggle)" : "Waiting for the first answer from the HUD bridge"}>
             {offline ? <Icon name="offline" className="size-3" /> : <span className={`size-1.5 rounded-full ${snap.conn === "live" ? "bg-success" : "bg-fg-3"}`} />}
             {offline ? "Offline" : snap.conn === "live" ? "Connected" : "Connecting"}
@@ -325,7 +325,7 @@ function Stat({ tone, label, detail, strong, onClick }: { tone: "field" | "gap" 
   const Tag = onClick ? "button" : "span";
   return (
     <Tag type={onClick ? "button" : undefined} onClick={onClick} className={`inline-flex h-5 items-center gap-1.5 rounded-md border border-line bg-surface px-1.5 ${text} ${onClick ? "hover:border-line-2" : ""}`} title={detail}>
-      <span className={`size-1.5 shrink-0 rounded-[2px] ${tone === "gap" ? "m-hatch bg-surface-3" : ""}`} style={dot} aria-hidden />
+      <span className={`size-1.5 shrink-0 rounded-xs ${tone === "gap" ? "m-hatch bg-surface-3" : ""}`} style={dot} aria-hidden />
       <span className="tnum font-medium">{label}</span>
       {detail && <span className="tnum hidden text-fg-3 sm:inline">{detail}</span>}
     </Tag>
@@ -339,9 +339,9 @@ function LoadingMap() {
       <div className="mt-3 space-y-1.5">
         {Array.from({ length: 7 }, (_, i) => (
           <div key={i} className="flex items-center gap-2">
-            <div className="shimmer h-2.5 w-12 rounded" />
-            <div className="shimmer h-2.5 rounded" style={{ width: `${30 + (i % 3) * 15}%` }} />
-            <div className="shimmer ml-auto h-2.5 w-16 rounded" />
+            <div className="shimmer h-2.5 w-12 rounded-sm" />
+            <div className="shimmer h-2.5 rounded-sm" style={{ width: `${30 + (i % 3) * 15}%` }} />
+            <div className="shimmer ml-auto h-2.5 w-16 rounded-sm" />
           </div>
         ))}
       </div>

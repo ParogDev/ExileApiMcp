@@ -58,7 +58,7 @@ export function Findings({ store, snap, fullscreen, host }: { store: MemoryStore
       </div>
 
       {fnd.error && <p className="code-wrap px-3 py-2 text-[11.5px] text-danger">{fnd.error}</p>}
-      {fnd.loading && !fnd.data && <div className="space-y-1.5 p-3" aria-hidden>{Array.from({ length: 6 }, (_, i) => <div key={i} className="shimmer h-2.5 rounded" style={{ width: `${90 - (i % 3) * 12}%` }} />)}</div>}
+      {fnd.loading && !fnd.data && <div className="space-y-1.5 p-3" aria-hidden>{Array.from({ length: 6 }, (_, i) => <div key={i} className="shimmer h-2.5 rounded-sm" style={{ width: `${90 - (i % 3) * 12}%` }} />)}</div>}
       {fnd.data && rows.length === 0 && <EmptyState icon="search" title="No finding matches" className="py-6">{q ? `Nothing matches “${fnd.filter}”.` : "Nothing with this status."}</EmptyState>}
 
       <div className={`scroll-thin min-h-0 overflow-y-auto ${fullscreen ? "flex-1" : "max-h-[32rem]"}`}>
@@ -99,11 +99,11 @@ function Row({ f, store, fnd, game, host, struct }: { f: Finding; store: MemoryS
           <div className="flex items-center gap-1.5 truncate text-[10.5px] text-fg-3">
             <span className="truncate font-code">{subjectLabel(f.subject)}</span>
             <span className="truncate font-code opacity-70">{f.id}</span>
-            {onStruct && <span className="shrink-0 rounded px-1 text-[9.5px] font-semibold text-m-cand" style={{ background: mix("cand", 14) }} title={`About ${struct}, the struct open in the Struct view (not the game screen). Expand for "show in struct".`}>this struct</span>}
+            {onStruct && <span className="shrink-0 rounded-sm px-1 text-[9.5px] font-semibold text-m-cand" style={{ background: mix("cand", 14) }} title={`About ${struct}, the struct open in the Struct view (not the game screen). Expand for "show in struct".`}>this struct</span>}
           </div>
         </button>
         {GAMES.map((g) => <StatusCell key={g} f={f} g={g} current={game} />)}
-        <span className="hidden justify-center sm:flex"><span className="rounded bg-surface-3 px-1.5 py-0.5 font-code text-[10px] text-fg-2" title={f.check.kind === "manual" ? "An experiment to run with the user" : `Re-runs automatically on the live game (${f.check.kind})`}>{f.check.kind}</span></span>
+        <span className="hidden justify-center sm:flex"><span className="rounded-sm bg-surface-3 px-1.5 py-0.5 font-code text-[10px] text-fg-2" title={f.check.kind === "manual" ? "An experiment to run with the user" : `Re-runs automatically on the live game (${f.check.kind})`}>{f.check.kind}</span></span>
         <IconButton icon="chevron" label={open ? "Collapse" : "Expand"} size="sm" onClick={() => store.toggleFinding(f.id)} iconClass={`transition-transform ${open ? "rotate-180" : ""}`} />
       </div>
       {open && (
@@ -139,7 +139,7 @@ function StatusCell({ f, g, current }: { f: Finding; g: Game; current?: Game }) 
   const hypothesis = s === "unverified" && isToCheck(f, g);
   return (
     <span className="flex justify-center" title={[`${gameName(g)}: ${s}`, d?.date, d?.where && `@ ${d.where}`, d?.note].filter(Boolean).join("\n")}>
-      <span className={`tnum inline-flex h-5 items-center gap-1 rounded-full border px-1.5 text-[10px] font-medium ${st.cls} ${g === current ? "" : "opacity-80"} ${hypothesis ? "border-dashed" : ""}`}>
+      <span className={`tnum inline-flex h-5 items-center gap-1 rounded-sm border px-1.5 text-[10px] font-medium ${st.cls} ${g === current ? "" : "opacity-80"} ${hypothesis ? "border-dashed" : ""}`}>
         {s === "verified" && <Icon name="check" className="size-2.5" />}
         {s === "differs" && <Icon name="warning" className="size-2.5" />}
         <span className="hidden sm:inline">{hypothesis ? "hypothesis" : st.label}</span>
@@ -157,7 +157,7 @@ function GameDetail({ g, d, current, onShow }: { g: Game; d?: FindingGame; curre
     <div className={`rounded-md border px-2.5 py-2 ${g === current ? "border-line-2 bg-surface" : "border-line bg-surface-2/50"}`}>
       <div className="flex items-center gap-1.5">
         <span className="text-[10.5px] font-semibold uppercase tracking-wide text-fg-3">{gameName(g)}</span>
-        <span className={`tnum rounded-full border px-1.5 text-[10px] font-medium ${STATUS_STYLE[s].cls}`}>{STATUS_STYLE[s].label}</span>
+        <span className={`tnum rounded-sm border px-1.5 text-[10px] font-medium ${STATUS_STYLE[s].cls}`}>{STATUS_STYLE[s].label}</span>
         {d?.date && <span className="tnum ml-auto text-[10px] text-fg-3">{d.date}</span>}
       </div>
       {d?.where && !table && (
@@ -170,7 +170,7 @@ function GameDetail({ g, d, current, onShow }: { g: Game; d?: FindingGame; curre
         <div className="mt-1">
           <span className="text-[10px] text-fg-3">bit table</span>
           <ul className="mt-0.5 flex flex-wrap gap-1">
-            {[...table.entries()].sort((a, b) => a[0] - b[0]).map(([bit, name]) => <li key={bit} className="tnum rounded px-1 font-code text-[10px]" style={{ background: mix("cand", 14) }}><span className="text-fg-3">{bit} </span>{name}</li>)}
+            {[...table.entries()].sort((a, b) => a[0] - b[0]).map(([bit, name]) => <li key={bit} className="tnum rounded-sm px-1 font-code text-[10px]" style={{ background: mix("cand", 14) }}><span className="text-fg-3">{bit} </span>{name}</li>)}
           </ul>
         </div>
       )}
@@ -190,7 +190,7 @@ const VERDICT: Record<NonNullable<VerifyResult["verdict"]>, { cls: string; icon:
 
 function Verdict({ v, store }: { v: VerifyResult | { error: string }; store: MemoryStore }) {
   if ("error" in v) return <p className="code-wrap mt-2 text-danger"><Icon name="warning" className="mr-1 inline size-3.5 align-[-2px]" />{v.error}</p>;
-  const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); store.toast("info", "Copied the record for findings.json"); } catch { store.toast("error", "Clipboard blocked by the host"); } };
+  const copy = async (text: string) => { try { await navigator.clipboard.writeText(text); store.toast("success", "The record for findings.json", "Copied"); } catch { store.toast("error", "Select the text instead", "Clipboard blocked"); } };
   if (v.howToVerify) {
     return (
       <div className="mt-2 rounded-md border border-line bg-surface-2/60 px-2.5 py-2">
@@ -212,7 +212,7 @@ function Verdict({ v, store }: { v: VerifyResult | { error: string }; store: Mem
       {v.next && <p className="mt-1 leading-snug text-fg">{v.next}</p>}
       {v.record && (
         <div className="mt-1.5 flex items-start gap-1.5">
-          <pre className="code-wrap min-w-0 flex-1 rounded bg-surface-3/60 px-2 py-1 font-code text-[10px] leading-snug text-fg-2">{JSON.stringify({ [v.game]: v.record })}</pre>
+          <pre className="code-wrap min-w-0 flex-1 rounded-sm bg-surface-3/60 px-2 py-1 font-code text-[10px] leading-snug text-fg-2">{JSON.stringify({ [v.game]: v.record })}</pre>
           <IconButton icon="copy" label="Copy the record for Knowledge/findings.json" size="sm" onClick={() => copy(JSON.stringify({ [v.game]: v.record }, null, 2))} />
         </div>
       )}
