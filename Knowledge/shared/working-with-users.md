@@ -8,6 +8,15 @@ How an agent asks a developer for help with a guided experiment: when to ask, ho
 - **Don't ask** for things the tools forbid: you never send input, never write memory. If an action would cost the user something (trade, vendor, currency use), say so and offer a cheaper action.
 - Check `experiment_presets` first: a ready-made experiment has tested instructions and watch specs.
 
+## Live step or queued step
+- **Live (`await_change`):** use it when the user is at the game and answering you now. Capture starts at once, and the step fails if they are slow.
+- **Queued (`experiment_queue`):** use it when they are away, busy, or you don't know.
+  - The step waits on the in-game card ("queued for you") with your instruction, `note` (why you need it, what you expect) and repeats. The user presses **Start** when ready, and only then does the HUD record. It records by itself, so you need not be connected.
+  - The queue survives HUD restarts, so a developer coming back later sees what you asked for.
+  - Collect with `experiment_queue_status`. It diffs finished steps into the experiment record, so `experiment_summary` works as usual.
+  - Cancel what you no longer need (`experiment_queue_cancel`).
+- Queue the action and its undo as separate labels, or use repeats on a toggle: each repeat starts from the state the last one left.
+
 ## Phrasing an instruction (the in-game card)
 One action, imperative, about 70 characters, with the key and the mouse target. The card shows it large; longer text wraps and loses the glance.
 - Name the modifier key in caps and the direction or count: `Ctrl+scroll DOWN once`, `Ctrl+left-click ONE item`.

@@ -322,6 +322,121 @@ public static class ExperimentTools
             ["note"] = running ? "Cancelling; experiment_status shows 'cancelled' shortly." : "No step of this experiment is running in this server process." });
     }
 
+    // ── Queued steps (the user starts them in game) ──────────────────
+    // The bridge keeps the queue and records the step itself once the user presses Start on the in-game card, so
+    // nothing waits on an agent being connected. experiment_queue_status collects finished steps into the same
+    // experiment records as await_change (diffed here with the HUD's field names), so experiment_summary covers both.
+
+    [McpServerTool(Name = "experiment_queue", Title = "Queue a step for the user to start in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Leave a guided step for the USER to start from the in-game guide card when they are ready (they may be " +
+                 "away): nothing is recorded until they press Start, then the HUD records it itself (baseline, wait for a lasting " +
+                 "change, settle) for each repeat - no agent needs to be connected. The queue survives HUD restarts, so " +
+                 "developers see later what you asked and why (note). Collect results with experiment_queue_status. Prefer this " +
+                 "over await_change when the user isn't actively waiting on you.")]
+    public static async Task<CallToolResult> ExperimentQueue(BridgeRegistry bridges,
+        [Description("Watch specs: value:<path> | memory:<path>[:size] | collection:<path>[:Label1,Label2]")] string[] watch,
+        [Description("Step label, e.g. 'public-on'")] string label,
+        [Description("Experiment record name the results go to")] string experiment,
+        [Description("What the user should do, in game words, e.g. 'Tick Public on Dump leveling, then confirm'")] string instruction,
+        [Description("How many times in a row (1-10, default 2: repeats are the evidence). Each repeat starts from the state the last one left")] int repeats = 2,
+        [Description("Why you need it / what you expect, shown on the card for the developer")] string? note = null,
+        [Description("Card title, e.g. 'Stash: which checkbox is Flags bit 3?'")] string? title = null,
+        [Description("Max wait per repeat after Start, ms (5000-600000, default 120000)")] int timeoutMs = 120_000,
+        [Description("Settle time, ms (100-5000, default 500)")] int settleMs = 500,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var p = new JObject
+        {
+            ["experiment"] = experiment, ["label"] = label, ["instruction"] = instruction, ["watch"] = new JArray(watch),
+            ["repeats"] = repeats, ["timeoutMs"] = timeoutMs, ["settleMs"] = settleMs, ["by"] = "Claude",
+        };
+        if (note != null) p["note"] = note;
+        if (title != null) p["title"] = title;
+        foreach (var w in watch) Spec.Parse(w);
+        var (_, r) = await bridges.CallAsync(game, "experiment.queue", p, ct);
+        NeedQueue(r);
+        if (r["error"] == null) r["next"] = "The user presses Start on the in-game guide card. Check experiment_queue_status later (it imports finished steps).";
+        return ToolResults.Json(r);
+    }
+
+    [McpServerTool(Name = "experiment_queue_status", Title = "Queued steps and their recordings", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("The in-game step queue: what waits for the user, what runs, what finished. Finished recordings not collected " +
+                 "yet are diffed (bytes, bits, values, with HUD field names), appended to their experiment record and marked " +
+                 "collected - then experiment_summary shows what changed in every repeat. all=true also lists collected steps.")]
+    public static async Task<CallToolResult> ExperimentQueueStatus(BridgeRegistry bridges,
+        [Description("Also list steps already collected")] bool all = false,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var (bridge, list) = await bridges.CallAsync(game, "experiment.queued", new JObject { ["all"] = all }, ct);
+        NeedQueue(list);
+        var gameName = bridge.Game;
+        var sb = new StringBuilder();
+        var imported = new JArray();
+        foreach (var s in (list["steps"] as JArray ?? []).OfType<JObject>())
+        {
+            var status = s["status"]?.ToString();
+            sb.AppendLine($"[{status}] {s["id"]} {s["experiment"]}/{s["label"]} x{s["repeats"]} ({s["captured"]} recorded): {s["instruction"]}");
+            if (status is "queued" or "running" || s["collected"]?.Value<bool>() == true || (s["captured"]?.Value<int>() ?? 0) == 0) continue;
+            var (_, full) = await bridges.CallAsync(gameName, "experiment.result", new JObject { ["id"] = s["id"] }, ct);
+            var specs = (full["watch"] as JArray ?? []).Select(w => Spec.Parse(w.ToString())).ToList();
+            foreach (var sp in specs) await sp.PrepareAsync(bridges, gameName, ct);
+            var experiment = full["experiment"]!.ToString();
+            var label = full["label"]!.ToString();
+            JObject? record = null;
+            foreach (var c in (full["captures"] as JArray ?? []).OfType<JObject>())
+            {
+                var before = new Dictionary<string, string>();
+                var after = new Dictionary<string, string>();
+                foreach (var sp in specs)
+                {
+                    if (c["Before"]?[sp.Raw] is { } b) AddToMap(sp, b, before);
+                    if (c["After"]?[sp.Raw] is { } a) AddToMap(sp, a, after);
+                }
+                var changes = Diff(specs, before, after);
+                record = await AppendStep(experiment, new JObject
+                {
+                    ["label"] = label, ["instruction"] = full["instruction"], ["at"] = c["At"], ["game"] = gameName,
+                    ["changedAfterMs"] = c["ChangedAfterMs"], ["watch"] = full["watch"], ["changes"] = changes,
+                    ["queuedStep"] = s["id"], ["repeat"] = c["Repeat"], ["startedFrom"] = full["startedFrom"],
+                }, ct);
+                sb.AppendLine($"    repeat {c["Repeat"]}: " + (changes.Count == 0 ? "no differences" : string.Join("; ", changes.OfType<JObject>().Take(6).Select(x =>
+                    x["kind"]?.ToString() == "bytes" ? $"{x["key"]}: {x["from"]} -> {x["to"]}{(x["bitsFlipped"] is JArray bits ? $" (bits {string.Join(",", bits)})" : "")}" : $"{x["key"]}: {x["from"]} -> {x["to"]}"))));
+            }
+            await bridges.CallAsync(gameName, "experiment.collected", new JObject { ["id"] = s["id"] }, ct);
+            var entry = new JObject { ["id"] = s["id"], ["experiment"] = experiment, ["label"] = label };
+            if (record != null) entry["consistent"] = Consistent(record, label);
+            imported.Add(entry);
+        }
+        if (sb.Length == 0) sb.AppendLine(all ? "The queue is empty." : "Nothing queued or waiting to be collected (all=true lists collected steps).");
+        if (imported.Count > 0) sb.AppendLine($"Collected {imported.Count} step(s) into their experiment records (experiment_summary).");
+        list["imported"] = imported;
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
+            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(list.ToString(Formatting.None)),
+        };
+    }
+
+    [McpServerTool(Name = "experiment_queue_cancel", Title = "Remove a queued step", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Cancel a queued (or running) in-game step by id, e.g. when the question is already answered.")]
+    public static async Task<CallToolResult> ExperimentQueueCancel(BridgeRegistry bridges,
+        [Description("Step id from experiment_queue / experiment_queue_status")] string id,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var (_, r) = await bridges.CallAsync(game, "experiment.cancel", new JObject { ["id"] = id }, ct);
+        NeedQueue(r);
+        return ToolResults.Json(r);
+    }
+
+    private static void NeedQueue(JToken? r)
+    {
+        if (r is not JObject o || (o["ok"] == null && o["error"] == null))
+            throw new McpException("This HUD's bridge plugin has no experiment queue yet: update What's an AI Bridge and restart the HUD.");
+    }
+
     [McpServerTool(Name = "experiment_summary", Title = "Summarise a guided experiment", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("For an experiment record: per step label, how many repeats, which changes happened in EVERY repeat (the " +
                  "evidence) and which only sometimes (noise or side effects). Pass no name to list records.")]
@@ -406,11 +521,25 @@ public static class ExperimentTools
         var d = new Dictionary<string, string>();
         foreach (var s in specs)
         {
+            JToken r = s.Kind switch
+            {
+                "value" => (await bridges.QueryAsync(game, $"eval:{s.Path}", ct)).Item2,
+                "memory" => (await bridges.CallAsync(game, "memory.read", new JObject { ["path"] = s.Path, ["size"] = s.Size, ["classify"] = false }, ct)).Item2,
+                _ => (await bridges.CallAsync(game, "memory.collect", new JObject { ["path"] = s.Path, ["size"] = s.Size, ["labels"] = new JArray(s.Labels), ["limit"] = 500 }, ct)).Item2,
+            };
+            AddToMap(s, r, d);
+        }
+        return d;
+    }
+
+    /// <summary>One spec's bridge response (eval / memory.read / memory.collect) as flat "spec|key" -> value entries.</summary>
+    private static void AddToMap(Spec s, JToken r, Dictionary<string, string> d)
+    {
+        {
             switch (s.Kind)
             {
                 case "value":
                 {
-                    var (_, r) = await bridges.QueryAsync(game, $"eval:{s.Path}", ct);
                     var leaves = new Dictionary<string, string>();
                     if (r["error"] != null) leaves["error"] = r["error"]!.ToString();
                     else WatchTools.Flatten(r["value"], "", leaves);
@@ -419,14 +548,12 @@ public static class ExperimentTools
                 }
                 case "memory":
                 {
-                    var (_, r) = await bridges.CallAsync(game, "memory.read", new JObject { ["path"] = s.Path, ["size"] = s.Size, ["classify"] = false }, ct);
                     d[$"{s.Raw}|@"] = r["data"]?.ToString() ?? $"error:{r["error"]}";
                     d[$"{s.Raw}|address"] = r["address"]?.ToString() ?? "";
                     break;
                 }
                 case "collection":
                 {
-                    var (_, r) = await bridges.CallAsync(game, "memory.collect", new JObject { ["path"] = s.Path, ["size"] = s.Size, ["labels"] = new JArray(s.Labels), ["limit"] = 500 }, ct);
                     var seen = new Dictionary<string, int>();
                     foreach (var item in (r["items"] as JArray ?? []).OfType<JObject>())
                     {
@@ -441,7 +568,6 @@ public static class ExperimentTools
                 }
             }
         }
-        return d;
     }
 
     private static bool Same(Dictionary<string, string> a, Dictionary<string, string> b) =>
