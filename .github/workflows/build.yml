@@ -44,3 +44,16 @@ jobs:
               exit 1
             fi
           done
+
+      # Instructions, prompts, tool descriptions and packs point agents at knowledge packs by name
+      # (e.g. "knowledge pack shared/api-costs"). Fail if one of those names has no pack.
+      - name: Knowledge pack references resolve
+        shell: bash
+        run: |
+          refs=$(grep -ohE "\b(shared|poe1|poe2)/[a-z][a-z0-9-]+" Hosting/McpSetup.cs Prompts/*.cs Tools/*.cs Knowledge/*/*.md README.md | grep -vE "^(shared|poe1|poe2)/(poe1|poe2)$" | sort -u)
+          missing=0
+          for r in $refs; do
+            if [ ! -f "Knowledge/$r.md" ]; then echo "::error::knowledge pack '$r' is referenced but Knowledge/$r.md doesn't exist"; missing=1; fi
+          done
+          echo "$(echo $refs | wc -w) pack references checked"
+          exit $missing
