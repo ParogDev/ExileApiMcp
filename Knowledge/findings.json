@@ -93,13 +93,23 @@
     },
     {
       "id": "ui.poe2.quest-complete-notice",
-      "title": "PoE2: the quest notification (new objective / quest complete) is a top-level IngameUi child the HUD doesn't map (QuestRewardWindow and QuestTracker are different panels)",
+      "title": "PoE2: the notification popup (quest objectives, quest complete, gameplay hints) is a top-level IngameUi child the HUD doesn't map (QuestRewardWindow and QuestTracker are different panels)",
       "subject": "IngameUi.Children",
       "games": {
         "poe1": { "status": "unverified" },
-        "poe2": { "status": "unverified", "note": "Seen twice by passive observation (2026-10-08), both as child [43]: text 'Quest Complete' while QuestRewardWindow [63] was open after an NPC dialog in Clearfell Encampment, and 'Kill the Mad Wolf' (a new objective) in Ogham Manor. A 540x270 element near the bottom centre with one child. Identify by position or text" }
+        "poe2": { "status": "unverified", "note": "Seen twice by passive observation (2026-10-08), both as child [43]: text 'Quest Complete' while QuestRewardWindow [63] was open after an NPC dialog in Clearfell Encampment, and 'Kill the Mad Wolf' (a new objective) in Ogham Manor; later 'Travel East', 'Defeat Rathbreaker' and a gameplay hint '[Freeze] Buildup: Upon reaching 100%, this monster will become [Frozen].' A 540x270 element near the bottom centre with one child. Identify by position or text" }
       },
       "check": { "kind": "manual", "how": "observe action=start, turn in a quest, then observe_events kinds=[ui]: an unmapped panel with text 'Quest Complete' alongside QuestRewardWindow." }
+    },
+    {
+      "id": "ui.poe2.checkpoints-panel",
+      "title": "PoE2: the Checkpoints travel panel is a top-level IngameUi child the HUD doesn't map (no Checkpoint/Waypoint/Travel property)",
+      "subject": "IngameUi.Children",
+      "games": {
+        "poe1": { "status": "unverified", "note": "PoE2 feature" },
+        "poe2": { "status": "unverified", "note": "Seen once by passive observation (2026-10-08) in Vastiri Outskirts as child [61]: 1728x1080, 7 children; title text 'Checkpoints' at [1][0] (445x28) and [6][0] (143x26); [3]-[5] are 1296x729 layers (likely the map image). Byte snapshot in the observe journal (seq 436). Confirm on the next opening and map its checkpoint entries" }
+      },
+      "check": { "kind": "manual", "how": "observe action=start, open the Checkpoints panel, then observe_events kinds=[ui]: an unmapped panel with text 'Checkpoints'; explore_object IngameUi.Children[<index>] while it is open." }
     },
     {
       "id": "stash.flags.public",
