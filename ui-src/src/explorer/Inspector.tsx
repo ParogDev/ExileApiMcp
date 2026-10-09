@@ -24,8 +24,8 @@ export function Inspector({ store, snap, now, sel, host, variant }: { store: Exp
   useEffect(() => { setFull(undefined); }, [sel.id]);
 
   const copy = async (text: string, what: string) => {
-    try { await navigator.clipboard.writeText(text); store.toast("info", `Copied ${what}`); }
-    catch { store.toast("error", "Clipboard blocked by the host; select the text instead"); }
+    try { await navigator.clipboard.writeText(text); store.toast("success", what, "Copied"); }
+    catch { store.toast("error", "Select the text instead", "Clipboard blocked"); }
   };
   const loadFull = async () => {
     if (!sel.path) return;
@@ -114,7 +114,7 @@ export function Inspector({ store, snap, now, sel, host, variant }: { store: Exp
       {full && full.path === sel.path && (
         <div className="mt-3">
           <SectionLabel right={<IconButton icon="x" label="Hide full value" size="sm" onClick={() => setFull(undefined)} className="-my-1" />}>Full value · eval_path</SectionLabel>
-          {full.loading ? <div className="mt-1.5 space-y-1.5"><div className="shimmer h-2.5 w-3/4 rounded" /><div className="shimmer h-2.5 w-1/2 rounded" /></div>
+          {full.loading ? <div className="mt-1.5 space-y-1.5"><div className="shimmer h-2.5 w-3/4 rounded-sm" /><div className="shimmer h-2.5 w-1/2 rounded-sm" /></div>
             : full.error ? <p className="mt-1.5 text-danger">{full.error}</p>
             : <pre className="scroll-thin code-wrap mt-1.5 max-h-56 overflow-auto rounded-md bg-surface-3/60 p-2 font-code text-[10.5px] leading-snug">{typeof full.data === "string" ? full.data : JSON.stringify(full.data, null, 2)}</pre>}
         </div>
@@ -134,7 +134,7 @@ function WatchPanel({ watch, now, onClear }: { watch: NonNullable<Snapshot["watc
         {watch.status === "done" && <span className="tnum font-normal normal-case tracking-normal">· {watch.result?.samples ?? "?"} samples, {changes.length} changed</span>}
       </SectionLabel>
       {watch.status === "running" && (
-        <div className="mt-1.5 h-1 overflow-hidden rounded bg-surface-3" role="progressbar" aria-valuenow={Math.round(pct * 100)} aria-valuemin={0} aria-valuemax={100}>
+        <div className="mt-1.5 h-1 overflow-hidden rounded-sm bg-surface-3" role="progressbar" aria-valuenow={Math.round(pct * 100)} aria-valuemin={0} aria-valuemax={100}>
           <div className="h-full bg-warning transition-[width] duration-500 ease-linear" style={{ width: `${pct * 100}%` }} />
         </div>
       )}
@@ -159,8 +159,8 @@ function WatchRow({ c }: { c: WatchChange }) {
       <span className="tnum shrink-0 font-code text-[11px]">
         <span className="text-fg-3">{fmtVal(c.first)}</span> <span className="text-fg-3">→</span> <span className="text-fg">{fmtVal(c.last)}</span>
       </span>
-      <span className="tnum shrink-0 rounded bg-surface-3 px-1 text-[10px] text-fg-2" title={`Changed ${c.changes} times`}>×{c.changes}</span>
-      {c.noisy && <span className="shrink-0 rounded bg-warning/15 px-1 text-[10px] text-warning" title="Changed on almost every sample">noisy</span>}
+      <span className="tnum shrink-0 rounded-sm bg-surface-3 px-1 text-[10px] text-fg-2" title={`Changed ${c.changes} times`}>×{c.changes}</span>
+      {c.noisy && <span className="shrink-0 rounded-sm bg-warning/15 px-1 text-[10px] text-warning" title="Changed on almost every sample">noisy</span>}
     </li>
   );
 }

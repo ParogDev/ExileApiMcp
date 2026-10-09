@@ -215,7 +215,7 @@ export function Timeline({ frames, durationMs, analysis, height = 112, dim }: Ti
 function Row({ swatch, label, value, strong, muted }: { swatch: string; label: string; value: string; strong?: boolean; muted?: boolean }) {
   return (
     <div className={`flex items-center gap-1.5 ${muted ? "text-fg-3" : ""}`}>
-      <span className={`size-2 shrink-0 rounded-[2px] ${swatch}`} aria-hidden />
+      <span className={`size-2 shrink-0 rounded-xs ${swatch}`} aria-hidden />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       <span className={`tnum ${strong ? "font-semibold" : ""}`}>{value}</span>
     </div>
@@ -236,5 +236,5 @@ export function TimelineLegend({ analysis, frames, durationMs }: { analysis: Spi
 }
 
 function Key({ swatch, children }: { swatch: string; children: React.ReactNode }) {
-  return <span className="inline-flex items-center gap-1"><span className={`size-2 rounded-[2px] ${swatch}`} aria-hidden />{children}</span>;
+  return <span className="inline-flex items-center gap-1"><span className={`size-2 rounded-xs ${swatch}`} aria-hidden />{children}</span>;
 }

@@ -59,7 +59,7 @@ export function PathBar({ store, snap }: { store: ExplorerStore; snap: Snapshot 
                     onClick={() => (last ? setEditing(true) : void store.navigate(path))}
                     title={last ? `${path}\nClick to edit the path` : `Re-root at ${path}`}
                     aria-current={last ? "page" : undefined}
-                    className={`inline-flex h-6 items-center gap-1 rounded px-1 font-code text-[11.5px] hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${last ? "font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}
+                    className={`inline-flex h-6 items-center gap-1 rounded-sm px-1 font-code text-[11.5px] hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${last ? "font-semibold text-fg" : "text-fg-2 hover:text-fg"}`}
                   >
                     {gc && <Icon name="puzzle" className="size-3 text-info" />}
                     {gc ? segmentLabel(seg) : seg}

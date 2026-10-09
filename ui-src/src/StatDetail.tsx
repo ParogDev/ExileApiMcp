@@ -56,11 +56,11 @@ export function StatDetail({ statKey, stat, stats, pinned, change, now, remote, 
 
   return (
     <div className={variant === "panel" ? "rounded-lg border border-line bg-surface-2 p-3" : "px-3 pb-3 pt-2.5"} onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-fg-3">
+      <div className="flex items-center gap-1.5 ds-label text-fg-3">
         {category && <><span className={`size-1.5 rounded-full ${CATEGORY_DOT[category]}`} aria-hidden />{CATEGORY_LABEL[category]}</>}
         {meta.length > 0 && <span className="truncate font-normal normal-case tracking-normal" title="Stats.dat record details; keys are stable across patches, ids are not">· {meta.join(" · ")}</span>}
         {remote && (
-          <span className="ml-1 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-info/10 px-1.5 py-px font-medium normal-case tracking-normal text-info" title="This stat was selected in the in-game panel or by Claude; the selection is shared.">
+          <span className="ml-1 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-sm bg-info/10 px-1.5 py-px font-medium normal-case tracking-normal text-info" title="This stat was selected in the in-game panel or by Claude; the selection is shared.">
             <Icon name="sync" className="size-3" />selected elsewhere
           </span>
         )}
@@ -89,7 +89,7 @@ export function StatDetail({ statKey, stat, stats, pinned, change, now, remote, 
 
       {element && (
         <div className="mt-2">
-          <div className={`text-[10.5px] font-semibold uppercase tracking-wide ${ELEMENT_META[element].text}`}>{ELEMENT_META[element].label} resistance layers</div>
+          <div className={`ds-label ${ELEMENT_META[element].text}`}>{ELEMENT_META[element].label} resistance layers</div>
           <div className="mt-1 grid grid-cols-4 gap-1">
             {resistLayers(stats, element).map((l) => (
               <div key={l.key} className={`rounded-md ${innerBg} px-1.5 py-1 ${l.key === statKey ? "ring-1 ring-ring" : ""}`}

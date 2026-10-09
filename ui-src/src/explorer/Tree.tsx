@@ -215,7 +215,7 @@ const NodeRow = memo(function NodeRow({ row, selected, checked, flash, hit, hitB
         tabIndex={-1}
         aria-hidden={!row.expandable}
         onClick={(e) => { e.stopPropagation(); if (row.expandable) onToggle(row.path!); }}
-        className={`grid size-4 shrink-0 place-items-center rounded text-fg-3 ${row.expandable ? "hover:bg-surface-3 hover:text-fg" : "pointer-events-none"}`}
+        className={`grid size-4 shrink-0 place-items-center rounded-sm text-fg-3 ${row.expandable ? "hover:bg-surface-3 hover:text-fg" : "pointer-events-none"}`}
       >
         {row.loading ? <Icon name="sync" className="spin size-3" />
           : row.expandable ? <Icon name="chevronRight" className={`size-3 transition-transform ${row.expanded ? "rotate-90" : ""}`} />
@@ -226,7 +226,7 @@ const NodeRow = memo(function NodeRow({ row, selected, checked, flash, hit, hitB
         {c.name}
       </span>
       {c.kind !== "component" && <span className="shrink-0 text-fg-3">:</span>}
-      <span key={flash} className={`flex min-w-0 flex-1 items-center gap-1.5 ${flash ? "flash-up rounded" : ""}`}>
+      <span key={flash} className={`flex min-w-0 flex-1 items-center gap-1.5 ${flash ? "flash-up rounded-sm" : ""}`}>
         <Preview node={c} className="text-[12px]" />
         {c.slowMs !== undefined && <Icon name="clock" className="size-3 shrink-0 text-warning/80" />}
         {!row.path && c.kind !== "component" && <Icon name="lock" className="size-3 shrink-0 text-fg-3" />}
@@ -245,7 +245,7 @@ const NodeRow = memo(function NodeRow({ row, selected, checked, flash, hit, hitB
             aria-label={checked ? "Remove from snippet" : "Add to snippet"}
             title={checked ? "Remove from the C# snippet" : "Add to the C# snippet (Space)"}
             onClick={(e) => { e.stopPropagation(); onCheck({ name: c.name, path: row.path!, csharp: c.csharp!, type: c.type, kind: c.kind, preview: c.preview }, !checked); }}
-            className={`grid size-5 place-items-center rounded text-fg-3 hover:bg-surface-3 hover:text-fg ${checked ? "text-fg" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"}`}
+            className={`grid size-5 place-items-center rounded-sm text-fg-3 hover:bg-surface-3 hover:text-fg ${checked ? "text-fg" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"}`}
           >
             <Icon name={checked ? "checkSquare" : "square"} className="size-3.5" />
           </button>
@@ -270,8 +270,8 @@ function LoadingRows({ depth, count }: { depth: number; count: number }) {
     <div aria-hidden>
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className="flex h-6 items-center gap-2 pr-2" style={{ paddingLeft: depth * INDENT + 24 }}>
-          <div className="shimmer h-2.5 rounded" style={{ width: `${22 + (i % 3) * 8}%` }} />
-          <div className="shimmer h-2.5 rounded" style={{ width: `${30 - (i % 4) * 5}%` }} />
+          <div className="shimmer h-2.5 rounded-sm" style={{ width: `${22 + (i % 3) * 8}%` }} />
+          <div className="shimmer h-2.5 rounded-sm" style={{ width: `${30 - (i % 4) * 5}%` }} />
         </div>
       ))}
     </div>

@@ -55,10 +55,10 @@ export function Perf({ store, host }: { store: PerfStore; host: HostApi }) {
       <span className="grid h-6 shrink-0 place-items-center rounded-md bg-fg px-1.5 text-[11px] font-bold tracking-tight text-surface" title={gameLabel}>
         {game === "poe2" ? "PoE 2" : game === "poe1" ? "PoE 1" : "PoE"}
       </span>
-      <h1 className="truncate text-[13px] font-semibold">HUD performance</h1>
+      <h1 className="ds-title truncate">HUD performance</h1>
       {snap.reportAt && !snap.loading && <span className="hidden truncate text-[11px] text-fg-3 xs:inline" title={new Date(snap.reportAt).toLocaleTimeString()}>traced {agoShort(now - snap.reportAt)}</span>}
       <div className="ml-auto flex shrink-0 items-center gap-1">
-        <span className={`hidden items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium xs:flex ${offline ? "border-danger/30 bg-danger/10 text-danger" : noInstr ? "border-warning/30 bg-warning/10 text-warning" : snap.conn === "live" ? "border-success/30 bg-success/10 text-success" : "border-line text-fg-3"}`} role="status">
+        <span className={`hidden items-center gap-1.5 ds-chip rounded-sm border px-2 xs:flex ${offline ? "border-danger/30 bg-danger/10 text-danger" : noInstr ? "border-warning/30 bg-warning/10 text-warning" : snap.conn === "live" ? "border-success/30 bg-success/10 text-success" : "border-line text-fg-3"}`} role="status">
           {offline ? <Icon name="offline" className="size-3" /> : noInstr ? <Icon name="warning" className="size-3" /> : <span className={`size-1.5 rounded-full ${snap.conn === "live" ? "bg-success" : "bg-fg-3"}`} />}
           {offline ? "Offline" : noInstr ? "No instrumentation" : snap.conn === "live" ? "Live" : "Connecting"}
         </span>
@@ -178,7 +178,7 @@ export function Perf({ store, host }: { store: PerfStore; host: HostApi }) {
 
   const gcCard = trace.gc && (
     <Card title="GC health" icon="box" dim={dim}>
-      <GcPanel gc={trace.gc} trace={trace} report={report!} pool={pool} onCopied={() => store.toast("info", "Copied the environment variable")} />
+      <GcPanel gc={trace.gc} trace={trace} report={report!} pool={pool} onCopied={() => store.toast("success", "The environment variable", "Copied")} />
     </Card>
   );
 
@@ -197,7 +197,7 @@ export function Perf({ store, host }: { store: PerfStore; host: HostApi }) {
         <ul className="mt-2 flex flex-col gap-1 text-[11px]">
           {report!.lint.map((l, i) => (
             <li key={i} className="rounded-md bg-surface-2 px-2 py-1">
-              <div className="flex flex-wrap items-baseline gap-x-1.5"><span className="font-medium">{l.plugin}</span><span className="truncate font-code text-[10.5px] text-fg-2" title={l.method}>{l.method}</span><span className="text-fg-3">calls</span><span className="font-code text-[10.5px]">{l.call}</span>{l.count > 1 && <span className="tnum text-fg-3">x{l.count}</span>}<span className="rounded border border-warning/40 bg-warning/10 px-1 text-[10px] text-warning">in a loop</span></div>
+              <div className="flex flex-wrap items-baseline gap-x-1.5"><span className="font-medium">{l.plugin}</span><span className="truncate font-code text-[10.5px] text-fg-2" title={l.method}>{l.method}</span><span className="text-fg-3">calls</span><span className="font-code text-[10.5px]">{l.call}</span>{l.count > 1 && <span className="tnum text-fg-3">x{l.count}</span>}<span className="rounded-sm border border-warning/40 bg-warning/10 px-1 text-[10px] text-warning">in a loop</span></div>
               <div className="text-fg-2">{l.advice}</div>
             </li>
           ))}
@@ -320,9 +320,9 @@ function GcPanel({ gc, trace, report, pool, onCopied }: { gc: Gc; trace: Trace; 
           <div className="ml-px bg-p-plugins" style={{ width: pct(pluginMBs) }} />
         </div>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10.5px] text-fg-3">
-          {fetched > 0 && <span className="inline-flex items-center gap-1"><span className="size-2 rounded-[2px] bg-p-core" aria-hidden />game pages <span className="tnum text-fg-2">{fmtPct(fetched, gc.allocMBPerSecond)}</span></span>}
-          <span className="inline-flex items-center gap-1"><span className="size-2 rounded-[2px] bg-p-plugins" aria-hidden />plugins <span className="tnum text-fg-2">{fmtPct(pluginMBs, gc.allocMBPerSecond)}</span> <span>({fmtKB(pluginKB)} / frame)</span></span>
-          {other > 1 && <span className="inline-flex items-center gap-1"><span className="size-2 rounded-[2px] bg-line-2" aria-hidden />other <span className="tnum text-fg-2">{fmtPct(other, gc.allocMBPerSecond)}</span></span>}
+          {fetched > 0 && <span className="inline-flex items-center gap-1"><span className="size-2 rounded-xs bg-p-core" aria-hidden />game pages <span className="tnum text-fg-2">{fmtPct(fetched, gc.allocMBPerSecond)}</span></span>}
+          <span className="inline-flex items-center gap-1"><span className="size-2 rounded-xs bg-p-plugins" aria-hidden />plugins <span className="tnum text-fg-2">{fmtPct(pluginMBs, gc.allocMBPerSecond)}</span> <span>({fmtKB(pluginKB)} / frame)</span></span>
+          {other > 1 && <span className="inline-flex items-center gap-1"><span className="size-2 rounded-xs bg-line-2" aria-hidden />other <span className="tnum text-fg-2">{fmtPct(other, gc.allocMBPerSecond)}</span></span>}
         </div>
       </div>
       {pool.state === "churn" && (
@@ -334,7 +334,7 @@ function GcPanel({ gc, trace, report, pool, onCopied }: { gc: Gc; trace: Trace; 
               <p className="mt-0.5 text-fg-2">The HUD cycles about <span className="tnum font-medium text-fg">{fmtInt(pool.cycles)}</span> memory pages per frame, but the shared ArrayPool keeps only <span className="tnum font-medium text-fg">{fmtInt(pool.keeps)}</span> per size. The rest are dropped and reallocated every frame: that is most of the {fmtNum(gc.allocMBPerSecond, 0)} MB/s, and what the collector keeps pausing for.</p>
               <p className="mt-1 text-fg-2">Mitigation, not a cure: this environment variable (decimal) lets the pool keep the pages. Measured: about 4x less allocation and half the total pause, but each pause gets longer, so spikes stay. The cure is a pool of long-lived pages in the HUD itself (research/hud-gc.md).</p>
               <div className="mt-1 flex items-center gap-1">
-                <code className="code-wrap min-w-0 flex-1 rounded bg-surface px-1.5 py-1 font-code text-[10.5px] text-fg">{POOL_ENV}</code>
+                <code className="code-wrap min-w-0 flex-1 rounded-sm bg-surface px-1.5 py-1 font-code text-[10.5px] text-fg">{POOL_ENV}</code>
                 <CopyButton text={POOL_ENV} onCopied={onCopied} />
               </div>
             </div>

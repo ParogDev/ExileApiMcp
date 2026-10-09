@@ -59,7 +59,7 @@ export function Strip({ store, snap, region, segs, sf, cm }: { store: MemoryStor
             className="absolute inset-y-0 border-y-2 border-dashed hover:brightness-110" style={{ left: pct(m.off), width: `max(3px, ${pct(markSize(m))})`, borderColor: mix("cand", 85), background: mix("cand", 18) }} />
         ))}
         {hov && <span className="pointer-events-none absolute inset-y-0 bg-fg/15" style={{ left: pct(hov.off), width: `max(2px, ${pct(hov.size)})` }} />}
-        {sel && <span className="pointer-events-none absolute -inset-y-px rounded-[2px] ring-2 ring-ring" style={{ left: pct(sel.off), width: `max(3px, ${pct(sel.size)})` }} />}
+        {sel && <span className="pointer-events-none absolute -inset-y-px rounded-xs ring-2 ring-ring" style={{ left: pct(sel.off), width: `max(3px, ${pct(sel.size)})` }} />}
       </div>
       <div className="tnum relative mt-0.5 h-3.5 font-code text-[9.5px] text-fg-3" aria-hidden>
         <span className="absolute left-0">0</span>
@@ -88,7 +88,7 @@ function runs(changes: ReadonlyMap<number, ByteChange>, size: number): { off: nu
 
 export function Legend({ struct, code }: { struct: boolean; code?: boolean }) {
   const item = (swatch: ReactNode, label: string, title?: string) => <span className="inline-flex items-center gap-1" title={title}>{swatch}{label}</span>;
-  const box = (cls: string, style?: React.CSSProperties) => <span className={`inline-block size-2 rounded-[2px] ${cls}`} style={style} />;
+  const box = (cls: string, style?: React.CSSProperties) => <span className={`inline-block size-2 rounded-xs ${cls}`} style={style} />;
   return (
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 px-0.5 text-[10px] text-fg-3" aria-label="Legend">
       {struct ? (
@@ -266,7 +266,7 @@ export function MarkChip({ m, onClick }: { m: FindingMark; onClick?: () => void 
       role={onClick ? "button" : undefined}
       onClick={onClick ? (e) => { e.stopPropagation(); onClick(); } : undefined}
       title={`${m.finding.title}\n${m.finding.id} · ${m.status}${m.bit !== undefined ? ` · bit ${m.bit}` : ""}${verified ? "" : "\nNot verified on this game yet: a hypothesis"}`}
-      className={`inline-flex max-w-[16rem] shrink items-center gap-1 truncate rounded px-1 text-[9.5px] font-medium ${confirms ? "text-success" : "text-m-cand"} ${verified ? "" : "border border-dashed"} ${onClick ? "cursor-pointer hover:brightness-110" : ""}`}
+      className={`inline-flex max-w-[16rem] shrink items-center gap-1 truncate rounded-sm px-1 text-[9.5px] font-medium ${confirms ? "text-success" : "text-m-cand"} ${verified ? "" : "border border-dashed"} ${onClick ? "cursor-pointer hover:brightness-110" : ""}`}
       style={{ background: confirms ? "color-mix(in oklab, var(--color-success) 12%, transparent)" : mix("cand", verified ? 16 : 8), borderColor: verified ? undefined : confirms ? "color-mix(in oklab, var(--color-success) 50%, transparent)" : mix("cand", 50) }}
     >
       {confirms ? <Icon name="check" className="size-2.5 shrink-0" /> : m.bit !== undefined && <span className="tnum shrink-0 font-code opacity-80">b{m.bit}</span>}
@@ -295,7 +295,7 @@ const SegRow = memo(function SegRow({ seg: s, region, view, selected, hovered, c
     name = <span className="max-w-[55%] shrink-0 truncate font-code text-[12px] font-medium text-fg">{f.name.includes(".") && <span className="font-normal text-fg-3">{f.name.slice(0, f.name.lastIndexOf(".") + 1)}</span>}{leafOf(f.name)}</span>;
     detail = <span className="hidden truncate font-code text-[10.5px] text-fg-3 xs:inline">{f.type}</span>;
     value = (
-      <span key={flashAt} className={`tnum flex min-w-0 items-center justify-end gap-1.5 rounded px-0.5 font-code text-[11.5px] ${flashAt ? "m-flash" : ""}`}>
+      <span key={flashAt} className={`tnum flex min-w-0 items-center justify-end gap-1.5 rounded-sm px-0.5 font-code text-[11.5px] ${flashAt ? "m-flash" : ""}`}>
         {f.kind === "text" && f.text ? <span className="truncate text-k-str" title={f.text}>"{f.text}"</span> : null}
         <span className={`truncate ${f.kind && f.kind !== "int" && f.kind !== "zero" ? "text-m-ptr" : "text-fg"}`}>{fmtValue(v)}</span>
         {(() => {
@@ -304,14 +304,14 @@ const SegRow = memo(function SegRow({ seg: s, region, view, selected, hovered, c
           const bits = typeof v === "number" && f.size <= 4 ? bitsOfValue(v, f.size * 8) : f.bits;
           if (!bits?.length) return null;
           const named = bitNames ? bits.map((b) => bitNames.get(b)).filter((n): n is string => !!n) : [];
-          if (named.length) return <span className="hidden shrink-0 items-center gap-0.5 sm:inline-flex" title={`Set bits: ${bits.map((b) => `${b}${bitNames?.get(b) ? ` ${bitNames.get(b)}` : ""}`).join(", ")} (bit table from findings)`}>{named.slice(0, 3).map((n) => <span key={n} className="rounded px-1 text-[9.5px] font-medium text-m-cand" style={{ background: mix("cand", 14) }}>{n}</span>)}{named.length > 3 && <span className="text-[9.5px] text-fg-3">+{named.length - 3}</span>}</span>;
-          return <span className="hidden shrink-0 rounded bg-surface-3 px-1 text-[9.5px] text-fg-2 sm:inline" title={`Set bits: ${bits.join(", ")}`}>bits {bits.join(",")}</span>;
+          if (named.length) return <span className="hidden shrink-0 items-center gap-0.5 sm:inline-flex" title={`Set bits: ${bits.map((b) => `${b}${bitNames?.get(b) ? ` ${bitNames.get(b)}` : ""}`).join(", ")} (bit table from findings)`}>{named.slice(0, 3).map((n) => <span key={n} className="rounded-sm px-1 text-[9.5px] font-medium text-m-cand" style={{ background: mix("cand", 14) }}>{n}</span>)}{named.length > 3 && <span className="text-[9.5px] text-fg-3">+{named.length - 3}</span>}</span>;
+          return <span className="hidden shrink-0 rounded-sm bg-surface-3 px-1 text-[9.5px] text-fg-2 sm:inline" title={`Set bits: ${bits.join(", ")}`}>bits {bits.join(",")}</span>;
         })()}
       </span>
     );
     if (f.check !== "ok") {
       const ct = checkTone(f.check);
-      badge = <span className={`shrink-0 rounded px-1 text-[9.5px] font-semibold uppercase ${f.check === "unread" ? "bg-surface-3 text-fg-3" : `${TONE_TEXT[ct]}`}`} style={f.check === "unread" ? undefined : { background: mix(ct, 16) }} title={f.why ?? CHECK_LABEL[f.check]}>{CHECK_LABEL[f.check]}</span>;
+      badge = <span className={`shrink-0 rounded-sm px-1 text-[9.5px] font-semibold uppercase ${f.check === "unread" ? "bg-surface-3 text-fg-3" : `${TONE_TEXT[ct]}`}`} style={f.check === "unread" ? undefined : { background: mix(ct, 16) }} title={f.why ?? CHECK_LABEL[f.check]}>{CHECK_LABEL[f.check]}</span>;
     }
   } else if (s.kind === "cand" && s.cand) {
     const c = s.cand;
@@ -335,9 +335,9 @@ const SegRow = memo(function SegRow({ seg: s, region, view, selected, hovered, c
       </span>
     );
     detail = <span className="hidden truncate font-code text-[10.5px] text-fg-3 xs:inline">{sl.points ?? (sl.section ? `${sl.section} ${sl.rva ?? ""}` : "")}</span>;
-    value = <span key={flashAt} className={`tnum truncate rounded px-0.5 font-code text-[11.5px] ${zero ? "text-fg-3" : "text-fg"} ${flashAt ? "m-flash" : ""}`} title={sl.hex}>
+    value = <span key={flashAt} className={`tnum truncate rounded-sm px-0.5 font-code text-[11.5px] ${zero ? "text-fg-3" : "text-fg"} ${flashAt ? "m-flash" : ""}`} title={sl.hex}>
       {sl.kind === "text" && sl.text ? <span className="text-k-str">"{sl.text}"</span> : sl.kind === "int" || sl.kind === "float" ? sl.value : sl.hex}
-      {sl.bits && sl.bits.length > 0 && <span className="ml-1.5 rounded bg-surface-3 px-1 text-[9.5px] text-fg-2" title={`Set bits: ${sl.bits.join(", ")}`}>bits {sl.bits.join(",")}</span>}
+      {sl.bits && sl.bits.length > 0 && <span className="ml-1.5 rounded-sm bg-surface-3 px-1 text-[9.5px] text-fg-2" title={`Set bits: ${sl.bits.join(", ")}`}>bits {sl.bits.join(",")}</span>}
     </span>;
   } else if (s.kind === "zeros") {
     name = <span className="text-[11.5px] italic text-fg-3">{s.count} zero slots</span>;
@@ -377,14 +377,14 @@ const SegRow = memo(function SegRow({ seg: s, region, view, selected, hovered, c
         <span className="hidden text-[9.5px] text-fg-3 xs:inline">{s.off}</span>
       </span>
       <span className="tnum hidden font-code text-[10px] text-fg-3 xs:block">{s.size}B</span>
-      <span className={`h-[70%] rounded-[1px] ${s.kind === "gap" && !found ? "m-hatch bg-surface-3" : s.kind === "zeros" ? "bg-surface-3" : ""} ${used && s.kind === "gap" && marks.length === 0 ? "border-y border-dashed" : ""}`}
+      <span className={`h-[70%] rounded-xs ${s.kind === "gap" && !found ? "m-hatch bg-surface-3" : s.kind === "zeros" ? "bg-surface-3" : ""} ${used && s.kind === "gap" && marks.length === 0 ? "border-y border-dashed" : ""}`}
         style={(s.kind === "gap" && !found) || s.kind === "zeros" ? undefined : used && s.kind === "gap" && marks.length === 0 ? { background: mix("cand", 30), borderColor: mix("cand", 90) } : { background: mix(tone, 85) }} aria-hidden />
       <span className="flex min-w-0 items-center gap-2">{name}{markChips || detail}</span>
       <span className="flex min-w-0 items-center justify-end">{value}</span>
       <span className="flex items-center gap-1">
         {badge}
         {change && (
-          <span className="tnum shrink-0 rounded px-1 font-code text-[9.5px] font-semibold text-surface" title={`${change.unmapped ? "Unmapped bytes changed" : "Changed"} ×${change.count}${change.noisy ? " · noisy" : ""}`}
+          <span className="tnum shrink-0 rounded-sm px-1 font-code text-[9.5px] font-semibold text-surface" title={`${change.unmapped ? "Unmapped bytes changed" : "Changed"} ×${change.count}${change.noisy ? " · noisy" : ""}`}
             style={{ background: `color-mix(in oklab, var(--color-m-change) ${Math.round(55 + change.recency * 45)}%, transparent)` }}>
             Δ{change.count > 1 ? change.count : ""}
           </span>
@@ -414,7 +414,7 @@ function CodeChip({ marks, gap }: { marks: CodeMark[]; gap: boolean }) {
   const widths = [...new Set(marks.flatMap((m) => m.widths))].sort((a, b) => b - a);
   const gated = marks.flatMap((m) => m.gatedBy);
   return (
-    <span className="inline-flex max-w-[16rem] shrink items-center gap-1 truncate rounded border border-dashed px-1 font-code text-[9.5px] font-medium text-m-cand"
+    <span className="inline-flex max-w-[16rem] shrink items-center gap-1 truncate rounded-sm border border-dashed px-1 font-code text-[9.5px] font-medium text-m-cand"
       style={{ background: mix("cand", 8), borderColor: mix("cand", 55) }}
       title={`${fns.length ? fns.join(", ") : "Code"} ${gap ? "uses these unmapped bytes" : "reads past the HUD's field"}${widths.length ? ` as ${widths.map((w) => `${w} B`).join(" / ")}` : ""}${gated.length ? `\nGated by +${gated.map((g) => `${g.fromOff} bit ${g.bits.join("+")} ${g.when}`).join(", +")}` : ""}\nFrom the code lookup(s) at +${[...new Set(marks.flatMap((m) => m.fromTargets))].join(", +")}`}>
       <Icon name="code" className="size-2.5 shrink-0" />

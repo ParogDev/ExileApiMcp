@@ -56,12 +56,12 @@ function Picker({ store, run, now }: { store: MemoryStore; run: RunState; now: n
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="truncate text-[12.5px] font-semibold">{p.title}</span>
-                      {recs.length > 0 && <span className="tnum shrink-0 rounded bg-surface-3 px-1 text-[9.5px] font-semibold text-fg-2" title={`${recs.length} record${recs.length === 1 ? "" : "s"} on disk from earlier runs, ${n} step${n === 1 ? "" : "s"} in all`}>recorded{n ? ` ×${n}` : ""}</span>}
+                      {recs.length > 0 && <span className="tnum shrink-0 rounded-sm bg-surface-3 px-1 text-[9.5px] font-semibold text-fg-2" title={`${recs.length} record${recs.length === 1 ? "" : "s"} on disk from earlier runs, ${n} step${n === 1 ? "" : "s"} in all`}>recorded{n ? ` ×${n}` : ""}</span>}
                     </div>
                     <p className="mt-0.5 text-[11px] leading-snug text-fg-2">{p.question}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-fg-3">
                       <span className="tnum">{p.steps.length} action{p.steps.length === 1 ? "" : "s"} · {p.watch.length} watched</span>
-                      <span className="flex gap-1">{p.games.map((g) => <span key={g} className="rounded border border-line px-1 text-[9.5px] font-medium">{g === "poe1" ? "PoE 1" : "PoE 2"}</span>)}</span>
+                      <span className="flex gap-1">{p.games.map((g) => <span key={g} className="rounded-sm border border-line px-1 text-[9.5px] font-medium">{g === "poe1" ? "PoE 1" : "PoE 2"}</span>)}</span>
                       <span className="truncate font-code opacity-70">{p.id}</span>
                     </div>
                   </div>
@@ -80,7 +80,7 @@ function Picker({ store, run, now }: { store: MemoryStore; run: RunState; now: n
               <li key={r.name}>
                 <button type="button" onClick={() => store.openRecord(r.name)} className="flex h-8 w-full items-center gap-2 px-3 text-left hover:bg-surface-2" title={`Read the summary of ${r.name}: what changed every time, what only sometimes`}>
                   <span className="truncate font-code text-[11.5px]">{r.name}</span>
-                  {r.steps !== undefined && <span className="tnum shrink-0 rounded bg-surface-3 px-1 text-[9.5px] font-semibold text-fg-2">×{r.steps} step{r.steps === 1 ? "" : "s"}</span>}
+                  {r.steps !== undefined && <span className="tnum shrink-0 rounded-sm bg-surface-3 px-1 text-[9.5px] font-semibold text-fg-2">×{r.steps} step{r.steps === 1 ? "" : "s"}</span>}
                   <span className="tnum ml-auto shrink-0 text-[10px] text-fg-3">{agoText(now - Date.parse(r.updated))}</span>
                   <Icon name="chevronRight" className="size-3.5 shrink-0 text-fg-3" />
                 </button>
@@ -142,7 +142,7 @@ function Setup({ store, run }: { store: MemoryStore; run: RunState }) {
 
         <SectionLabel className="mt-3">Watched while you act</SectionLabel>
         <ul className="mt-1.5 flex flex-wrap gap-1">
-          {p.watch.map((w) => { const i = parseWatch(w); return <li key={w} className="rounded bg-surface-3 px-1.5 py-0.5 font-code text-[10.5px] text-fg-2" title={w}>{i.kind === "memory" ? <><span className="text-m-field">bytes</span> {i.short}{i.size ? ` ·${i.size}` : ""}</> : i.kind === "collection" ? <><span className="text-m-cand">items</span> {i.short}</> : i.short}</li>; })}
+          {p.watch.map((w) => { const i = parseWatch(w); return <li key={w} className="rounded-sm bg-surface-3 px-1.5 py-0.5 font-code text-[10.5px] text-fg-2" title={w}>{i.kind === "memory" ? <><span className="text-m-field">bytes</span> {i.short}{i.size ? ` ·${i.size}` : ""}</> : i.kind === "collection" ? <><span className="text-m-cand">items</span> {i.short}</> : i.short}</li>; })}
         </ul>
 
         <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -289,8 +289,8 @@ export function StepCard({ card, now, title, children, readOnly }: { card: CardM
         <span className={`shrink-0 whitespace-nowrap text-[10.5px] font-bold uppercase tracking-wider ${look.loud ? "" : "opacity-90"}`} style={{ color: look.tone }}>{label}</span>
         {title && <span className="truncate text-[11px] text-fg-3" title={card.title ?? title}>{card.title?.replace(/^Experiment:\s*/, "") ?? title}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          {readOnly && <span className="rounded-full border border-line px-1.5 text-[9.5px] font-medium text-fg-3" title="Claude is running this experiment; the app only shows it">following</span>}
-          {card.step !== undefined && <span className="tnum rounded-full border border-line bg-surface-2 px-1.5 text-[10px] text-fg-2">step {card.step}{card.steps ? ` / ${card.steps}` : ""}</span>}
+          {readOnly && <span className="rounded-sm border border-line px-1.5 text-[9.5px] font-medium text-fg-3" title="Claude is running this experiment; the app only shows it">following</span>}
+          {card.step !== undefined && <span className="tnum rounded-sm border border-line bg-surface-2 px-1.5 text-[10px] text-fg-2">step {card.step}{card.steps ? ` / ${card.steps}` : ""}</span>}
           {(card.status === "waiting" || card.status === "failed" || card.status === "cancelled") && elapsed !== undefined && <span className="tnum text-[10.5px] text-fg-3" title="Since the instruction appeared">{fmtLeft(elapsed)}</span>}
         </span>
       </div>
@@ -300,7 +300,7 @@ export function StepCard({ card, now, title, children, readOnly }: { card: CardM
         {card.detail && card.detail !== sub && <p className="mt-1 text-[11px] leading-snug text-fg-3">{card.detail}</p>}
         {pct !== undefined && busy && (
           <div className="mt-2">
-            <div className="h-1.5 overflow-hidden rounded bg-surface-3" role="progressbar" aria-valuenow={Math.round(pct * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Time left for this step">
+            <div className="h-1.5 overflow-hidden rounded-sm bg-surface-3" role="progressbar" aria-valuenow={Math.round(pct * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Time left for this step">
               <div className={`h-full transition-[width] duration-500 ease-linear ${card.status === "waiting" ? "m-sampling" : ""}`} style={{ width: `${(1 - pct) * 100}%`, background: look.tone }} />
             </div>
             <p className="tnum mt-1 text-[10.5px] text-fg-3">{leftMs !== undefined ? `${fmtLeft(leftMs)} left` : ""}{card.status === "waiting" ? " · a change that reverts (hover, animation) is ignored" : ""}</p>
@@ -350,7 +350,7 @@ function StepList({ actions, current, record, local, disabled, onPick }: { actio
 function RepeatBadge({ n }: { n: number }) {
   const tone = n >= RUN_TARGET_REPEATS ? "var(--color-success)" : n === 1 ? "var(--color-warning)" : "var(--color-fg-3)";
   const text = n === 0 ? "not yet" : n === 1 ? "once · again" : `×${n}`;
-  return <span className="tnum shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ color: tone, background: mixVar(tone, 14) }} title={n === 0 ? "Not captured yet" : n === 1 ? "Captured once: do it again so the repeats can be compared" : `Captured ${n} times`}>{text}</span>;
+  return <span className="tnum shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-semibold" style={{ color: tone, background: mixVar(tone, 14) }} title={n === 0 ? "Not captured yet" : n === 1 ? "Captured once: do it again so the repeats can be compared" : `Captured ${n} times`}>{text}</span>;
 }
 
 // ── Results: the latest capture in plain words, then the raw changes ─
@@ -406,12 +406,12 @@ function Results({ r }: { r: ResultView }) {
                 <span className="min-w-0">
                   <span className="flex items-center gap-1.5">
                     <span className="truncate font-code text-[11.5px] font-medium">{v.name}</span>
-                    {v.unmapped && <span className="shrink-0 rounded px-1 font-code text-[9.5px] font-semibold uppercase text-m-cand" style={{ background: mix("cand", 14) }}>unmapped</span>}
+                    {v.unmapped && <span className="shrink-0 rounded-sm px-1 font-code text-[9.5px] font-semibold uppercase text-m-cand" style={{ background: mix("cand", 14) }}>unmapped</span>}
                   </span>
                   {v.note && <span className="block text-[10.5px] text-fg-3">{v.note}</span>}
                 </span>
                 <span className="tnum shrink-0 font-code text-[11px]"><span className="text-fg-3">{v.from}</span> <span className="text-fg-3">→</span> <span className="font-semibold">{v.to}</span></span>
-                {v.bits && v.bits.length > 0 && <span className="col-span-2 flex flex-wrap items-center gap-1 pt-0.5 text-[10px] text-fg-3">bit{v.bits.length === 1 ? "" : "s"} {v.bits.map((b) => <span key={b} className="tnum rounded px-1 font-code font-semibold text-m-change" style={{ background: mix("change", 14) }}>{b}</span>)}</span>}
+                {v.bits && v.bits.length > 0 && <span className="col-span-2 flex flex-wrap items-center gap-1 pt-0.5 text-[10px] text-fg-3">bit{v.bits.length === 1 ? "" : "s"} {v.bits.map((b) => <span key={b} className="tnum rounded-sm px-1 font-code font-semibold text-m-change" style={{ background: mix("change", 14) }}>{b}</span>)}</span>}
               </li>
             ))}
           </ul>
@@ -425,7 +425,7 @@ function Results({ r }: { r: ResultView }) {
         {r.ok && r.changes.length > 0 && (
           <div className="mt-2">
             <button type="button" onClick={() => setRaw((v) => !v)} aria-expanded={raw} className="flex items-center gap-1 text-[10.5px] text-fg-3 hover:text-fg"><Icon name="chevron" className={`size-3 transition-transform ${raw ? "rotate-180" : ""}`} />Raw changes (the step's result)</button>
-            {raw && <pre className="code-wrap mt-1 max-h-48 overflow-auto rounded bg-surface-3/60 px-2 py-1 font-code text-[10px] leading-snug text-fg-2">{JSON.stringify(r.changes, null, 1)}</pre>}
+            {raw && <pre className="code-wrap mt-1 max-h-48 overflow-auto rounded-sm bg-surface-3/60 px-2 py-1 font-code text-[10px] leading-snug text-fg-2">{JSON.stringify(r.changes, null, 1)}</pre>}
           </div>
         )}
       </div>
@@ -435,10 +435,10 @@ function Results({ r }: { r: ResultView }) {
 
 function Key({ k, tone }: { k: EvidenceKey; tone: "success" | "warning" }) {
   return (
-    <span className={`mx-0.5 inline-flex max-w-full items-center gap-1 rounded px-1.5 py-px font-code text-[10.5px] ${tone === "success" ? "bg-success/12 text-success" : "bg-warning/12 text-warning"}`} title={k.full}>
+    <span className={`mx-0.5 inline-flex max-w-full items-center gap-1 rounded-sm px-1.5 py-px font-code text-[10.5px] ${tone === "success" ? "bg-success/12 text-success" : "bg-warning/12 text-warning"}`} title={k.full}>
       <span className="truncate">{k.name}</span>
       {k.seen !== undefined && <span className="tnum opacity-80">{k.seen}/{k.of}</span>}
-      {k.unmapped && <span className="rounded bg-surface px-1 text-[9px] font-semibold uppercase text-m-cand">unmapped</span>}
+      {k.unmapped && <span className="rounded-sm bg-surface px-1 text-[9px] font-semibold uppercase text-m-cand">unmapped</span>}
     </span>
   );
 }
@@ -515,7 +515,7 @@ function Finish({ store, run, host }: { store: MemoryStore; run: RunState; host:
               <li key={i} className="flex items-start gap-2 px-3 py-2 text-[11.5px] leading-snug">
                 <Icon name="warning" className="mt-0.5 size-3.5 shrink-0 text-warning" />
                 <span className="min-w-0 flex-1">{u.text}</span>
-                {u.count !== undefined && <span className="tnum shrink-0 rounded bg-warning/12 px-1.5 text-[10px] font-semibold text-warning" title="How many times the action was done more often than its reverse">×{u.count}</span>}
+                {u.count !== undefined && <span className="tnum shrink-0 rounded-sm bg-warning/12 px-1.5 text-[10px] font-semibold text-warning" title="How many times the action was done more often than its reverse">×{u.count}</span>}
               </li>
             ))}
           </ul>

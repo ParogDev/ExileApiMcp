@@ -60,6 +60,8 @@ const PATHS = {
   binary: "M6 4h4v7H6zM6 13h4v7H6zM14 4h4v7h-4zM14 13h4v7h-4z",
   diff: "M12 3v18M3 12h18",
   grid: "M4 4h16v16H4zM4 12h16M12 4v16",
+  circleX: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 9l-6 6",
+  circleCheck: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8.5 12.5l2.5 2.5 5-5",
 } as const;
 
 export type IconName = keyof typeof PATHS;

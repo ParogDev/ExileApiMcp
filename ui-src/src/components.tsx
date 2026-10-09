@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "./icons";
 import type { Connection, RemoteChange, StatChange, Toast, ViewField, VitalSample } from "./sync";
 import type { Game, StatItem, Vitals as VitalsDto, ViewState } from "./types";
-import { ELEMENT_META, ago, fmt, fmtStat, signed, statLabel, type Resist } from "./format";
+import { ELEMENT_META, ago, capsLine, fmt, fmtStat, signed, statLabel, type Resist } from "./format";
 
 /** How long the delta column and chip deltas stay visible after a change. */
 export const DELTA_VISIBLE_MS = 30_000;
@@ -60,7 +60,7 @@ export function PinButton({ pinned, onToggle, label, className = "", size = "md"
 
 export function SectionLabel({ children, right, className = "" }: { children: ReactNode; right?: ReactNode; className?: string }) {
   return (
-    <div className={`flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-wide text-fg-3 ${className}`}>
+    <div className={`ds-label flex items-center gap-2 text-fg-3 ${className}`}>
       <span className="flex items-center gap-1.5">{children}</span>
       {right && <span className="ml-auto font-normal normal-case tracking-normal">{right}</span>}
     </div>
@@ -123,7 +123,7 @@ export function SyncPill({ conn, pending, latencyMs, lastOkAt, remote, view, gam
         aria-expanded={open}
         aria-haspopup="dialog"
         title={fresh ? `Changed elsewhere (HUD panel or Claude): ${fresh.fields.map((f) => FIELD_LABEL[f]).join(", ")}` : "Shared view: how this panel stays in sync"}
-        className={`flex h-7 max-w-[9.5rem] items-center gap-1.5 rounded-full border px-2 text-[11px] font-medium transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone}`}
+        className={`flex h-7 max-w-[9.5rem] items-center gap-1.5 ds-chip rounded-sm border px-2 transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone}`}
       >
         {icon}
         <span className="truncate" role="status" aria-live="polite">{label}</span>
@@ -325,9 +325,9 @@ export function PinnedChips({ keys, byKey, selectedKey, changes, now, onUnpin, o
                   onClick={() => onSelect(k)}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(k); } }}
                   title={`${k}${s ? "" : " · not on the character right now (0)"}`}
-                  className={`group flex h-7 max-w-full cursor-pointer items-center gap-1.5 rounded-full border bg-surface pl-2.5 pr-1 text-[12px] outline-none transition-colors hover:border-line-2 focus-visible:ring-2 focus-visible:ring-ring ${selected ? "border-ring" : "border-line"}`}
+                  className={`group flex h-7 max-w-full cursor-pointer items-center gap-1.5 rounded-sm border bg-surface pl-2.5 pr-1 text-[12px] outline-none transition-colors hover:border-line-2 focus-visible:ring-2 focus-visible:ring-ring ${selected ? "border-ring" : "border-line"}`}
                 >
-                  <span key={ch?.at} className={`tnum rounded px-0.5 font-semibold ${s ? "" : "text-fg-3"} ${flash}`}>{s ? fmtStat(k, s.value) : "–"}</span>
+                  <span key={ch?.at} className={`tnum rounded-sm px-0.5 font-semibold ${s ? "" : "text-fg-3"} ${flash}`}>{s ? fmtStat(k, s.value) : "–"}</span>
                   <span className="max-w-[11rem] truncate text-fg-2">{statLabel(s ?? { key: k })}</span>
                   {recent && <span className={`tnum text-[10px] ${ch.delta > 0 ? "text-success" : "text-danger"}`}>{signed(ch.delta)}</span>}
                   <button
@@ -335,7 +335,7 @@ export function PinnedChips({ keys, byKey, selectedKey, changes, now, onUnpin, o
                     aria-label={`Unpin ${k}`}
                     title="Unpin"
                     onClick={(e) => { e.stopPropagation(); onUnpin(k); }}
-                    className="grid size-5 shrink-0 place-items-center rounded-full text-fg-3 opacity-50 transition-opacity hover:bg-surface-3 hover:text-fg focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                    className="grid size-5 shrink-0 place-items-center rounded-sm text-fg-3 opacity-50 transition-opacity hover:bg-surface-3 hover:text-fg focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
                   >
                     <Icon name="x" className="size-3" />
                   </button>
@@ -357,9 +357,9 @@ export function Skeleton({ kind, count }: { kind: "tiles" | "rows"; count: numbe
       <div className={`grid gap-1.5 ${count === 4 ? "grid-cols-4" : "grid-cols-3"}`} aria-hidden>
         {Array.from({ length: count }, (_, i) => (
           <div key={i} className="rounded-lg bg-surface-2 px-2.5 py-2">
-            <div className="shimmer h-2.5 w-2/3 rounded" />
-            <div className="shimmer mt-2 h-4 w-1/2 rounded" />
-            <div className="shimmer mt-2.5 h-1.5 rounded" />
+            <div className="shimmer h-2.5 w-2/3 rounded-sm" />
+            <div className="shimmer mt-2 h-4 w-1/2 rounded-sm" />
+            <div className="shimmer mt-2.5 h-1.5 rounded-sm" />
           </div>
         ))}
       </div>
@@ -370,8 +370,8 @@ export function Skeleton({ kind, count }: { kind: "tiles" | "rows"; count: numbe
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className="grid h-7 grid-cols-[1.75rem_minmax(0,1fr)_4rem] items-center gap-2 px-2">
           <span />
-          <div className="shimmer h-2.5 rounded" style={{ width: `${85 - (i % 4) * 14}%` }} />
-          <div className="shimmer ml-auto h-2.5 w-8 rounded" />
+          <div className="shimmer h-2.5 rounded-sm" style={{ width: `${85 - (i % 4) * 14}%` }} />
+          <div className="shimmer ml-auto h-2.5 w-8 rounded-sm" />
         </div>
       ))}
     </div>
@@ -389,14 +389,14 @@ export function EmptyState({ icon, title, children, className = "" }: { icon: Ic
 }
 
 export function Banner({ tone, icon, title, children, action }: { tone: "danger" | "warning" | "info"; icon: IconName; title: ReactNode; children?: ReactNode; action?: ReactNode }) {
-  const cls = tone === "danger" ? "border-danger/30 bg-danger-bg text-danger"
-    : tone === "warning" ? "border-warning/30 bg-warning/10 text-warning"
-    : "border-line bg-surface-2 text-fg-2";
+  // The state is the stripe (and the glyph); the fill stays neutral so banners stack without turning the panel red.
+  const stripe = tone === "danger" ? "border-l-danger" : tone === "warning" ? "border-l-warning" : "border-l-fg-3";
+  const ink = tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-fg-2";
   return (
-    <div role={tone === "danger" ? "alert" : "status"} className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 text-xs ${cls}`}>
-      <Icon name={icon} className="mt-px size-4 shrink-0" />
+    <div role={tone === "danger" ? "alert" : "status"} className={`flex items-start gap-2.5 rounded-sm border border-line border-l-[3px] bg-surface-2 px-3 py-2 text-xs text-fg-2 ${stripe}`}>
+      <Icon name={icon} className={`mt-px size-4 shrink-0 ${ink}`} />
       <div className="min-w-0 flex-1 leading-snug">
-        <div className="font-semibold">{title}</div>
+        <div className={`ds-card-title ${tone === "info" ? "text-fg" : ink}`}>{title}</div>
         {children && <div className="mt-0.5 text-fg-2">{children}</div>}
       </div>
       {action}
@@ -404,18 +404,38 @@ export function Banner({ tone, icon, title, children, action }: { tone: "danger"
   );
 }
 
+/** How each toast kind looks: the stripe and glyph tone on the fixed toast ink, the outlined glyph, the default title. */
+const TOAST_LOOK: Record<Toast["kind"], { icon: IconName; title: string; stripe: string; ink: string }> = {
+  error: { icon: "circleX", title: "Error", stripe: "border-l-toast-danger", ink: "text-toast-danger" },
+  warning: { icon: "warning", title: "Warning", stripe: "border-l-toast-warning", ink: "text-toast-warning" },
+  success: { icon: "circleCheck", title: "Done", stripe: "border-l-toast-success", ink: "text-toast-success" },
+  info: { icon: "info", title: "Note", stripe: "border-l-toast-info", ink: "text-toast-info" },
+};
+
+/**
+ * Toasts: a slate panel with square corners and a hairline border, a 3 px stripe in the kind's tone flush on the
+ * left edge, an outlined 18 px glyph, the title in condensed caps and the message under it in caps, smaller and
+ * muted. Fixed colours, so a toast is the same object in the apps, the control center and in game. Newest at the
+ * bottom, 4 px apart, 356 px wide in a 380 px panel; no shadow.
+ */
 export function Toasts({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
   if (!toasts.length) return null;
   return (
-    <div className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex flex-col items-end gap-1.5">
-      {toasts.map((t) => (
-        <div key={t.id} role="alert"
-          className={`slide-up pointer-events-auto flex max-w-sm items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-lg ${t.kind === "error" ? "border-danger/40 bg-danger-bg text-danger" : "border-line bg-surface text-fg"}`}>
-          <Icon name={t.kind === "error" ? "warning" : "check"} className="mt-px size-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 leading-snug">{t.text}</span>
-          <IconButton icon="x" label="Dismiss" size="sm" onClick={() => onDismiss(t.id)} className="-my-1 -mr-1.5 text-current hover:text-current" />
-        </div>
-      ))}
+    <div className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex flex-col items-end gap-1">
+      {toasts.map((t) => {
+        const look = TOAST_LOOK[t.kind] ?? TOAST_LOOK.info;
+        return (
+          <div key={t.id} role={t.kind === "error" ? "alert" : "status"}
+            className={`slide-up pointer-events-auto flex w-full max-w-sm items-center gap-2.5 rounded-sm border border-toast-line border-l-[3px] bg-toast py-1.5 pl-3 pr-1 text-toast-fg ${look.stripe}`}>
+            <Icon name={look.icon} className={`size-[18px] shrink-0 ${look.ink}`} strokeWidth="1.6" />
+            <span className="min-w-0 flex-1">
+              <span className="ds-toast-title block truncate">{t.title ?? look.title}</span>
+              <span className="ds-toast-msg block break-words text-toast-fg-2">{capsLine(t.text)}</span>
+            </span>
+            <IconButton icon="x" label="Dismiss" size="sm" onClick={() => onDismiss(t.id)} className="text-toast-fg-2 hover:bg-toast-line hover:text-toast-fg" />
+          </div>
+        );
+      })}
     </div>
   );
 }

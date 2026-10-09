@@ -206,7 +206,7 @@ function Timeline({ compare, step, onStep }: { compare: CompareResult; step: num
                   className={`-mx-[3.75rem] mt-[4px] flex h-3 w-[7.5rem] shrink-0 flex-col items-center ${active ? "" : "opacity-60 hover:opacity-100"}`}
                   title={`${s.from} → ${s.to}: ${s.changes.length} item${s.changes.length === 1 ? "" : "s"}, ${bytes} byte${bytes === 1 ? "" : "s"} changed`}>
                   <span className="h-0.5 w-full" style={{ background: active ? "var(--color-m-change)" : "var(--color-line-2)" }} />
-                  <span className={`tnum mt-6 whitespace-nowrap rounded px-1 text-[9.5px] ${active ? "font-semibold text-m-change" : "text-fg-3"}`} style={active ? { background: mix("change", 12) } : undefined}>{s.changes.length === 0 ? "no change" : `${s.changes.length} item · ${bytes} B`}</span>
+                  <span className={`tnum mt-6 whitespace-nowrap rounded-sm px-1 text-[9.5px] ${active ? "font-semibold text-m-change" : "text-fg-3"}`} style={active ? { background: mix("change", 12) } : undefined}>{s.changes.length === 0 ? "no change" : `${s.changes.length} item · ${bytes} B`}</span>
                 </button>
               )}
             </div>
@@ -254,7 +254,7 @@ function Matrix({ compare, step, fields, onStep }: { compare: CompareResult; ste
             <th className="sticky left-0 z-10 bg-surface px-1 pb-1 text-left font-semibold text-fg-3">item · byte</th>
             {compare.steps.map((s, i) => (
               <th key={i} className="px-1 pb-1 text-center font-normal">
-                <button type="button" onClick={() => onStep(i)} className={`tnum rounded px-1 font-code ${i === step ? "font-semibold text-m-change" : "text-fg-3 hover:text-fg"}`} style={i === step ? { background: mix("change", 12) } : undefined} title={`${s.from} → ${s.to}`}>{i + 1}</button>
+                <button type="button" onClick={() => onStep(i)} className={`tnum rounded-sm px-1 font-code ${i === step ? "font-semibold text-m-change" : "text-fg-3 hover:text-fg"}`} style={i === step ? { background: mix("change", 12) } : undefined} title={`${s.from} → ${s.to}`}>{i + 1}</button>
               </th>
             ))}
           </tr>
@@ -270,7 +270,7 @@ function Matrix({ compare, step, fields, onStep }: { compare: CompareResult; ste
                     <span className={`w-[7rem] truncate font-code ${first ? "font-semibold text-fg" : "text-transparent"}`} title={r.item}>{itemName(r.item)}</span>
                     <span className="tnum font-code text-fg-2">+{r.off}</span>
                     <span className="tnum font-code text-[9.5px] text-fg-3">{hexOff(r.off)}</span>
-                    {f ? <span className="truncate rounded px-1 font-code text-[9.5px] text-fg" style={{ background: mix("field", 22) }} title={`${f.name} (${f.type}) at +${f.off}`}>{f.name.split(".").pop()}{f.size > 1 ? ` [${r.off - f.off}]` : ""}</span> : fields.length ? <span className="rounded px-1 font-code text-[9.5px] text-m-cand" style={{ background: mix("cand", 14) }}>unmapped</span> : null}
+                    {f ? <span className="truncate rounded-sm px-1 font-code text-[9.5px] text-fg" style={{ background: mix("field", 22) }} title={`${f.name} (${f.type}) at +${f.off}`}>{f.name.split(".").pop()}{f.size > 1 ? ` [${r.off - f.off}]` : ""}</span> : fields.length ? <span className="rounded-sm px-1 font-code text-[9.5px] text-m-cand" style={{ background: mix("cand", 14) }}>unmapped</span> : null}
                   </div>
                 </td>
                 {r.cells.map((b, i) => (
@@ -296,8 +296,8 @@ function BitFlip({ b, fieldBase }: { b: ByteChangeStep; fieldBase?: number }) {
   const lbl = (bit: number) => fieldBase !== undefined ? String(fieldBase + bit) : String(bit);
   return (
     <span className="inline-flex items-center gap-0.5 whitespace-nowrap font-code" title={`${b.from} → ${b.to}${b.bitsOn.length ? ` · on: ${b.bitsOn.join(",")}` : ""}${b.bitsOff.length ? ` · off: ${b.bitsOff.join(",")}` : ""}${fieldBase !== undefined ? "\nBit numbers are relative to the field" : ""}`}>
-      {b.bitsOn.map((bit) => <span key={`on${bit}`} className="tnum rounded px-1 font-semibold text-surface" style={{ background: "var(--color-m-change)" }}>▲{lbl(bit)}</span>)}
-      {b.bitsOff.map((bit) => <span key={`off${bit}`} className="tnum rounded border px-1 text-m-change" style={{ borderColor: mix("change", 60) }}>▽{lbl(bit)}</span>)}
+      {b.bitsOn.map((bit) => <span key={`on${bit}`} className="tnum rounded-sm px-1 font-semibold text-surface" style={{ background: "var(--color-m-change)" }}>▲{lbl(bit)}</span>)}
+      {b.bitsOff.map((bit) => <span key={`off${bit}`} className="tnum rounded-sm border px-1 text-m-change" style={{ borderColor: mix("change", 60) }}>▽{lbl(bit)}</span>)}
       {!b.bitsOn.length && !b.bitsOff.length && <span className="text-fg-2">{b.from}→{b.to}</span>}
     </span>
   );
@@ -330,10 +330,10 @@ function StepDetail({ step, fields, host, compare, index }: { step: CompareStep;
                   return (
                     <li key={b.off} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="tnum font-code text-fg-2">+{b.off} <span className="text-[9.5px] text-fg-3">{hexOff(b.off)}</span></span>
-                      {f ? <span className="rounded px-1 font-code text-[9.5px]" style={{ background: mix("field", 22) }}>{f.name}{f.size > 1 ? ` byte ${b.off - f.off}` : ""}</span> : fields.length ? <span className="rounded px-1 font-code text-[9.5px] text-m-cand" style={{ background: mix("cand", 14) }}>unmapped</span> : null}
+                      {f ? <span className="rounded-sm px-1 font-code text-[9.5px]" style={{ background: mix("field", 22) }}>{f.name}{f.size > 1 ? ` byte ${b.off - f.off}` : ""}</span> : fields.length ? <span className="rounded-sm px-1 font-code text-[9.5px] text-m-cand" style={{ background: mix("cand", 14) }}>unmapped</span> : null}
                       <span className="tnum font-code"><span className="text-fg-3">{b.from}</span> → <span className="font-semibold">{b.to}</span></span>
                       <BitFlip b={b} fieldBase={f ? base : undefined} />
-                      {explained.map((e) => <span key={e} className="rounded bg-success/15 px-1 text-[10px] text-success" title="The byte's flipped bit is the same bit that changed in the label's value">{e}</span>)}
+                      {explained.map((e) => <span key={e} className="rounded-sm bg-success/15 px-1 text-[10px] text-success" title="The byte's flipped bit is the same bit that changed in the label's value">{e}</span>)}
                     </li>
                   );
                 })}
@@ -356,7 +356,7 @@ function LabelDelta({ k, v }: { k: string; v: string }) {
   const m = /^(-?\d+) -> (-?\d+)$/.exec(v);
   const bits = m ? bitDelta(Number(m[1]), Number(m[2])) : undefined;
   return (
-    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px]" style={{ background: mix("ptr", 12) }} title={bits ? `${k}: bits on ${bits.on.join(",") || "–"}, off ${bits.off.join(",") || "–"}` : undefined}>
+    <span className="inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10.5px]" style={{ background: mix("ptr", 12) }} title={bits ? `${k}: bits on ${bits.on.join(",") || "–"}, off ${bits.off.join(",") || "–"}` : undefined}>
       <span className="font-semibold text-m-ptr">{k}</span>
       <span className="tnum font-code">{v.replace("->", "→")}</span>
       {bits && (bits.on.length || bits.off.length) ? <span className="tnum font-code text-fg-2">{bits.on.map((b) => `▲${b}`).join(" ")} {bits.off.map((b) => `▽${b}`).join(" ")}</span> : null}

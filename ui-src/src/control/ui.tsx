@@ -101,7 +101,7 @@ export function Segmented<T extends string>({ value, options, onChange, label, t
     <div role="radiogroup" aria-label={label} data-tour={tour} className={`inline-flex shrink-0 rounded-md border border-line bg-surface-2 p-0.5 ${size === "sm" ? "h-6" : "h-7"}`}>
       {options.map((o) => (
         <button key={o.value} type="button" role="radio" aria-checked={o.value === value} title={o.title} onClick={() => onChange(o.value)}
-          className={`inline-flex items-center gap-1 rounded-[5px] px-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${size === "sm" ? "text-[11px]" : "text-[12px]"} ${o.value === value ? "bg-fg text-surface" : "text-fg-2 hover:text-fg"}`}>
+          className={`inline-flex items-center gap-1 rounded-xs px-2 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${size === "sm" ? "text-[11px]" : "text-[12px]"} ${o.value === value ? "bg-fg text-surface" : "text-fg-2 hover:text-fg"}`}>
           {o.label}
         </button>
       ))}
@@ -115,7 +115,7 @@ export function Card({ title, icon, right, children, className = "", tour, pad =
       {title !== undefined && (
         <header className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line px-3 py-1">
           {icon && <Icon name={icon} className="size-3.5 shrink-0 text-fg-3" />}
-          <h2 className="min-w-[6rem] flex-1 truncate text-[12px] font-semibold">{title}</h2>
+          <h2 className="ds-card-title min-w-[6rem] flex-1 truncate">{title}</h2>
           {right && <div className="flex min-w-0 flex-wrap items-center gap-1.5">{right}</div>}
         </header>
       )}
@@ -136,14 +136,14 @@ export function Badge({ children, tone = "neutral", icon, title, className = "" 
     violet: "border-m-cand/30 bg-m-cand/10 text-m-cand",
   };
   return (
-    <span title={title} className={`inline-flex h-[18px] shrink-0 items-center gap-1 rounded border px-1.5 text-[10px] font-medium leading-none ${t[tone]} ${className}`}>
+    <span title={title} className={`ds-badge inline-flex h-[18px] shrink-0 items-center gap-1 rounded-xs border px-1.5 ${t[tone]} ${className}`}>
       {icon && <Icon name={icon} className="size-2.5" />}{children}
     </span>
   );
 }
 
 export function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="rounded border border-line bg-surface-2 px-1 font-code text-[10px] text-fg-2">{children}</kbd>;
+  return <kbd className="rounded-sm border border-line bg-surface-2 px-1 font-code text-[10px] text-fg-2">{children}</kbd>;
 }
 
 /** A catalog icon (data URI SVG per theme). Falls back to an inline icon when the tool has none. */
@@ -161,8 +161,8 @@ export function Stat({ label, value, unit, sub, tone, trend, tour, flash }: { la
   return (
     <div data-tour={tour} className="relative min-w-0 overflow-hidden rounded-lg bg-surface-2 px-2.5 py-2">
       {trend && trend.length > 2 && <MiniTrend values={trend} className="pointer-events-none absolute right-2 top-5 h-5 w-[40%] text-fg-3" />}
-      <div className="truncate text-[10.5px] font-medium uppercase tracking-wide text-fg-3">{label}</div>
-      <div key={flash} className={`relative mt-0.5 flex items-baseline gap-1 ${flash ? "flash-accent rounded px-0.5 -mx-0.5" : ""}`}>
+      <div className="truncate ds-label text-fg-3">{label}</div>
+      <div key={flash} className={`relative mt-0.5 flex items-baseline gap-1 ${flash ? "flash-accent rounded-sm px-0.5 -mx-0.5" : ""}`}>
         <span className={`tnum text-[19px] font-semibold leading-none ${color}`}>{value}</span>
         {unit && <span className="text-[11px] text-fg-3">{unit}</span>}
       </div>
@@ -187,7 +187,7 @@ export function MiniTrend({ values, className = "" }: { values: number[]; classN
 export function ShowMe({ onClick, done, children = "Show me", size = "sm", className = "" }: { onClick: () => void; done?: boolean; children?: ReactNode; size?: "sm" | "md"; className?: string }) {
   return (
     <button type="button" onClick={onClick} title={done ? "Seen before. Show it again" : "A short guided tour of this"}
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full border border-dashed border-ring/50 bg-ring/5 font-medium text-fg transition-colors hover:border-ring hover:bg-ring/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${size === "sm" ? "h-5 px-1.5 text-[10.5px]" : "h-7 px-2.5 text-[11.5px]"} ${className}`}>
+      className={`inline-flex shrink-0 items-center gap-1 rounded-sm border border-dashed border-ring/50 bg-ring/5 font-medium text-fg transition-colors hover:border-ring hover:bg-ring/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${size === "sm" ? "h-5 px-1.5 text-[10.5px]" : "h-7 px-2.5 text-[11.5px]"} ${className}`}>
       <Icon name={done ? "check" : "sparkle"} className={size === "sm" ? "size-2.5" : "size-3"} />{children}
     </button>
   );
@@ -274,7 +274,7 @@ function Collapsible({ label, open: initial, children, inline }: { label: string
   const [open, setOpen] = useState(initial);
   return (
     <div className={inline ? "" : ""}>
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="inline-flex items-center gap-0.5 rounded font-code text-[11px] text-fg-3 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="inline-flex items-center gap-0.5 rounded-sm font-code text-[11px] text-fg-3 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <Icon name="chevronRight" className={`size-3 transition-transform ${open ? "rotate-90" : ""}`} />{label}
       </button>
       {open && <div className="ml-1.5 mt-0.5 border-l border-line pl-2.5">{children}</div>}
@@ -303,7 +303,7 @@ export function JsonTable({ rows: raw, name }: { rows: Record<string, unknown>[]
   return (
     <div className="min-w-0 overflow-x-auto rounded-md border border-line scroll-thin">
       <table className="w-full border-collapse text-[11px]">
-        <thead><tr className="bg-surface-2 text-left text-[10.5px] uppercase tracking-wide text-fg-3">{cols.map((c) => <th key={c} className="whitespace-nowrap px-2 py-1 font-semibold">{c}</th>)}</tr></thead>
+        <thead><tr className="bg-surface-2 ds-label text-left text-fg-3">{cols.map((c) => <th key={c} className="whitespace-nowrap px-2 py-1 font-semibold">{c}</th>)}</tr></thead>
         <tbody>
           {shown.map((r, i) => (
             <tr key={i} className="border-t border-line align-top hover:bg-surface-2/60">
@@ -335,7 +335,7 @@ export function Confirm({ title, children, confirmLabel, tone = "primary", onCon
   return (
     <div className="fade-in fixed inset-0 z-[60] grid place-items-center bg-fg/40 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
       <div ref={ref} role="dialog" aria-modal aria-labelledby={id} data-tour={tour} className="tour-card w-full max-w-sm rounded-card border border-line bg-surface p-4 shadow-2xl">
-        <h2 id={id} className="text-[13.5px] font-semibold">{title}</h2>
+        <h2 id={id} className="ds-card-title">{title}</h2>
         <div className="mt-2 text-[12px] leading-relaxed text-fg-2">{children}</div>
         <div className="mt-4 flex justify-end gap-2">
           <Button onClick={onCancel} tone="ghost" autoFocus>Cancel</Button>

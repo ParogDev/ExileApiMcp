@@ -52,7 +52,7 @@ export function PlayerStats({ store, host }: { store: StatsStore; host: HostApi 
       load={load}
       onPin={(p) => pin(selectedKey, p)}
       onAsk={host.ask && (() => host.ask!(askText(selectedStat ?? { key: selectedKey }, game)))}
-      onCopied={(ok) => store.toast(ok ? "info" : "error", ok ? `Copied ${selectedKey}` : "Clipboard blocked by the host; select the key text instead")}
+      onCopied={(ok) => (ok ? store.toast("success", selectedKey, "Copied") : store.toast("error", "Select the key text instead", "Clipboard blocked"))}
       onClose={() => select(null)}
       variant={fullscreen ? "panel" : "sheet"}
     />
@@ -111,7 +111,7 @@ export function PlayerStats({ store, host }: { store: StatsStore; host: HostApi 
         <span className="grid h-6 shrink-0 place-items-center rounded-md bg-fg px-1.5 text-[11px] font-bold tracking-tight text-surface" title={game === "poe2" ? "Path of Exile 2" : game === "poe1" ? "Path of Exile" : "Game not known yet"}>
           {game === "poe2" ? "PoE 2" : game === "poe1" ? "PoE 1" : "PoE"}
         </span>
-        <h1 className="truncate text-[13px] font-semibold">Player stats</h1>
+        <h1 className="ds-title truncate">Player stats</h1>
         {level !== undefined && <span className="tnum shrink-0 text-[11px] text-fg-3" title="Character level (stat key: level)">Lv {level}</span>}
         {game === "poe2" && vitals?.weaponSet !== undefined && (
           <span className="flex shrink-0 items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[10.5px] text-fg-2" title="Active weapon set; stats differ per set">

@@ -157,7 +157,7 @@ function FrameStrip({ intervals, gc, fps }: { intervals?: (number | null)[]; gc?
   const w = 400, h = 28;
   const n = intervals.length, bw = w / n;
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-7 w-full rounded bg-surface-2" aria-label="Frame intervals of the latest trace" role="img">
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-7 w-full rounded-sm bg-surface-2" aria-label="Frame intervals of the latest trace" role="img">
       <line x1={0} x2={w} y1={h - (thr / max) * h} y2={h - (thr / max) * h} stroke="var(--color-p-spike)" strokeDasharray="2 3" strokeWidth={0.75} opacity={0.6} />
       {intervals.map((v, i) => {
         if (v == null) return null;

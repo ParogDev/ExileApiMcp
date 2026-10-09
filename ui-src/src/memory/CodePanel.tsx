@@ -40,8 +40,8 @@ export function CodePanel({ store, snap, view, region, sel, cm, host, variant, n
   const run = (o: { minKnown?: number; decompile?: number } = {}) => void store.findCode({ minKnown: o.minKnown ?? minKnown, decompile: o.decompile ?? decompile });
 
   const copy = async (text: string, what: string) => {
-    try { await navigator.clipboard.writeText(text); store.toast("info", `Copied ${what}`); }
-    catch { store.toast("error", "Clipboard blocked by the host; select the text instead"); }
+    try { await navigator.clipboard.writeText(text); store.toast("success", what, "Copied"); }
+    catch { store.toast("error", "Select the text instead", "Clipboard blocked"); }
   };
 
   // Names for offsets referenced by the code.
@@ -58,7 +58,7 @@ export function CodePanel({ store, snap, view, region, sel, cm, host, variant, n
     <span className="code-wrap font-code font-normal normal-case tracking-normal">
       {fieldName && <span className="font-semibold text-fg">{fieldName} </span>}
       <span className="text-fg-2">{offPair(target.offset)}</span>
-      {target.bit !== undefined && <span className="rounded px-1 font-semibold text-warning" style={{ background: mix("warning", 14) }}> bit {target.bit}{seg?.field && seg.field.size > 1 && target.offset !== sel.off ? <span className="font-normal text-fg-3"> ({fieldName} bit {snap.bitSel})</span> : null}</span>}
+      {target.bit !== undefined && <span className="rounded-sm px-1 font-semibold text-warning" style={{ background: mix("warning", 14) }}> bit {target.bit}{seg?.field && seg.field.size > 1 && target.offset !== sel.off ? <span className="font-normal text-fg-3"> ({fieldName} bit {snap.bitSel})</span> : null}</span>}
     </span>
   );
 
@@ -127,14 +127,14 @@ function Options({ minKnown, decompile, setMinKnown, setDecompile, anchors }: { 
     <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 rounded-md bg-surface-3/60 px-2.5 py-2 text-[11px]">
       <label className="text-fg-2" htmlFor="code-minknown">minKnown</label>
       <span className="flex items-center gap-2">
-        <select id="code-minknown" value={minKnown} onChange={(e) => setMinKnown(Number(e.target.value))} className="h-6 rounded border border-line bg-surface px-1 text-[11px]">
+        <select id="code-minknown" value={minKnown} onChange={(e) => setMinKnown(Number(e.target.value))} className="h-6 rounded-sm border border-line bg-surface px-1 text-[11px]">
           {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
         <span className="text-fg-3">known fields the same base register must also touch{anchors !== undefined ? ` (the struct has ${anchors} usable)` : ""}. Lower finds more, with more false positives.</span>
       </span>
       <label className="text-fg-2" htmlFor="code-decompile">decompile</label>
       <span className="flex items-center gap-2">
-        <select id="code-decompile" value={decompile} onChange={(e) => setDecompile(Number(e.target.value))} className="h-6 rounded border border-line bg-surface px-1 text-[11px]">
+        <select id="code-decompile" value={decompile} onChange={(e) => setDecompile(Number(e.target.value))} className="h-6 rounded-sm border border-line bg-surface px-1 text-[11px]">
           {[0, 1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
         <span className="text-fg-3">functions to decompile around the offset (the bit-testing ones first).</span>
@@ -155,7 +155,7 @@ function Running({ q, now, anchors, onCancel }: { q: CodeQuery; now: number; anc
         <span className="tnum font-code text-fg-3">{fmtElapsed(elapsed)}</span>
         <button type="button" onClick={onCancel} className="ml-auto rounded-md border border-line px-1.5 py-0.5 text-[11px] text-fg-2 hover:border-line-2 hover:text-fg">Stop waiting</button>
       </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded bg-surface-3" role="progressbar" aria-valuenow={Math.round(phase.pct * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Estimated progress">
+      <div className="mt-2 h-1.5 overflow-hidden rounded-sm bg-surface-3" role="progressbar" aria-valuenow={Math.round(phase.pct * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Estimated progress">
         <div className="m-sampling h-full transition-[width] duration-700 ease-linear" style={{ width: `${Math.max(3, phase.pct * 100)}%`, background: "var(--color-m-cand)" }} />
       </div>
       <p className="mt-1.5 text-[11px] text-fg-2">{phase.label}<span className="text-fg-3"> · estimate; Ghidra reports no progress</span></p>
@@ -181,7 +181,7 @@ function CodeError({ q, onRetry, onRetryLoose, copy }: { q: CodeQuery; onRetry: 
       <div className="mt-2 rounded-md border px-2.5 py-2 text-[11.5px]" style={{ borderColor: mix("warning", 40), background: mix("warning", 6) }}>
         <p className="flex items-center gap-1.5 font-medium text-fg"><Icon name="offline" className="size-3.5 text-warning" />Ghidra isn't running</p>
         <p className="mt-1 leading-snug text-fg-2">Start the headless server from the scaffolding repo, in the background, and wait for “running on port 8089”:</p>
-        <div className="mt-1.5 flex items-start gap-1.5 rounded bg-surface-3/70 px-2 py-1.5">
+        <div className="mt-1.5 flex items-start gap-1.5 rounded-sm bg-surface-3/70 px-2 py-1.5">
           <code className="code-wrap min-w-0 flex-1 font-code text-[10.5px] leading-snug text-fg">{cmd}</code>
           <IconButton icon="copy" label="Copy command" size="sm" onClick={() => copy(cmd, "command")} className="-my-1 -mr-1" />
         </div>
@@ -304,7 +304,7 @@ function leafType(t: string): string { const i = t.lastIndexOf("."); return i >=
 
 function Chip({ tone, children, title }: { tone: "plain" | "cand" | "warning" | "change"; children: ReactNode; title?: string }) {
   const cls = tone === "plain" ? "bg-surface-3 text-fg-2" : tone === "cand" ? "text-m-cand" : tone === "warning" ? "text-warning" : "text-m-change";
-  return <span className={`tnum rounded px-1.5 py-0.5 font-medium ${cls}`} style={{ background: tone === "plain" ? undefined : mix(tone, 14) }} title={title}>{children}</span>;
+  return <span className={`tnum rounded-sm px-1.5 py-0.5 font-medium ${cls}`} style={{ background: tone === "plain" ? undefined : mix(tone, 14) }} title={title}>{children}</span>;
 }
 
 // ── Seen in code (cross-references from other lookups) ───────────────
@@ -324,7 +324,7 @@ function SeenHere({ marks, sel, nameAt, store }: { marks: CodeMark[]; sel: Selec
               {m.gatedBy.map((g) => (
                 <span key={`${g.fromOff}:${g.bits.join()}`} className="text-fg-2"> when <button type="button" className="font-code text-warning underline-offset-2 hover:underline" onClick={() => { store.selectBytes(g.fromOff, 1); store.pickBit(g.bits[0]); }} title="Select that bit">{nameAt(g.fromOff).kind === "field" ? (nameAt(g.fromOff) as { name: string }).name : `+${hexOff(g.fromOff)}`} bit {g.bits.join("+")}</button> is {g.when}</span>
               ))}
-              {n.kind === "gap" && <span className="ml-1 rounded px-1 text-[9.5px] font-semibold uppercase text-m-cand" style={{ background: mix("cand", 14) }}>unmapped</span>}
+              {n.kind === "gap" && <span className="ml-1 rounded-sm px-1 text-[9.5px] font-semibold uppercase text-m-cand" style={{ background: mix("cand", 14) }}>unmapped</span>}
               <span className="text-fg-3"> · from the +{hexOff(m.fromTargets[0])} lookup</span>
             </li>
           );
@@ -370,7 +370,7 @@ function roleText(r: FieldAccessResult, fns: string[]): string {
 function BitChip({ bit, tone, onClick, onHover, matches }: { bit: number; tone: Tone; onClick?: () => void; onHover?: (h: boolean) => void; matches?: boolean }) {
   return (
     <button type="button" onClick={onClick} onMouseEnter={() => onHover?.(true)} onMouseLeave={() => onHover?.(false)} onFocus={() => onHover?.(true)} onBlur={() => onHover?.(false)}
-      className={`tnum inline-flex h-4 items-center rounded px-1 font-code text-[10px] font-semibold ${matches || tone === "warning" ? "text-warning" : "text-fg-2"} ${onClick ? "hover:brightness-110" : ""}`}
+      className={`tnum inline-flex h-4 items-center rounded-sm px-1 font-code text-[10px] font-semibold ${matches || tone === "warning" ? "text-warning" : "text-fg-2"} ${onClick ? "hover:brightness-110" : ""}`}
       style={{ background: matches || tone === "warning" ? mix("warning", 16) : "var(--color-surface-3)" }}
       title={`bit ${bit} = 0x${(1 << bit).toString(16).toUpperCase()} · click to pick it in the bit grid`}>
       b{bit}
@@ -385,7 +385,7 @@ function OffsetChip({ off, width, n, onSelect, inline }: { off: number; width?: 
   const title = n.kind === "field" ? `${n.full} (${n.type}, ${fmtBytes(n.size)}) at +${hexOff(n.start)} · click to select` : unmapped ? `+${hexOff(off)}: the HUD's struct has no field here, but this code uses it · click to select the bytes` : `+${hexOff(off)} · click to select`;
   return (
     <button type="button" onClick={onSelect} title={title}
-      className={`inline-flex max-w-full items-center gap-1 rounded px-1 font-code ${inline ? "text-[10px] align-[1px]" : "text-[10.5px]"} ${unmapped ? "border border-dashed text-m-cand" : n.kind === "field" ? "text-m-field" : "text-fg-2"} hover:brightness-110`}
+      className={`inline-flex max-w-full items-center gap-1 rounded-sm px-1 font-code ${inline ? "text-[10px] align-[1px]" : "text-[10.5px]"} ${unmapped ? "border border-dashed text-m-cand" : n.kind === "field" ? "text-m-field" : "text-fg-2"} hover:brightness-110`}
       style={{ background: unmapped ? mix("cand", 8) : n.kind === "field" ? mix("field", 12) : "var(--color-surface-3)", borderColor: unmapped ? mix("cand", 55) : undefined }}>
       {!inline && <span className="tnum">+{hexOff(off)}</span>}
       <span className={`truncate ${unmapped ? "font-semibold" : ""}`}>{unmapped && !inline ? `${label}: the code uses it` : label}</span>
@@ -412,8 +412,8 @@ function FnRow({ f, r, open, onToggle, copy, nameAt, store, bitSel, byteDelta, b
           <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
             <span className={`font-code text-[11.5px] font-semibold ${f.fn.function === "?" ? "text-fg-3" : "text-fg"}`}>{f.fn.function === "?" ? "no function here" : f.fn.function}</span>
             {f.role && <span className="text-[10.5px] text-fg-2" title="A guess from the pseudocode and the instruction mix">{roleLabel(f.role).prefix}<span className="font-medium text-fg">{f.role}</span></span>}
-            <span className={`tnum rounded px-1 text-[9.5px] font-semibold uppercase ${TONE_TEXT[CONF_TONE[f.confidence]]}`} style={{ background: mix(CONF_TONE[f.confidence], 14) || "var(--color-surface-3)" }} title={`${f.fn.knownFields} of the anchor fields touched through the same base register`}>{f.confidence}</span>
-            {f.fn.bitMatch && r.target.bit !== undefined && r.target.bit !== null && <span className="rounded px-1 text-[9.5px] font-semibold text-warning" style={{ background: mix("warning", 16) }}>tests bit {r.target.bit}</span>}
+            <span className={`tnum rounded-sm px-1 text-[9.5px] font-semibold uppercase ${TONE_TEXT[CONF_TONE[f.confidence]]}`} style={{ background: mix(CONF_TONE[f.confidence], 14) || "var(--color-surface-3)" }} title={`${f.fn.knownFields} of the anchor fields touched through the same base register`}>{f.confidence}</span>
+            {f.fn.bitMatch && r.target.bit !== undefined && r.target.bit !== null && <span className="rounded-sm px-1 text-[9.5px] font-semibold text-warning" style={{ background: mix("warning", 16) }}>tests bit {r.target.bit}</span>}
           </span>
         </button>
         {addr && <IconButton icon="copy" label={`Copy Ghidra address ${addr}`} size="sm" onClick={() => copy(addr, "Ghidra address")} className="-my-1" />}
@@ -449,7 +449,7 @@ function FnRow({ f, r, open, onToggle, copy, nameAt, store, bitSel, byteDelta, b
 
 function KindChip({ kind }: { kind: string }) {
   const tone = ACCESS_TONE[kind] ?? "none";
-  return <span className={`rounded px-1 text-[9.5px] font-semibold ${tone === "none" ? "text-fg-2" : TONE_TEXT[tone]}`} style={{ background: tone === "none" ? "var(--color-surface-3)" : mix(tone, 14) }}>{KIND_LABEL[kind as keyof typeof KIND_LABEL] ?? kind}</span>;
+  return <span className={`rounded-sm px-1 text-[9.5px] font-semibold ${tone === "none" ? "text-fg-2" : TONE_TEXT[tone]}`} style={{ background: tone === "none" ? "var(--color-surface-3)" : mix(tone, 14) }}>{KIND_LABEL[kind as keyof typeof KIND_LABEL] ?? kind}</span>;
 }
 
 function AccessRow({ a, r, copy, bitTone, onBit, onHover, nameAt }: { a: Access; r: FieldAccessResult; copy: (t: string, w: string) => void; bitTone: (b: number) => Tone; onBit: (b: number) => void; onHover: (bits?: number[]) => void; nameAt: (off: number) => OffName }) {
@@ -460,12 +460,12 @@ function AccessRow({ a, r, copy, bitTone, onBit, onHover, nameAt }: { a: Access;
   const parts = a.instruction.split(re);
   const hudSize = nameAt(r.target.offset);
   return (
-    <li className={`grid grid-cols-[3px_minmax(0,1fr)_auto] items-center gap-x-2 rounded px-1 py-0.5 ${a.matchesBit ? "bg-warning/8" : ""}`} onMouseEnter={() => a.bits && onHover(a.bits)} onMouseLeave={() => onHover(undefined)}>
-      <span className="h-[70%] rounded-[1px]" style={{ background: tone === "none" ? "var(--color-fg-3)" : mix(tone, 85) }} aria-hidden />
+    <li className={`grid grid-cols-[3px_minmax(0,1fr)_auto] items-center gap-x-2 rounded-sm px-1 py-0.5 ${a.matchesBit ? "bg-warning/8" : ""}`} onMouseEnter={() => a.bits && onHover(a.bits)} onMouseLeave={() => onHover(undefined)}>
+      <span className="h-[70%] rounded-xs" style={{ background: tone === "none" ? "var(--color-fg-3)" : mix(tone, 85) }} aria-hidden />
       <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-        <code className="code-wrap font-code text-[10.5px] text-fg">{parts.map((p, i) => re.test(p) ? <mark key={i} className="rounded-[2px] bg-transparent px-px font-semibold text-warning ring-1 ring-inset" style={{ ["--tw-ring-color" as string]: mix("warning", 55) }}>{p}</mark> : p)}</code>
+        <code className="code-wrap font-code text-[10.5px] text-fg">{parts.map((p, i) => re.test(p) ? <mark key={i} className="rounded-xs bg-transparent px-px font-semibold text-warning ring-1 ring-inset" style={{ ["--tw-ring-color" as string]: mix("warning", 55) }}>{p}</mark> : p)}</code>
         <KindChip kind={a.kind} />
-        {a.width > 0 && <span className={`tnum rounded px-1 font-code text-[9.5px] ${hudSize.kind === "field" && a.width > hudSize.size ? "text-m-cand" : "text-fg-3"}`} style={{ background: hudSize.kind === "field" && a.width > hudSize.size ? mix("cand", 12) : "var(--color-surface-3)" }} title={hudSize.kind === "field" && a.width > hudSize.size ? `Wider than the HUD's ${fmtBytes(hudSize.size)} field` : "Access width"}>{a.width} B</span>}
+        {a.width > 0 && <span className={`tnum rounded-sm px-1 font-code text-[9.5px] ${hudSize.kind === "field" && a.width > hudSize.size ? "text-m-cand" : "text-fg-3"}`} style={{ background: hudSize.kind === "field" && a.width > hudSize.size ? mix("cand", 12) : "var(--color-surface-3)" }} title={hudSize.kind === "field" && a.width > hudSize.size ? `Wider than the HUD's ${fmtBytes(hudSize.size)} field` : "Access width"}>{a.width} B</span>}
         {a.bits && a.bits.length > 0 && <span className="flex items-center gap-0.5">{a.bits.map((b) => <BitChip key={b} bit={b} tone={bitTone(b)} matches={!!a.matchesBit && b === r.target.bit} onClick={() => onBit(b)} />)}</span>}
       </span>
       <span className="flex items-center gap-0.5">
@@ -505,10 +505,10 @@ function Tok({ t, nameAt, store, onBit, onHover }: { t: Token; nameAt: (off: num
     case "text": return <>{t.s}</>;
     case "other": return <span className="text-fg-3/70" title="Through a variable that isn't this struct">{t.s}</span>;
     case "fn": return <span className="text-fg-2">{t.s}</span>;
-    case "mask": return <button type="button" onClick={() => onBit(t.bits[0])} onMouseEnter={() => onHover(t.bits)} onMouseLeave={() => onHover(undefined)} className="rounded-[2px] px-px font-semibold text-warning hover:brightness-110" style={{ background: mix("warning", 14) }} title={`mask ${t.s} = bit${t.bits.length === 1 ? "" : "s"} ${t.bits.join(", ")} · click to pick in the bit grid`}>{t.s}</button>;
+    case "mask": return <button type="button" onClick={() => onBit(t.bits[0])} onMouseEnter={() => onHover(t.bits)} onMouseLeave={() => onHover(undefined)} className="rounded-xs px-px font-semibold text-warning hover:brightness-110" style={{ background: mix("warning", 14) }} title={`mask ${t.s} = bit${t.bits.length === 1 ? "" : "s"} ${t.bits.join(", ")} · click to pick in the bit grid`}>{t.s}</button>;
     case "off": {
       const n = nameAt(t.off);
-      if (t.target) return <mark className="rounded-[2px] bg-transparent px-px font-semibold text-warning ring-1 ring-inset" style={{ ["--tw-ring-color" as string]: mix("warning", 55) }} title={`the target +${hexOff(t.off)}`}>{t.s}</mark>;
+      if (t.target) return <mark className="rounded-xs bg-transparent px-px font-semibold text-warning ring-1 ring-inset" style={{ ["--tw-ring-color" as string]: mix("warning", 55) }} title={`the target +${hexOff(t.off)}`}>{t.s}</mark>;
       const unmapped = n.kind === "gap" || n.kind === "past";
       const width = t.width ?? (n.kind === "field" ? n.size : 1);
       return (

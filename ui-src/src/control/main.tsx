@@ -115,7 +115,7 @@ function NoToken({ onToken }: { onToken: (t: string) => void }) {
   const [t, setT] = useState("");
   return (
     <div className="mx-auto flex max-w-md flex-col gap-3 p-6">
-      <h1 className="text-[13px] font-semibold">Hexile control center</h1>
+      <h1 className="ds-title">Hexile control center</h1>
       <p className="text-[12px] leading-relaxed text-fg-2">This page talks to the MCP server with a bearer token, and none arrived. Open it from the launcher (it opens <code className="font-code">/app#t=…</code> with the server's token), or paste the token from <code className="font-code">%LOCALAPPDATA%\ExileApiMcp\http-token.txt</code>.</p>
       <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (t.trim()) onToken(t.trim()); }}>
         <input type="password" value={t} onChange={(e) => setT(e.target.value)} placeholder="token" aria-label="Bearer token" className="h-7 min-w-0 flex-1 rounded-md border border-line bg-surface px-2 font-code text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />

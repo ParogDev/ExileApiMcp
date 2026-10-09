@@ -85,7 +85,7 @@ const HexRow = memo(function HexRow({ row, region, sel, hover, changes, flash, n
     const style: React.CSSProperties = {};
     if (ch) style.background = `color-mix(in oklab, var(--color-m-change) ${Math.round(28 + ch.recency * 42)}%, transparent)`;
     else if (alpha) style.background = mix(tone, alpha);
-    const cls = `inline-block w-[1.45rem] cursor-default rounded-[2px] text-center ${i === start + 8 ? "ml-2" : ""} ` +
+    const cls = `inline-block w-[1.45rem] cursor-default rounded-xs text-center ${i === start + 8 ? "ml-2" : ""} ` +
       (!known ? "text-fg-3/50" : ch ? "font-semibold text-fg" : zero && gapish ? "text-fg-3/70" : "text-fg") +
       (selected ? " ring-2 ring-inset ring-ring" : hovered ? " ring-1 ring-inset ring-fg/40" : "") +
       (gapish && seg?.kind === "gap" && !ch && !selected ? " m-hatch" : "") +

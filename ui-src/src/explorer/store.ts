@@ -365,8 +365,8 @@ export class ExplorerStore {
 
   // ── Toasts ───────────────────────────────────────────────────────
 
-  toast(kind: Toast["kind"], text: string) {
-    const toast: Toast = { id: ++this.toastSeq, kind, text };
+  toast(kind: Toast["kind"], text: string, title?: string) {
+    const toast: Toast = { id: ++this.toastSeq, kind, text, title };
     this.set({ toasts: [...this.snap.toasts, toast].slice(-3) });
     setTimeout(() => this.dismiss(toast.id), kind === "error" ? 6000 : 2500);
   }

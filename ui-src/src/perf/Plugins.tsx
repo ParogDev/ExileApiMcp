@@ -31,7 +31,7 @@ export function FrameSplit({ trace }: { trace: Trace }) {
 function Part({ swatch, label, ms, of }: { swatch: string; label: string; ms: number; of: number }) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className={`size-2 rounded-[2px] ${swatch}`} aria-hidden />
+      <span className={`size-2 rounded-xs ${swatch}`} aria-hidden />
       <span className="text-fg-2">{label}</span>
       <span className="tnum font-medium">{fmtMs(ms)}</span>
       <span className="tnum text-fg-3">{fmtPct(ms, of)}</span>
@@ -72,7 +72,7 @@ export function PluginTable({ report, selected, onSelect, sort, onSort, maxRows 
 function SortHead({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick} title={title} aria-pressed={active}
-      className={`flex items-center justify-end gap-0.5 rounded px-1 text-right hover:text-fg ${active ? "font-semibold text-fg-2" : ""}`}>
+      className={`flex items-center justify-end gap-0.5 rounded-sm px-1 text-right hover:text-fg ${active ? "font-semibold text-fg-2" : ""}`}>
       {children}{active && <Icon name="down" className="size-2.5" />}
     </button>
   );
@@ -94,7 +94,7 @@ function PluginRow({ p, maxTime, maxAlloc, selected, onSelect, sort }: { p: Plug
 function Cell({ value, frac, swatch, lead, unit }: { value: string; frac: number; swatch: string; lead: boolean; unit?: string }) {
   return (
     <span className="relative flex h-5 items-center justify-end">
-      <span className={`absolute inset-y-1 right-0 rounded-[2px] ${swatch} ${lead ? "opacity-30" : "opacity-15"}`} style={{ width: `${Math.max(2, frac * 100)}%` }} aria-hidden />
+      <span className={`absolute inset-y-1 right-0 rounded-xs ${swatch} ${lead ? "opacity-30" : "opacity-15"}`} style={{ width: `${Math.max(2, frac * 100)}%` }} aria-hidden />
       <span className={`tnum relative pr-1 ${lead ? "font-semibold" : "text-fg-2"}`}>{value}{unit && <span className="text-[10px] text-fg-3"> {unit}</span>}</span>
     </span>
   );
@@ -111,7 +111,7 @@ export function PluginDetail({ name, trace, onRun, running, onClose }: { name: s
     <div className="fade-in rounded-lg border border-line bg-surface-2 p-2.5 text-[11.5px]">
       <div className="flex items-center gap-2">
         <SectionLabel className="min-w-0 flex-1"><span className="truncate normal-case tracking-normal text-fg">{name}</span></SectionLabel>
-        <button type="button" onClick={onClose} aria-label="Close" className="grid size-5 place-items-center rounded text-fg-3 hover:bg-surface-3 hover:text-fg"><Icon name="x" className="size-3" /></button>
+        <button type="button" onClick={onClose} aria-label="Close" className="grid size-5 place-items-center rounded-sm text-fg-3 hover:bg-surface-3 hover:text-fg"><Icon name="x" className="size-3" /></button>
       </div>
       <dl className="mt-1.5 grid grid-cols-[3.5rem_1fr] gap-y-1">
         <dt className="text-fg-3">Tick</dt><dd className="tnum min-w-0 break-words">{tick?.n ? fmtStats(tick) : "not called"}{allocT ? <span className="text-fg-3"> · {fmtKB(allocT)} / frame</span> : null}</dd>

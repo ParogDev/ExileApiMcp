@@ -266,7 +266,7 @@ export class ControlStore {
         this.applyHealth(json as PerfSnapshot);
       }
     } catch (e) {
-      this.toast("error", `Could not read ${uri}: ${errorText(e)}`);
+      this.toast("error", `${uri}: ${errorText(e)}`, "Could not read");
     }
   }
 
@@ -346,7 +346,7 @@ export class ControlStore {
     try {
       const r = await this.call("observe", this.gameArgs({ action: on ? "start" : "stop" }));
       if (r.isError) throw new Error(r.text || "observe failed");
-      this.toast("info", on ? "Observing: the HUD records what happens in game (read-only)" : "Observation stopped");
+      this.toast(on ? "success" : "info", on ? "The HUD records what happens in game (read-only)" : "Nothing is recorded any more", on ? "Observing" : "Observation stopped");
       await this.refreshObserver();
     } catch (e) {
       this.set({ observer: { ...this.snap.observer, busy: false } });
@@ -387,8 +387,8 @@ export class ControlStore {
       if (r.isError) throw new Error(r.text || "observe_layers set failed");
       const d = r.data as LayersResult;
       this.set({ observer: { ...this.snap.observer, layers: d?.layers ? d : this.snap.observer.layers, layersAt: Date.now(), busy: false, justSet: { id: spec.id, preflight: d?.preflight, at: Date.now() } } });
-      if (d?.preflight) this.toast("error", `Layer ${spec.id} stored, but its preflight failed: ${d.preflight}`);
-      else this.toast("info", `Layer ${spec.id} ${spec.enabled ? "is watching" : "paused"}`);
+      if (d?.preflight) this.toast("error", `${spec.id}: ${d.preflight}`, "Stored, preflight failed");
+      else this.toast(spec.enabled ? "success" : "info", spec.id, spec.enabled ? "Layer watching" : "Layer paused");
       return { ok: true, preflight: d?.preflight };
     } catch (e) {
       this.set({ observer: { ...this.snap.observer, busy: false } });
@@ -406,7 +406,7 @@ export class ControlStore {
       const d = r.data as LayersResult;
       const map = this.snap.observer.map?.layer === id ? undefined : this.snap.observer.map;
       this.set({ observer: { ...this.snap.observer, layers: d?.layers ? d : this.snap.observer.layers, layersAt: Date.now(), busy: false, map } });
-      this.toast("info", `Removed layer ${id}`);
+      this.toast("info", id, "Layer removed");
     } catch (e) {
       this.set({ observer: { ...this.snap.observer, busy: false } });
       this.toast("error", errorText(e));
@@ -490,7 +490,7 @@ export class ControlStore {
       apply(previous);
       const cur = this.settingsFor(game);
       this.patchSettings(game, { pending: new Set([...cur.pending].filter((k) => k !== key)) });
-      this.toast("error", `${node.label}: ${errorText(e)}`);
+      this.toast("error", errorText(e), node.label);
       return false;
     }
   }
@@ -502,7 +502,7 @@ export class ControlStore {
     const node = st.result?.plugins.find((p) => p.plugin === u.plugin)?.settings.find((s) => s.path === u.path);
     if (!node) return false;
     const ok = await this.changeSetting(u.plugin, node, u.previous, { isUndo: true, viaRoute: u.permission });
-    if (ok) this.toast("info", `Undid ${u.label}`);
+    if (ok) this.toast("success", u.label, "Undone");
     return ok;
   }
 
@@ -552,9 +552,9 @@ export class ControlStore {
     }
   }
 
-  toast(kind: Toast["kind"], text: string) {
+  toast(kind: Toast["kind"], text: string, title?: string) {
     const id = ++this.toastSeq;
-    this.set({ toasts: [...this.snap.toasts, { id, kind, text }] });
+    this.set({ toasts: [...this.snap.toasts, { id, kind, text, title }] });
     setTimeout(() => this.dismissToast(id), kind === "error" ? 8000 : 4000);
   }
 

@@ -22,6 +22,8 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: !(mode in INPUTS),
       rollupOptions: { input },
       // The apps ship inside tool resources: keep them small and dependency-free at runtime.
+      // Fonts (the condensed display face) and any other asset go into the single file as data URIs.
+      assetsInlineLimit: 100_000_000,
       sourcemap: false,
       reportCompressedSize: false,
     },

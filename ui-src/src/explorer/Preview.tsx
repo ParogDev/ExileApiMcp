@@ -56,7 +56,7 @@ export function hasDetail(node: ExploreNode): boolean {
 
 export function CountBadge({ count, className = "" }: { count: number; className?: string }) {
   return (
-    <span className={`tnum inline-flex h-4 min-w-4 items-center justify-center rounded px-1 font-code text-[10px] leading-none ${count === 0 ? "text-fg-3" : "bg-surface-3 text-fg-2"} ${className}`}
+    <span className={`tnum inline-flex h-4 min-w-4 items-center justify-center rounded-sm px-1 font-code text-[10px] leading-none ${count === 0 ? "text-fg-3" : "bg-surface-3 text-fg-2"} ${className}`}
       title={`${count.toLocaleString("en-US")} item${count === 1 ? "" : "s"}`}>
       {count === 0 ? "empty" : count.toLocaleString("en-US")}
     </span>

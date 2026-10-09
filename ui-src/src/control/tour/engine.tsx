@@ -225,7 +225,7 @@ function TourOverlay({ state, onNext, onBack, onSkip }: { state: TourState; onNe
           <button type="button" onClick={onSkip} aria-label="End the tour" title="End the tour (Esc)" className="grid size-6 place-items-center rounded-md text-fg-3 hover:bg-surface-3 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Icon name="x" className="size-3.5" /></button>
         </div>
         <div className="min-h-0 overflow-auto px-3 py-2.5 scroll-thin">
-          <h3 className="text-[13px] font-semibold">{step.title}</h3>
+          <h3 className="ds-card-title">{step.title}</h3>
           <div className="mt-1 text-[12px] leading-relaxed text-fg-2">{state.busy ? <span className="text-fg-3">…</span> : step.body}</div>
           {missing && !state.busy && <p className="mt-1.5 text-[11px] text-warning">That part isn't on screen right now (it may need a HUD or a different page). You can still continue.</p>}
         </div>
