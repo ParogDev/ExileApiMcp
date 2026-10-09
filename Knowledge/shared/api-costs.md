@@ -21,6 +21,13 @@ Measured on PoE2 (ExileCore2), 2026-10-09, in town with ~600 entities loaded, wi
 
 **Worked example.** Whats An Azmeri Wisp read `DistancePlayer` on every entity (~550) in two passes: 550 x 2.9 µs x 2 ≈ 3.2 ms per frame, which matched the profile (2.9 ms). After filtering on `Path`/`Type` first and scanning at 20 Hz it was 33x cheaper.
 
+## Allocation (garbage = GC pauses; research/hud-gc.md)
+| Call | allocates | Instead |
+|---|---|---|
+| `Element.IsVisibleLocal` (first per element per frame) | ~3.6 KB (the HUD caches the whole element struct) | read the flag bit: PoE1 `Flags` +0x1E8, PoE2 +0x168, bit 11 (calibrate by matching `IsVisibleLocal`) |
+| `Memory.Read<T>` on an address whose 4 KB page isn't cached this frame | ~3 KB (a page is rented, and most end up as garbage) | for scattered small reads, read from the leaf backend into a stack buffer (bridge `RawRead<T>`) |
+| `Entity.Path.Split(...)`, string building per entity per frame | per entity | cache by path: string work once per path |
+
 ## Patterns
 - **Filter cheap, then expensive.** `Path`/`Type`/`Rarity`/`IsValid` and your own cached classification come first; `DistancePlayer`, `Buffs`, `Stats` only for the few survivors.
 - **Classify slowly, project per frame.** Category, mods, buffs and stats change rarely: compute them at 10-20 Hz. Positions need every frame; use the held `Render` component's `Pos`.
