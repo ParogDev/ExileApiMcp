@@ -122,6 +122,16 @@
       "check": { "kind": "manual", "how": "observe action=start, right-click a stash tab > Edit, then explore_object IngameUi.Children[<index of the unmapped panel with text 'Stash Tab Settings'>] while it is open." }
     },
     {
+      "id": "ui.poe2.checkbox-checked",
+      "title": "PoE2: a checkbox element's checked state is the byte at +0x60A (1546), past the 1288-byte Element struct the HUD maps; no HUD type exposes it",
+      "subject": "Element (checkbox)",
+      "games": {
+        "poe1": { "status": "unverified" },
+        "poe2": { "status": "verified", "date": "2026-10-09", "where": "checkbox element +0x60A (1 byte, 0/1)", "evidence": "Stash Tab Settings dialog, one-variable experiment with the user (tick/untick Currency, not confirmed): a 4 KB snapshot of all 194 dialog elements, unticked vs ticked. The only state change was the Currency checkbox [0][1][7][1][0][1] +0x60A 00 -> 01; the rest were timestamp-like noise. Population check afterwards: Currency = 1, the other 13 affinity checkboxes = 0, Public [0][1][4][1][0] = 0 (tab not public). Earlier diffs of the first 1288 bytes saw nothing: the checkbox is a derived, larger element type. hud_find_types finds no CheckBox type or IsChecked member in either HUD" }
+      },
+      "check": { "kind": "manual", "how": "Open Edit Stash Tab on a tab with a known affinity; run_csharp: Read<byte>(checkbox.Address + 0x60A) for each [0][1][7][1][n][1] must be 1 exactly for the tab's affinities (the dialog is unmapped: find it by the text 'Stash Tab Settings')." }
+    },
+    {
       "id": "stash.flags.public",
       "title": "Stash tab Flags bit 3 = Public (the Edit Stash Tab dialog's only checkbox: the tab is listed for trade)",
       "subject": "ServerStashTab",
