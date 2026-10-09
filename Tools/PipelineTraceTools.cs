@@ -64,13 +64,14 @@ public static class PipelineTraceTools
         [Description("Run length in ms (500-60000, default 5000)")] int durationMs = 5000,
         [Description("How many of the nearest players (yours included) to track (1-32, default 8)")] int entities = 8,
         [Description("Mark both projections on screen")] bool draw = false,
+        [Description("Track exactly this entity (an await_motion result's entityId)")] long? entityId = null,
         [Description("Track entities whose metadata path contains this (e.g. a static chest or NPC as an anchor) instead of the nearest players")] string? path = null,
         [Description("Draw the cyan (fresh) marker from the state this many ms ago (0-100), to align with the game image's own latency")] double delayMs = 0,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 60_000);
-        var (bridge, started) = await bridges.CallAsync(game, "tracker.start", new JObject { ["durationMs"] = durationMs, ["entities"] = entities, ["draw"] = draw, ["path"] = path, ["delayMs"] = delayMs }, ct);
+        var (bridge, started) = await bridges.CallAsync(game, "tracker.start", new JObject { ["durationMs"] = durationMs, ["entities"] = entities, ["draw"] = draw, ["path"] = path, ["entityId"] = entityId, ["delayMs"] = delayMs }, ct);
         var id = started["id"]?.Value<string>();
         if (id == null) return ToolResults.Json(started);
         var g = bridge.Game == "auto" ? game : bridge.Game;
@@ -82,6 +83,67 @@ public static class PipelineTraceTools
             catch (McpException) { }
             if (r["status"]?.Value<string>() == "running") await Task.Delay(250, ct);
         }
+        return ToolResults.Json(r);
+    }
+
+    [McpServerTool(Name = "await_motion", Title = "Wait until a player walks nearby", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("""
+        Block until another player starts moving near the character (3 frames in a row above minSpeed world units/s;
+        the local player is ignored), then return {entityId, name, speed, screen}. Use it to start overlay
+        measurements on a moving target without anyone moving the character: pass entityId to overlay_accuracy and
+        capture the screen around 'screen' right away (tools/fidelity). Read-only; the watch is a cheap per-frame check.
+        """)]
+    public static async Task<CallToolResult> AwaitMotion(BridgeRegistry bridges,
+        [Description("How long to wait, seconds (1-3600, default 600)")] int timeoutSec = 600,
+        [Description("Radius in world units (default 900, about a screen)")] float range = 900,
+        [Description("Minimum speed in world units/s (default 200; a walk is ~300-450)")] float minSpeed = 200,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var (bridge, armed) = await bridges.CallAsync(game, "motion.watch", new JObject { ["range"] = range, ["minSpeed"] = minSpeed }, ct);
+        if (armed["error"] != null) return ToolResults.Json(armed);
+        var g = bridge.Game == "auto" ? game : bridge.Game;
+        var since = armed["seq"]?.Value<int>() ?? 0;
+        var deadline = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSec, 1, 3600));
+        try
+        {
+            while (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(100, ct);
+                JToken s;
+                try { (_, s) = await bridges.CallAsync(g, "motion.state", new JObject { ["since"] = since }, ct); }
+                catch (McpException) { continue; }
+                if (s["entityId"] != null) return ToolResults.Json(s);
+            }
+            return ToolResults.Json(new JObject { ["status"] = "timeout", ["message"] = $"No player walked within {range} units in {timeoutSec} s." });
+        }
+        finally
+        {
+            try { await bridges.CallAsync(g, "motion.watch", new JObject { ["on"] = false }, CancellationToken.None); } catch { }
+        }
+    }
+
+    [McpServerTool(Name = "render_lab", Title = "Experimental world renderers (walls, path)", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("""
+        Turn the bridge's Render Lab on or off: renderers to compare with Radar and HealthBars during movement.
+        walls: raycast wall contours around the player (rays over the walkability grid, re-cast per grid cell).
+        path: a smoothed, glowing path to a target ('waypoint', 'transition', or an entity metadata path substring),
+        planned with A* when the player changes cell and always starting at the player's live position.
+        Both draw from fresh camera/position reads, time-aligned by delayMs (default 5, the game image's own latency
+        measured with tools/fidelity). Omit everything to read the state. Draws on screen; nothing is sent to the game.
+        """)]
+    public static async Task<CallToolResult> RenderLab(BridgeRegistry bridges,
+        [Description("Raycast wall highlight on/off")] bool? walls = null,
+        [Description("Path to target on/off")] bool? path = null,
+        [Description("'waypoint', 'transition', or an entity path substring")] string? target = null,
+        [Description("Time alignment in ms (0-100)")] double? delayMs = null,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var p = new JObject();
+        if (walls != null) p["walls"] = walls; if (path != null) p["path"] = path;
+        if (target != null) p["target"] = target; if (delayMs != null) p["delayMs"] = delayMs;
+        var (_, r) = await bridges.CallAsync(game, p.Count == 0 ? "lab.state" : "lab.set", p, ct);
         return ToolResults.Json(r);
     }
 
@@ -99,6 +161,8 @@ public static class PipelineTraceTools
                       $"camera data fetched {T("cameraDataFetchedAfterFrameStart", "p50")}, entity data fetched {T("entityDataFetchedAfterFrameStart", "p50")}");
         if (r["pluginRenderMs"] is JObject plugins && plugins.Count > 0)
             sb.AppendLine("Plugin Render (avg / p95 ms): " + string.Join(", ", plugins.Properties().Take(6).Select(p => $"{p.Name} {p.Value["avg"]}/{p.Value["p95"]}")));
+        if (r["pluginTickMs"] is JObject ticks && ticks.Count > 0)
+            sb.AppendLine("Plugin Tick (avg / p95 ms): " + string.Join(", ", ticks.Properties().Take(6).Select(p => $"{p.Name} {p.Value["avg"]}/{p.Value["p95"]}")));
         var watch = r["watch"];
         sb.AppendLine($"Watched: camera {(watch?["camera"]?.Value<bool>() == true ? "yes" : "NO")}, {(watch?["entities"] as JArray)?.Count ?? 0} player(s)");
         if (r["patches"]?["refused"] is JArray { Count: > 0 } refused)
