@@ -22,9 +22,10 @@ import type { CallToolResult } from "@modelcontextprotocol/client";
 import { FakeServer, type CallLogEntry } from "./fakeServer";
 import { FakeExplorer } from "./fakeExplore";
 import { FakeMemory } from "./fakeMemory";
+import { FakePerf } from "./fakePerf";
 import "../src/styles.css";
 
-type AppName = "stats" | "explorer" | "memory";
+type AppName = "stats" | "explorer" | "memory" | "perf";
 
 interface FakeHost {
   scenario: string;
@@ -36,7 +37,7 @@ interface FakeHost {
 }
 
 const params = new URLSearchParams(location.search);
-const appName: AppName = params.get("app") === "explorer" ? "explorer" : params.get("app") === "memory" ? "memory" : "stats";
+const appName: AppName = params.get("app") === "explorer" ? "explorer" : params.get("app") === "memory" ? "memory" : params.get("app") === "perf" ? "perf" : "stats";
 const APPS: Record<AppName, { title: string; html: string; scenarios: string[]; initialTool: string; initialArgs: () => Record<string, unknown> }> = {
   stats: { title: "Player stats", html: "./player-stats.html", scenarios: ["live", "offline", "not-in-game", "empty", "flaky"], initialTool: "stats_ui_state", initialArgs: () => ({}) },
   explorer: { title: "Data explorer", html: "./data-explorer.html", scenarios: ["live", "offline", "flaky"], initialTool: "show_data_explorer", initialArgs: () => ({ path: params.get("path") ?? "GameController", game: "poe2" }) },
@@ -54,9 +55,13 @@ const APPS: Record<AppName, { title: string; html: string; scenarios: string[]; 
       return a;
     },
   },
+  perf: {
+    title: "HUD performance", html: "./hud-performance.html", scenarios: ["live", "display-off", "offline", "instrumentation-off", "flaky", "fps200", "clean"], initialTool: "show_hud_performance",
+    initialArgs: () => ({ game: "poe2" }),
+  },
 };
 const APP = APPS[appName];
-const server: FakeHost = appName === "explorer" ? new FakeExplorer() : appName === "memory" ? new FakeMemory() : new FakeServer();
+const server: FakeHost = appName === "explorer" ? new FakeExplorer() : appName === "memory" ? new FakeMemory() : appName === "perf" ? new FakePerf() : new FakeServer();
 server.scenario = params.get("scenario") ?? "live";
 server.latencyMs = Number(params.get("latency") ?? (appName === "stats" ? 40 : 60));
 // memory runner: user=acts|nothing|never (never = the full countdown runs until harness.server.act() or the timeout);
@@ -66,6 +71,11 @@ if (server instanceof FakeMemory) {
   if (u === "nothing" || u === "acts") server.user = u;
   if (u === "never") server.actMs = 10 * 60_000;
   if (params.get("run") === "follow") setTimeout(() => void server.agentRun(undefined, params.get("follow") === "slow" ? 40_000 : undefined), 1500);
+}
+// perf: trace=<ms> is how long a refresh "traces" (default 3500, like the real tool); profile=<ms> a profile_plugin run.
+if (server instanceof FakePerf) {
+  if (params.get("trace")) server.traceMs = Number(params.get("trace"));
+  if (params.get("profile")) server.profileMs = Number(params.get("profile"));
 }
 
 // Roughly Claude-like host variables; "none" tests the app's own fallbacks.

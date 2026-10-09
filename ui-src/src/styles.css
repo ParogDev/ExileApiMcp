@@ -56,6 +56,14 @@
   --color-m-change: light-dark(#d6336c, #ff6b9d);
   --color-m-ptr: light-dark(#0f8a7e, #4fd1c5);
 
+  /* HUD performance: the timeline's marks. Frames are neutral; a spike is amber; a GC pause is magenta (it is the
+     thing the panel points at); the work split reuses the memory view's blue (plugins) and teal (HUD core). */
+  --color-p-frame: light-dark(#b5b2a9, #605f5a);
+  --color-p-spike: light-dark(#d97706, #f5a524);
+  --color-p-gc: light-dark(#d6336c, #ff6b9d);
+  --color-p-plugins: light-dark(#2f6fd6, #7fa6f0);
+  --color-p-core: light-dark(#0f8a7e, #4fd1c5);
+
   /* Named ui/code (not sans/mono) so they never shadow the host's --font-sans/--font-mono. */
   --font-ui: var(--font-sans, ui-sans-serif, system-ui, "Segoe UI", sans-serif);
   --font-code: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);

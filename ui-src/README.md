@@ -5,17 +5,18 @@ Source for the interactive panels that ExileApiMcp serves as MCP Apps. The serve
 | Stack | TypeScript, React 19, Tailwind 4, Vite 8 + `vite-plugin-singlefile`, `@modelcontextprotocol/ext-apps` 2.0.1 |
 |---|---|
 | Toolchain | Docker only. No Node or npm on Windows; `node_modules` lives in a named Docker volume |
-| Output | `../ui/player-stats.html` (`ui://exile/player-stats`), `../ui/data-explorer.html` (`ui://exile/data-explorer`) and `../ui/memory-view.html` (`ui://exile/memory-view`), all committed |
+| Output | `../ui/player-stats.html` (`ui://exile/player-stats`), `../ui/data-explorer.html` (`ui://exile/data-explorer`), `../ui/memory-view.html` (`ui://exile/memory-view`) and `../ui/hud-performance.html` (`ui://exile/hud-performance`), all committed |
 
-Three apps share `src/styles.css`, `src/components.tsx` and `src/icons.tsx`:
+Four apps share `src/styles.css`, `src/components.tsx` and `src/icons.tsx`:
 
 | App | Entry | Source | Opened by |
 |---|---|---|---|
 | Player stats | `player-stats.html` → `src/main.tsx` | `src/*.tsx`, `src/sync.ts` | `show_player_stats` |
 | Data explorer | `data-explorer.html` → `src/explorer/main.tsx` | `src/explorer/*` | `show_data_explorer {path?, game?}` |
 | Memory view | `memory-view.html` → `src/memory/main.tsx` | `src/memory/*` | `show_memory_view {path?, address?, type?, mode?, preset?, experiment?, game?}` |
+| HUD performance | `hud-performance.html` → `src/perf/main.tsx` | `src/perf/*` | `show_hud_performance {game?}` |
 
-`vite build` takes one input per run (single-file plugin), so `npm run build` runs it four times: default (stats), `--mode explorer`, `--mode memory`, `--mode harness`. Tailwind scans the whole source tree, so a class added to one app can change another app's CSS: rebuild and commit all bundles together.
+`vite build` takes one input per run (single-file plugin), so `npm run build` runs it five times: default (stats), `--mode explorer`, `--mode memory`, `--mode perf`, `--mode harness`. Tailwind scans the whole source tree, so a class added to one app can change another app's CSS: rebuild and commit all bundles together.
 
 ## Commands
 
@@ -28,11 +29,11 @@ From the scaffolding root (Windows PowerShell 5.1):
 | npm without npm, e.g. add a pinned package | `... build.ps1 -Npm "install -E pkg@1.2.3"` |
 | Real host against the real server: ext-apps **basic-host** on http://localhost:8080 | start the server with `run.cmd --http`, then `... ui-src\basic-host.ps1` (`-Stop`, `-Rebuild`) |
 
-After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuilds on every start. **CI rebuilds the UI and fails if any of `ui/player-stats.html`, `ui/data-explorer.html` or `ui/memory-view.html` doesn't match its source**, so commit the rebuilt files with the source change.
+After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuilds on every start. **CI rebuilds the UI and fails if any of `ui/player-stats.html`, `ui/data-explorer.html`, `ui/memory-view.html` or `ui/hud-performance.html` doesn't match its source**, so commit the rebuilt files with the source change.
 
 ## Three ways to see the apps, fastest first
 
-1. **Dev harness** (`dist/harness.html`): a fake host plus a fake server per app. No game, HUD or server needed. Every state is reachable from the URL, so screenshots are deterministic. `app=stats` (default), `app=explorer` or `app=memory` picks the app; `bare=1` renders only the app's iframe, filling the viewport (pixel-exact captures in a narrow browser pane).
+1. **Dev harness** (`dist/harness.html`): a fake host plus a fake server per app. No game, HUD or server needed. Every state is reachable from the URL, so screenshots are deterministic. `app=stats` (default), `app=explorer`, `app=memory` or `app=perf` picks the app; `bare=1` renders only the app's iframe, filling the viewport (pixel-exact captures in a narrow browser pane).
    ```
    /harness.html?app=stats&theme=dark&width=380&scenario=offline&latency=400&display=fullscreen&vars=none&simulate=0
    /harness.html?app=explorer&path=GameController.Player&theme=dark&width=380&scenario=flaky&bare=1
@@ -41,8 +42,12 @@ After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuil
    /harness.html?app=memory&mode=experiments&preset=stash-ctrl-click&user=nothing&theme=dark&width=380
    /harness.html?app=memory&mode=experiments&preset=stash-ctrl-click&user=never     (the full countdown; Cancel)
    /harness.html?app=memory&mode=experiments&run=follow&follow=slow
+   /harness.html?app=perf&theme=dark&width=380
+   /harness.html?app=perf&scenario=display-off&trace=300        (the capture as taken; refreshes "trace" for 300 ms instead of 3.5 s)
+   /harness.html?app=perf&scenario=fps200&display=fullscreen     (~600 frames at 200 fps)
+   /harness.html?app=perf&scenario=clean                        (nothing stands out: the empty states)
    ```
-   - `scenario`: stats: `live`, `offline`, `not-in-game`, `empty`, `flaky` (30% errors plus jitter); explorer: `live`, `offline`, `flaky`; memory: those plus `ghidra-down` (every `find_field_access` fails like the real server does without the headless Ghidra).
+   - `scenario`: stats: `live`, `offline`, `not-in-game`, `empty`, `flaky` (30% errors plus jitter); explorer: `live`, `offline`, `flaky`; memory: those plus `ghidra-down` (every `find_field_access` fails like the real server does without the headless Ghidra); perf: `live`, `display-off`, `offline`, `instrumentation-off`, `flaky`, `fps200`, `clean`.
    - `vars=none` drops the host style variables to test the app's own fallbacks.
    - `simulate=0` stops the simulated game (random vitals and stat changes; drifting Life values).
    - `path=` (explorer) is the `show_data_explorer` argument: where the tree opens. A bad path shows the error state.
@@ -164,6 +169,26 @@ A byte-level view of one game object for checking that the HUD's struct still fi
 - **Layout:** inline: target bar, summary, the map card (strip, legend, filter All / Mapped / Candidates / Changed, rows at ≤ 20 rem), the inspector, the Code card, the hex card (collapsible), the watch card. Fullscreen: map | hex | inspector + code + watch at `lg`; map | (inspector, code, watch, hex) between `sm` and `lg`; stacked below. A watch that found changes switches the map filter to Changed once.
 - **Keyboard:** in the rows, arrows / Home / End move the selection, Enter follows a pointer, Escape clears.
 - **Model context:** the view (struct, address, size, coverage), the selection (offset, address, kind, name, type, value, bytes, check, Ghidra address, bits), the last watch's changed ranges and the selection's code lookup (top functions with roles and confidence, the gates, two excerpts), debounced and deduplicated. "Ask Claude" builds a question from the selection, e.g. "What is the unmapped std::vector at +40 in LifeComponentOffsets? Check it in Ghidra at 0x1435A64B0", and adds what changed there during the watch. The Code card's "Ask Claude to explain this field" sends the field, the ranked functions, the gates and the top two excerpts as fenced C, and asks what each bit means and what the unmapped offsets the code reads are.
+
+## How the HUD performance app works
+
+Answers "why is my HUD slow or stuttering?" at a glance and leads to the next step. Opened by `show_hud_performance {game?}`, which returns `hud_health_report` with the trace's per-frame series.
+
+| File | Role |
+|---|---|
+| `src/perf/main.tsx` | ext-apps wiring, same pattern as the other apps. `ontoolinput` marks the trace as in progress (the host sends it ~3.5 s before the result); `ontoolresult` seeds the report |
+| `src/perf/types.ts` | The `show_hud_performance` / `profile_plugin` / `hud_plugin_lint` structuredContent shapes. **Mirrors `Tools/HealthReportTools.cs`, `Tools/PipelineTraceTools.cs`, `Tools/PluginLintTools.cs` and the bridge's `PipelineTrace` / `PluginProfiler`; change both together** |
+| `src/perf/model.ts` | Pure: frames from the parallel series, the **spike / GC coincidence** (spike = 1.25x the expected 1000/fps; counts spikes, spikes with a GC pause, the longest frame without one, and words the verdict: GC / work / mixed / steady), the average frame split (plugins, HUD core, the rest), the ArrayPool check (`arraysPerSize` < `fetchedPagesPerFrame` = churn), the "Trace:" line of a trace-less result (unreachable vs instrumentation off), formatting, readable names for compiler-generated methods |
+| `src/perf/store.ts` | `PerfStore`, framework-free: the report, refresh (one at a time, with its start time for honest progress against the usual 3.6 s), auto-refresh every 15 s (each trace patches the HUD for 3 s), the action runs keyed by tool + args with running / done / error, a short history of fps per refresh, toasts |
+| `src/perf/Perf.tsx` | Header (game, traced n s ago, Live / Offline / No instrumentation, Auto, Refresh with elapsed time, fullscreen), banners (bridge unreachable, instrumentation off with where the setting is, display off / game not in front as a calm note), the three headline tiles (fps with a trend across refreshes, spikes, GC pauses), the cards, the model context and the "Ask Claude" question |
+| `src/perf/Timeline.tsx` | The hero: one bar per frame over the trace's 3 s (pixel coordinates from a ResizeObserver, so 170 or 600 frames stay crisp at 380 px and fullscreen), the expected frame time and the spike threshold as reference lines, spikes in amber, **GC pauses as a magenta base segment of the frame they landed in** plus a tick lane above (so a 1 ms pause is still visible), and the per-frame work (plugins + HUD core) on the same time axis below. Hover / click-to-pin / arrow keys give a tooltip per frame; the verdict under the legend states the coincidence in one sentence |
+| `src/perf/Plugins.tsx` | The average frame as one split bar, the plugin table ranked by ms or KB per frame with proportional bars behind the numbers, and the selected plugin's Tick / Render distribution with Profile / Lint buttons |
+| `src/perf/Results.tsx` | One card per action run: the loading state with elapsed time against what the tool usually takes, errors by kind (no such plugin, instrumentation off, unreachable, busy) with Try again, a profile as a method table (by self time or by allocation, hook overhead noted), a lint as the expensive calls with advice (in-loop first), anything else as its numbers, and the empty states (nothing ran, nothing expensive found); "Ask Claude" with the result in the question |
+
+- **Calls:** `show_hud_performance {game}` on Refresh and auto-refresh; the report's `actions` run as `profile_plugin {name}`, `hud_plugin_lint {plugin}`, `overlay_accuracy {}` through the host, and a selected plugin offers the first two by name. Nothing polls.
+- **Layout:** inline: banners, tiles, timeline, frame split + plugins, GC health, findings + next steps, results. Fullscreen: tiles, timeline and plugins on the left, GC, findings and results on the right (stacked below `sm`).
+- **Colours** (`styles.css`): frame = neutral, spike = amber, GC pause = magenta (the thing the panel points at), plugins = blue, HUD core = teal; both themes.
+- **Model context:** fps, interval stats, the verdict, GC numbers, the ArrayPool state, the costliest plugins, the findings and the latest done results, debounced and deduplicated.
 
 ## Conventions
 
