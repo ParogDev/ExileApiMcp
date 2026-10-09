@@ -17,7 +17,8 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class PropertyMapTools
 {
-    [McpServerTool(Name = "hud_property_map", Title = "Which memory each HUD property reads", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "hud_property_map", Title = "Which memory each HUD property reads", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(PropertyMapResult))]
     [Description("Map HUD properties to the game memory they read, by reading their getters' IL from the HUD DLLs (offline, " +
                  "no game needed): the offsets struct, the field path and the byte offset (summing [FieldOffset] through " +
                  "nested structs), or a direct Read<T>(Address + n). Forward: type (+ property). Reverse: struct (+ offset) - " +
@@ -44,7 +45,8 @@ public static class PropertyMapTools
                 try { var (_, tr) = PropertyMap.TraceOne(HudTypes.For(hud), type, property); lines.Add($"== {hud.Game}"); lines.AddRange(tr); }
                 catch (Exception ex) { lines.Add($"== {hud.Game}: {ex.Message}"); }
             }
-            return new CallToolResult { Content = [new TextContentBlock { Text = string.Join(Environment.NewLine, lines) }] };
+            // The output schema needs structuredContent: the trace lines, with no rows.
+            return Dto.Result(new PropertyMapResult { Trace = lines }, string.Join(Environment.NewLine, lines));
         }
         var rows = new JArray();
         var sb = new StringBuilder();
@@ -80,11 +82,7 @@ public static class PropertyMapTools
             ? $"No mapped properties for '{type}{(property != null ? "." + property : "")}'" + (unmapped > 0 ? $" ({unmapped} read nothing directly: includeUnmapped=true shows why)" : " (type not found in the HUD's PoEMemory namespaces?)")
             : $"No HUD property reads {@struct}{(offset != null ? $" +{offset}" : "")}.");
         if (total > rows.Count) sb.AppendLine($"(showing {rows.Count} of {total}; raise max or narrow)");
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(new JObject { ["total"] = total, ["rows"] = rows }.ToString(Newtonsoft.Json.Formatting.None)),
-        };
+        return Dto.Result(Dto.From<PropertyMapResult>(new JObject { ["total"] = total, ["rows"] = rows }), sb.ToString());
     }
 
     private static bool NameMatches(string full, string q) =>

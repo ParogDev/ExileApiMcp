@@ -20,7 +20,8 @@ public static partial class HudDevTools
     private const string GameOpt = "'poe1' or 'poe2'; omit for every HUD installed";
     private const int MaxText = 3000;
 
-    [McpServerTool(Name = "hud_plugins", Title = "Source plugin compile status", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "hud_plugins", Title = "Source plugin compile status", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(HudPluginsResult))]
     [Description("Did the HUD compile and load each source plugin in its latest run? Per plugin: status " +
                  "(loaded | cached | failed | not-seen), when, the compiler error for failures, counts of runtime " +
                  "errors/warnings it logged, and its Errors.txt - flagged stale when older than the last successful " +
@@ -49,10 +50,11 @@ public static partial class HudDevTools
                 ["plugins"] = plugins,
             });
         }
-        return ToolResults.Json(new JObject { ["huds"] = result });
+        return Typed<HudPluginsResult>(new JObject { ["huds"] = result });
     }
 
-    [McpServerTool(Name = "hud_log", Title = "HUD log (latest run)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "hud_log", Title = "HUD log (latest run)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(HudLogResult))]
     [Description("The HUD's log for its latest run (since its last start), newest last. Repeated messages are " +
                  "collapsed with a count, so noisy warnings don't drown real errors. Filter by minimum level, plugin " +
                  "and text. Paths outside the HUD folder are shortened. Works with the game and HUD closed.")]
@@ -117,7 +119,7 @@ public static partial class HudDevTools
                 ["entries"] = new JArray(shown),
             });
         }
-        return ToolResults.Json(new JObject { ["huds"] = result });
+        return Typed<HudLogResult>(new JObject { ["huds"] = result });
     }
 
 
@@ -232,6 +234,9 @@ public static partial class HudDevTools
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
+
+    /// <summary>The JSON text as before, with the result as typed structuredContent.</summary>
+    private static CallToolResult Typed<T>(JObject o) => Dto.Result(Dto.From<T>(o), o.ToString(Newtonsoft.Json.Formatting.None));
 
     internal static List<HudInstall> Installs(BridgeRegistry bridges, string? game)
     {

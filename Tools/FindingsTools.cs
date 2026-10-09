@@ -35,7 +35,8 @@ public static class FindingsTools
                        && (f["games"] as JObject)?.Properties().Any(p => p.Name != game && p.Value["status"]?.ToString() == "verified") == true)
            .Select(f => f["id"]!.ToString()).ToList();
 
-    [McpServerTool(Name = "findings", Title = "Verified findings per game", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "findings", Title = "Verified findings per game", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(FindingsResult))]
     [Description("Facts about game data and memory with their status per game (verified / differs / unverified / n/a), " +
                  "where they hold (offsets, bits) and the evidence. Use it before relying on a known offset or bit on a game, " +
                  "and after switching games: 'toCheck' lists findings verified on the other game but not this one - run " +
@@ -68,14 +69,11 @@ public static class FindingsTools
             result["toCheck"] = new JArray(pending);
             sb.AppendLine().Append($"To check on {game} (verified elsewhere only): {string.Join(", ", pending)}. Run verify_finding id=<id> game={game}.");
         }
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = sb.Length > 0 ? sb.ToString().TrimEnd() : "No findings match." }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(result.ToString(Formatting.None)),
-        };
+        return Dto.Result(Dto.From<FindingsResult>(result), sb.Length > 0 ? sb.ToString() : "No findings match.");
     }
 
-    [McpServerTool(Name = "verify_finding", Title = "Re-run a finding's check on a game", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "verify_finding", Title = "Re-run a finding's check on a game", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(VerifyFindingResult))]
     [Description("Run a finding's check against the live game and report pass / moved / fail with the evidence, plus the " +
                  "status entry to record in Knowledge/findings.json. Automatic for correlate/stored/eval checks; for manual " +
                  "ones it returns the experiment to run (with the user).")]
@@ -192,7 +190,7 @@ public static class FindingsTools
                 break;
             }
             default:
-                return ToolResults.Json(new JObject
+                return Typed(new JObject
                 {
                     ["id"] = id, ["game"] = g, ["kind"] = "manual", ["recorded"] = recorded,
                     ["howToVerify"] = check["how"],
@@ -220,8 +218,11 @@ public static class FindingsTools
             "differs" => $"Mostly holds on {g} with counterexamples: inspect them (probe_memory) before recording 'differs'.",
             _ => $"Not found on {g}: the population may lack variety (e.g. no tab with an affinity), the struct may differ, or the fact is game-specific. Investigate with probe_memory.",
         };
-        return ToolResults.Json(o);
+        return Typed(o);
     }
+
+    /// <summary>The JSON text as before, with the result as typed structuredContent.</summary>
+    private static CallToolResult Typed(JObject o) => Dto.Result(Dto.From<VerifyFindingResult>(o), o.ToString(Formatting.None));
 
     private static string Normalize(string s) => new(s.Where(c => !char.IsWhiteSpace(c)).ToArray());
 }

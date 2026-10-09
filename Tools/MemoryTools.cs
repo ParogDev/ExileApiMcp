@@ -25,13 +25,14 @@ public static class MemoryTools
                                   "GameController.IngameState.ServerData.PlayerStashTabs[0]) - its Address is used";
     private const string AddressDesc = "Absolute address instead of a path: number or \"0x...\"";
 
-    [McpServerTool(Name = "memory_layout", Title = "Struct mapping vs live memory", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.MemoryViewLight)]
+    [McpServerTool(Name = "memory_layout", Title = "Struct mapping vs live memory", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(MemoryLayoutResult), IconSource = ExileApiMcp.Hosting.IconSet.MemoryViewLight)]
     [Description("Overlay the offsets struct the HUD itself reads for an object (found by reflection - on PoE2 the real " +
                  "obfuscated struct, not the GameOffsets2 decoys) on live memory: each mapped field with offset, value, set bits " +
                  "for flag fields, and a sanity check (bad floats, pointers that don't point anywhere, broken std::vectors); the " +
                  "unmapped ranges between fields; and unmapped slots that look like structure the HUD doesn't map yet " +
                  "(std::vectors, pointers to objects with vtables, text, module pointers with Ghidra addresses). Use after a patch " +
-                 "to check a mapping still holds, and to find new members. extend reads past the struct's end.")]
+                 "to check a mapping still holds, and to find new members. extend reads past the struct's end. Result: MemoryLayoutResult.")]
     public static async Task<CallToolResult> MemoryLayout(BridgeRegistry bridges,
         [Description(Target)] string? path = null,
         [Description(AddressDesc)] JsonElement? address = null,
@@ -47,13 +48,14 @@ public static class MemoryTools
         if (result["error"] != null) return ToolResults.Json(result);
         result["game"] = bridge.Game;
         LabelWithHudProperties(bridges, bridge.Game, result);
-        return Result(LayoutOutline(result), result);
+        return Dto.Result(Dto.From<MemoryLayoutResult>(result), LayoutOutline(result));
     }
 
-    [McpServerTool(Name = "memory_read", Title = "Read a memory region", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "memory_read", Title = "Read a memory region", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(MemoryReadResult))]
     [Description("A memory region as classified 8-byte slots: zero, module pointer (section, RVA, Ghidra address, vtable " +
                  "class if RTTI exists), heap pointer (and what it points at: an object with a vtable, text), float pair, int " +
-                 "(set bits when flag-like), text - plus a hex dump. Follow pointers by reading their value as the next address.")]
+                 "(set bits when flag-like), text - plus a hex dump. Follow pointers by reading their value as the next address. Result: MemoryReadResult.")]
     public static async Task<CallToolResult> MemoryRead(BridgeRegistry bridges,
         [Description(Target)] string? path = null,
         [Description(AddressDesc)] JsonElement? address = null,
@@ -68,10 +70,11 @@ public static class MemoryTools
         var (bridge, result) = await Call(bridges, game, "memory.read", p, ct);
         if (result["error"] != null) return ToolResults.Json(result);
         result["game"] = bridge.Game;
-        return Result(ReadOutline(result), result);
+        return Dto.Result(Dto.From<MemoryReadResult>(result), ReadOutline(result));
     }
 
-    [McpServerTool(Name = "memory_where", Title = "What is at an address", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "memory_where", Title = "What is at an address", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(MemoryWhereResult))]
     [Description("What an address is: inside the game module (section, RVA, and the Ghidra address to pass to the ghidra " +
                  "MCP's decompile/xref tools) or a heap region, and what it points at.")]
     public static async Task<CallToolResult> MemoryWhere(BridgeRegistry bridges,
@@ -80,14 +83,16 @@ public static class MemoryTools
         CancellationToken ct = default)
     {
         var (_, result) = await Call(bridges, game, "memory.where", Params(null, address), ct);
-        return ToolResults.Json(result);
+        // Bridge errors stay error results with the bridge's code in structuredContent (the memory view reads it).
+        return result["error"] != null ? ToolResults.Json(result) : Typed<MemoryWhereResult>(result);
     }
 
-    [McpServerTool(Name = "watch_memory", Title = "Watch memory for changes", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "watch_memory", Title = "Watch memory for changes", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(WatchMemoryResult))]
     [Description("Sample a memory region repeatedly and report which bytes changed: ranges with first/last bytes, how often, " +
                  "and the bits that flipped - labelled with the HUD's field names when a path is given (unmapped changes are " +
                  "the interesting ones). Run it while the user does one thing in game (toggle a stash tab affinity, swap " +
-                 "weapons) to find where that state lives, including bit flags.")]
+                 "weapons) to find where that state lives, including bit flags. Result: WatchMemoryResult.")]
     public static async Task<CallToolResult> WatchMemory(BridgeRegistry bridges,
         [Description(Target)] string? path = null,
         [Description(AddressDesc)] JsonElement? address = null,
@@ -185,7 +190,7 @@ public static class MemoryTools
         };
         if (ranges.Count == 0) o["note"] = "Nothing changed. Ask the user to do the thing while this runs, or widen size/extend the region.";
         foreach (var r in ranges.OfType<JObject>()) foreach (var prop in r.Properties().Where(x => x.Value.Type == JTokenType.Null).ToList()) prop.Remove();
-        return ToolResults.Json(o);
+        return Typed<WatchMemoryResult>(o);
     }
 
     [McpServerTool(Name = "show_memory_view", Title = "Open the memory view", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.MemoryViewLight)]
@@ -245,11 +250,8 @@ public static class MemoryTools
         return (bridge, o);
     }
 
-    private static CallToolResult Result(string outline, JObject full) => new()
-    {
-        Content = [new TextContentBlock { Text = outline }],
-        StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(full.ToString(Formatting.None)),
-    };
+    /// <summary>The JSON text as before, with the result as typed structuredContent.</summary>
+    private static CallToolResult Typed<T>(JObject full) => Dto.Result(Dto.From<T>(full), full.ToString(Formatting.None));
 
     /// <summary>Add to each field the HUD properties whose getters read it (hud_property_map, from IL). Best effort.</summary>
     private static void LabelWithHudProperties(BridgeRegistry bridges, string game, JObject r)

@@ -12,7 +12,8 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class RuntimeLayoutTools
 {
-    [McpServerTool(Name = "hud_runtime_layout", Title = "Real offsets of a HUD struct (runtime reflection)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "hud_runtime_layout", Title = "Real offsets of a HUD struct (runtime reflection)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(RuntimeLayoutResult))]
     [Description("""
         Runtime reflection inside the running HUD: the layout the CLR actually uses for an offsets struct (each field set
         alone to a sentinel in a boxed instance; nested game structs flattened as a.b), next to the metadata [FieldOffset]
@@ -50,10 +51,6 @@ public static class RuntimeLayoutTools
         if (fields)
             foreach (var f in fs)
                 sb.AppendLine($"  {f["offset"],-7} {f["name"]} : {f["type"]} ({f["size"]} B){(f["decoy"]?.Type == JTokenType.Boolean ? $"  metadata says {f["metadataOffset"]}" : "")}{(f["value"] is { Type: JTokenType.String } v ? $" = {v}" : "")}");
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(r.ToString(Newtonsoft.Json.Formatting.None)),
-        };
+        return Dto.Result(Dto.From<RuntimeLayoutResult>(r), sb.ToString());
     }
 }

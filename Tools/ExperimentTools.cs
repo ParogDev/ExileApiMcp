@@ -33,7 +33,8 @@ public static class ExperimentTools
         return s == null ? new JObject { ["experiments"] = new JArray() } : JObject.Parse(new StreamReader(s).ReadToEnd());
     });
 
-    [McpServerTool(Name = "experiment_presets", Title = "Guided experiment presets", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "experiment_presets", Title = "Guided experiment presets", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ExperimentPresetsResult))]
     [Description("Ready-made guided experiments (e.g. stash: Ctrl+scroll to the next tab, Ctrl+click an item to the inventory): " +
                  "each has steps with an instruction for the USER to perform in game and the state to watch. Run a step with " +
                  "await_change. Also lists experiment records already on disk.")]
@@ -58,14 +59,11 @@ public static class ExperimentTools
             sb.AppendLine($"  watch: {string.Join(" | ", (p["watch"] as JArray ?? []).Select(w => w.ToString()))}");
         }
         sb.Append($"{records.Count} experiment record(s) on disk. Run a step: await_change experiment=<name> label=<step label> watch=<preset watch>.");
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = sb.ToString() }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(new JObject { ["presets"] = presets, ["records"] = records }.ToString(Formatting.None)),
-        };
+        return Dto.Result(Dto.From<ExperimentPresetsResult>(new JObject { ["presets"] = presets, ["records"] = records }), sb.ToString());
     }
 
-    [McpServerTool(Name = "await_change", Title = "Wait for the user's action and diff it", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
+    [McpServerTool(Name = "await_change", Title = "Wait for the user's action and diff it", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(AwaitChangeResult), IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("One step of a guided experiment. Captures the watched state, waits (up to timeoutMs) until the USER does " +
                  "the instructed thing in game and the state changes, waits until it settles, and returns what changed: leaf " +
                  "values, bytes and bits (with HUD field names), collection items. The step is appended to the experiment record " +
@@ -108,12 +106,8 @@ public static class ExperimentTools
             state["finishedAt"] = DateTimeOffset.Now.ToString("O");
             try { await WriteInFlight(experiment, state); } catch { }
         }
-        if (o["changed"]?.Value<bool>() != true) return ToolResults.Json(o);
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = StepOutline(o) }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(o.ToString(Formatting.None)),
-        };
+        if (o["changed"]?.Value<bool>() != true) return Typed<AwaitChangeResult>(o);
+        return Dto.Result(Dto.From<AwaitChangeResult>(o), StepOutline(o));
     }
 
     /// <summary>
@@ -229,7 +223,8 @@ public static class ExperimentTools
         File.Move(tmp, InFlightFile(experiment), overwrite: true);
     }
 
-    [McpServerTool(Name = "experiment_step_start", Title = "Start a guided step (non-blocking)", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "experiment_step_start", Title = "Start a guided step (non-blocking)", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ExperimentStepStartedResult))]
     [Description("Like await_change, but returns at once: the step runs in the server (up to 10 minutes) and experiment_status " +
                  "reports its progress (waiting -> detected -> captured | failed | cancelled) and result. Use it when the wait may " +
                  "outlast a tool call (MCP Apps, long pauses), or to keep working while the user acts. One step per experiment " +
@@ -280,14 +275,15 @@ public static class ExperimentTools
                 cts.Dispose();
             }
         });
-        return ToolResults.Json(new JObject
+        return Typed<ExperimentStepStartedResult>(new JObject
         {
             ["started"] = true, ["experiment"] = experiment, ["label"] = label, ["startedAt"] = state["startedAt"], ["timeoutMs"] = timeoutMs,
             ["next"] = "Poll experiment_status (every 1-3 s) until status is captured, failed, cancelled or error.",
         });
     }
 
-    [McpServerTool(Name = "experiment_status", Title = "Progress of a guided experiment", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "experiment_status", Title = "Progress of a guided experiment", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ExperimentStatusResult))]
     [Description("The current or last step started with experiment_step_start (status waiting | detected | captured | failed | " +
                  "cancelled | error, elapsed time, and the result once finished) plus how many steps the record holds. Cheap: " +
                  "reads two small files.")]
@@ -313,16 +309,17 @@ public static class ExperimentTools
         else o["running"] = false;
         var rec = Path.Combine(Dir, experiment + ".json");
         o["recordedSteps"] = File.Exists(rec) ? JObject.Parse(File.ReadAllText(rec))["steps"]?.Count() ?? 0 : 0;
-        return ToolResults.Json(o);
+        return Typed<ExperimentStatusResult>(o);
     }
 
-    [McpServerTool(Name = "experiment_step_cancel", Title = "Cancel a running guided step", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "experiment_step_cancel", Title = "Cancel a running guided step", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ExperimentStepCancelResult))]
     [Description("Stop the step started with experiment_step_start for this experiment (nothing is recorded).")]
     public static CallToolResult ExperimentStepCancel([Description("Experiment record name")] string experiment)
     {
         var running = InFlight.TryGetValue(experiment, out var cts);
         if (running) cts!.Cancel();
-        return ToolResults.Json(new JObject { ["experiment"] = experiment, ["cancelled"] = running,
+        return Typed<ExperimentStepCancelResult>(new JObject { ["experiment"] = experiment, ["cancelled"] = running,
             ["note"] = running ? "Cancelling; experiment_status shows 'cancelled' shortly." : "No step of this experiment is running in this server process." });
     }
 
@@ -480,6 +477,9 @@ public static class ExperimentTools
         return ToolResults.Json(r);
     }
 
+    /// <summary>The JSON text as before, with the result as typed structuredContent.</summary>
+    private static CallToolResult Typed<T>(JObject o) => Dto.Result(Dto.From<T>(o), o.ToString(Formatting.None));
+
     private static Dictionary<string, string> ParseRecipeArgs(string? s)
     {
         var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -503,7 +503,8 @@ public static class ExperimentTools
             throw new McpException("This HUD's bridge plugin has no experiment queue yet: update What's an AI Bridge and restart the HUD.");
     }
 
-    [McpServerTool(Name = "experiment_summary", Title = "Summarise a guided experiment", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "experiment_summary", Title = "Summarise a guided experiment", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ExperimentSummaryResult))]
     [Description("For an experiment record: per step label, how many repeats, which changes happened in EVERY repeat (the " +
                  "evidence) and which only sometimes (noise or side effects). Pass no name to list records.")]
     public static CallToolResult ExperimentSummary([Description("Experiment record name")] string? experiment = null)
@@ -524,11 +525,7 @@ public static class ExperimentTools
             foreach (var c in ((JArray)l["consistent"]!["always"]!).Take(30)) sb.AppendLine($"  always: {c}");
             foreach (var c in ((JArray)l["consistent"]!["sometimes"]!).Take(15)) sb.AppendLine($"  sometimes: {c}");
         }
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(new JObject { ["experiment"] = experiment, ["labels"] = labels, ["record"] = record }.ToString(Formatting.None)),
-        };
+        return Dto.Result(Dto.From<ExperimentSummaryResult>(new JObject { ["experiment"] = experiment, ["labels"] = labels, ["record"] = record }), sb.ToString());
     }
 
     // ── Watch specs ──────────────────────────────────────────────────
