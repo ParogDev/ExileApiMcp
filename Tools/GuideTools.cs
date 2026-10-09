@@ -15,7 +15,8 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class GuideTools
 {
-    [McpServerTool(Name = "guide", Title = "Show the user what to do in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
+    [McpServerTool(Name = "guide", Title = "Show the user what to do in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(GuideState), IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("Show an instruction in the in-game agent guide panel (sticky 'do this now' card) and/or add a line to its " +
                  "log. Use it before asking the user to do anything in game - they may not be looking at the chat. " +
                  "await_change sets the instruction and status by itself when you pass instruction. Statuses: waiting (user " +
@@ -44,18 +45,21 @@ public static class GuideTools
         if (set.Count > 0) state = (await bridges.CallAsync(game, "guide.set", set, ct)).Result;
         if (log != null) await bridges.CallAsync(game, "guide.log", new JObject { ["text"] = log, ["kind"] = "agent" }, ct);
         state ??= (await bridges.CallAsync(game, "guide.state", null, ct)).Result;
-        return ToolResults.Json(state);
+        // After a change the bridge only acknowledges it ({ok, rev}); otherwise this is the full state.
+        return set.Count > 0 ? TypedReply.Of<GuideAck>(state) : TypedReply.Of<GuideState>(state);
     }
 
-    [McpServerTool(Name = "guide_state", Title = "What the in-game guide shows", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "guide_state", Title = "What the in-game guide shows", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(GuideState))]
     [Description("Read the in-game agent guide without changing it: the current instruction card (title, instruction, step, " +
                  "status, detail) and the last log lines. Cheap; MCP Apps poll it to mirror the card.")]
     public static async Task<CallToolResult> GuideState(BridgeRegistry bridges,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default) =>
-        ToolResults.Json((await bridges.CallAsync(game, "guide.state", null, ct)).Result);
+        TypedReply.Of<GuideState>((await bridges.CallAsync(game, "guide.state", null, ct)).Result);
 
-    [McpServerTool(Name = "highlight", Title = "Point at things in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
+    [McpServerTool(Name = "highlight", Title = "Point at things in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(HighlightState), IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("Draw attention to things on the user's screen (never clicks): items in the inventory or the visible stash tab " +
                  "(by name, all matches), any UI element (walker path) or a screen area. Each target has a tier - primary " +
                  "(click/look here, animated), secondary (related) or context (an area to orient the eye) - and optionally an " +
@@ -72,7 +76,7 @@ public static class GuideTools
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
-        if (advance) return ToolResults.Json((await bridges.CallAsync(game, "guide.highlight_advance", new JObject(), ct)).Result);
+        if (advance) return TypedReply.Of<HighlightState>((await bridges.CallAsync(game, "guide.highlight_advance", new JObject(), ct)).Result);
         var p = new JObject();
         if (clear) p["clear"] = true;
         else
@@ -93,7 +97,7 @@ public static class GuideTools
         var (_, r) = await bridges.CallAsync(game, "guide.highlight", p, ct);
         if (r is not JObject o || (o["ok"] == null && o["error"] == null))
             throw new McpException("This HUD's bridge plugin has no highlights yet: update What's an AI Bridge and restart the HUD.");
-        return ToolResults.Json(r);
+        return r["cleared"] != null ? TypedReply.Of<HighlightCleared>(r) : TypedReply.Of<HighlightState>(r);
     }
 
     /// <summary>Best-effort highlight from other tools (never throws); null/empty clears.</summary>

@@ -11,7 +11,8 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class MapTools
 {
-    [McpServerTool(Name = "get_map_image", Title = "Area map (image)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "get_map_image", Title = "Area map (image)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(MapImageResult))]
     [Description("The current area's terrain map as a PNG image you can look at, with the player marked (red dot in a gold ring). " +
                  "Source (in 'source'): Radar's map when its build exposes one (PoE2), else the game's pathfinding grid drawn by the bridge " +
                  "(any game, no plugin needed); 'legend' says how to read it. Pixel = (grid - originGrid) * scale, " +
@@ -28,7 +29,7 @@ public static class MapTools
             ["cropRadius"] = cropRadius, ["maxSize"] = maxSize, ["includeRoutes"] = includeRoutes, ["markPlayer"] = true,
         }, ct);
         if (result is not JObject o || o["pngBase64"]?.Value<string>() is not { } b64)
-            return ToolResults.Json(result);
+            return TypedReply.Of<MapImageResult>(result);
 
         o.Remove("pngBase64");
         return new CallToolResult
@@ -38,6 +39,7 @@ public static class MapTools
                 new TextContentBlock { Text = o.ToString(Formatting.None) },
                 ImageContentBlock.FromBytes(Convert.FromBase64String(b64), "image/png"),
             ],
+            StructuredContent = Dto.Element(Dto.From<MapImageResult>(o)),
         };
     }
 }
