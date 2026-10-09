@@ -21,6 +21,11 @@ How an agent learns while the user plays, without asking for anything: the HUD o
   - Check the HUD for a property that should map it (`hud_type IngameUIElements`). A missing or wrong one is a HUD gap worth a finding.
 - **Area / level:** good moments to re-check facts that change with progress, such as stats, quest and waypoint state, passive points, or what the area's entities look like.
 - **Entity kinds:** a new metadata prefix (league mechanics, NPCs, chests) is a candidate for `explore_object` while it is near.
+- **Layer changes** (`observe_layer_map layer=<id>`, then `observe_timeline layer=<id> unit=<unit>`): the default layers are `server` (raw ServerData), `stats`, `life`, `buffs` and `inventories` (which of the player's inventories changed: `Inventory.Hash` per `TypeId`). An unmapped server offset that always changes with one inventory, buff or stat is named by it.
+- **Rule out the HUD and the agent first:** events of kind `hud` (frame spikes with their GC share, plugin reloads) and `agent` (guide, highlight, experiment, reload, settings calls) sit on the same clock. A change right after an `agent` highlight is the user doing what was asked; one inside a `hud` spike may only be late.
+
+## Adding a layer
+A layer is a spec, not code (`observe_layers action=set`): any walker path, in mode `struct`, `props`, `dict`, `list` or `each`. `each` watches a few values on every item of a collection (`props=[Inventory.Hash]`, `key=TypeId`); the bridge compiles those sub-paths to raw memory reads once and checks them against the HUD every 5 s (`rawPaths` in the layer status says which are raw, or why not). Check a new layer's cost with `bridge_self_perf` (step `observer`).
 
 ## Recording
 - **Findings:** add facts to `Knowledge/findings.json` as `unverified`, with the evidence you have and a `check` someone can run. Promote them to `verified` only with proof: a population, a code path, or a one-variable experiment.
