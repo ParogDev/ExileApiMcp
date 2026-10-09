@@ -67,11 +67,12 @@ public static class PipelineTraceTools
         [Description("Track exactly this entity (an await_motion result's entityId)")] long? entityId = null,
         [Description("Track entities whose metadata path contains this (e.g. a static chest or NPC as an anchor) instead of the nearest players")] string? path = null,
         [Description("Draw the cyan (fresh) marker from the state this many ms ago (0-100), to align with the game image's own latency")] double delayMs = 0,
+        [Description("Up to 3 more delays (ms) drawn as yellow, green and blue markers, so one camera pan measures several delays at once (tools/fidelity reports each)")] double[]? delays = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 60_000);
-        var (bridge, started) = await bridges.CallAsync(game, "tracker.start", new JObject { ["durationMs"] = durationMs, ["entities"] = entities, ["draw"] = draw, ["path"] = path, ["entityId"] = entityId, ["delayMs"] = delayMs }, ct);
+        var (bridge, started) = await bridges.CallAsync(game, "tracker.start", new JObject { ["durationMs"] = durationMs, ["entities"] = entities, ["draw"] = draw, ["path"] = path, ["entityId"] = entityId, ["delayMs"] = delayMs, ["delays"] = delays == null ? null : new JArray(delays) }, ct);
         var id = started["id"]?.Value<string>();
         if (id == null) return ToolResults.Json(started);
         var g = bridge.Game == "auto" ? game : bridge.Game;
