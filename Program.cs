@@ -24,7 +24,10 @@ static async Task RunStdioAsync(string[] args)
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
     builder.Services.AddExileApiMcp().WithStdioServerTransport();
-    await builder.Build().RunAsync();
+    var host = builder.Build();
+    // Exit when the launcher exits, even if stdin never reaches end-of-file (Hosting/ParentWatch.cs).
+    ParentWatch.Start(() => host.Services.GetRequiredService<IHostApplicationLifetime>().StopApplication());
+    await host.RunAsync();
 }
 
 static async Task RunHttpAsync(string[] args)
