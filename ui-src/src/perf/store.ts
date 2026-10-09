@@ -64,7 +64,6 @@ export class PerfStore {
   private listeners = new Set<() => void>();
   private gameArg?: Game;
   private startTimer?: ReturnType<typeof setTimeout>;
-  private autoTimer?: ReturnType<typeof setInterval>;
   private toastSeq = 0;
   private seeded = false;
   private refreshing?: Promise<void>;
@@ -116,15 +115,39 @@ export class PerfStore {
 
   stop() {
     clearTimeout(this.startTimer);
-    clearInterval(this.autoTimer);
-    this.autoTimer = undefined;
+    this.watchGen++;
   }
 
+  /** Live mode: push, not a timer. perf_watch returns as soon as the server has a report newer than the one shown; the
+   *  server traces on its own cadence (AUTO_REFRESH_MS) while anyone watches and stops 30 s after the last watcher, so a
+   *  hidden panel just stops asking. MCP Apps can't subscribe to resources (ext-apps 2.0), hence the held call. */
   setAutoRefresh(on: boolean) {
-    clearInterval(this.autoTimer);
-    this.autoTimer = undefined;
-    if (on) this.autoTimer = setInterval(() => { if (!document.hidden) void this.refresh(); }, AUTO_REFRESH_MS);
+    this.watchGen++;
     this.set({ autoRefresh: on });
+    if (on) void this.watch(this.watchGen);
+  }
+
+  private watchGen = 0;
+  private watchSeq = 0;
+
+  private async watch(gen: number) {
+    while (gen === this.watchGen) {
+      if (document.hidden) { await sleep(1000); continue; }
+      try {
+        const args: Record<string, unknown> = { since: this.watchSeq, timeoutSec: 25, intervalSec: AUTO_REFRESH_MS / 1000 };
+        if (this.gameArg) args.game = this.gameArg;
+        const r = await this.call("perf_watch", args);
+        if (gen !== this.watchGen) return;
+        const snap = r.data as { seq?: number; fresh?: boolean; report?: unknown } | undefined;
+        if (r.isError || !snap) { this.set({ conn: "offline", lastError: r.text ?? "perf_watch failed" }); await sleep(3000); continue; }
+        if (typeof snap.seq === "number") this.watchSeq = snap.seq;
+        if (snap.fresh && snap.report) this.applyReport(snap.report, r.text);
+      } catch (e) {
+        if (gen !== this.watchGen) return;
+        this.set({ conn: "offline", lastError: e instanceof Error ? e.message : String(e) });
+        await sleep(3000);
+      }
+    }
   }
 
   // ── The report ───────────────────────────────────────────────────
@@ -227,3 +250,5 @@ export class PerfStore {
     this.set({ toasts: this.snap.toasts.filter((t) => t.id !== id) });
   }
 }
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
