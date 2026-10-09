@@ -8,6 +8,19 @@ How an agent asks a developer for help with a guided experiment: when to ask, ho
 - **Don't ask** for things the tools forbid: you never send input, never write memory. If an action would cost the user something (trade, vendor, currency use), say so and offer a cheaper action.
 - Check `experiment_presets` first: a ready-made experiment has tested instructions and watch specs.
 
+## Show where, don't just say where
+- **Point at it whenever you ask for a click:** pass `highlight` to `await_change`, `experiment_step_start` or `experiment_queue`, or call the `highlight` tool. The words go on the card; the highlight shows the place.
+- **Targets:**
+  - `item`: a name; every match in the inventory and the visible stash tab is shown.
+  - `path`: any UI element, such as a tab, button or checkbox (find it with `explore_object`).
+  - `rect`: a screen area.
+- **Tiers:**
+  - `primary`: click or look here. It is the only animated one, so give one or two at most.
+  - `secondary`: related.
+  - `context`: an area to orient the eye.
+- **Sequences:** give targets an `order` for "1 then 2 then 3". `highlight advance=true` moves to the next step. Clear highlights when the step is done; steps clear their own.
+- Never use a highlight to make the user act faster than they want, and keep it short-lived.
+
 ## Live step or queued step
 - **Live (`await_change`):** use it when the user is at the game and answering you now. Capture starts at once, and the step fails if they are slow.
 - **Queued (`experiment_queue`):** use it when they are away, busy, or you don't know.

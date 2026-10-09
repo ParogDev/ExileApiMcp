@@ -80,6 +80,7 @@ public static class ExperimentTools
         [Description("What the user should do, shown in the in-game guide panel while waiting (recommended)")] string? instruction = null,
         [Description("Step number and total, for the guide panel")] int? step = null,
         [Description("Total steps, for the guide panel")] int? steps = null,
+        [Description("Highlight while waiting (removed after): JSON targets as for the highlight tool, e.g. [{\"item\":\"Chaos Orb\"}]")] string? highlight = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
@@ -96,7 +97,7 @@ public static class ExperimentTools
         try
         {
             o = await RunStepAsync(bridges, watch, label, experiment, limit, settleMs, instruction, step, steps, game,
-                async s => { state["status"] = s; await WriteInFlight(experiment, state); }, ct);
+                async s => { state["status"] = s; await WriteInFlight(experiment, state); }, ct, highlight);
             state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : "failed";
             state["result"] = o;
         }
@@ -120,7 +121,7 @@ public static class ExperimentTools
     /// reports progress through <paramref name="onStatus"/> (waiting / detected / settling) for the non-blocking API.
     /// </summary>
     internal static async Task<JObject> RunStepAsync(BridgeRegistry bridges, string[] watch, string label, string experiment,
-        int timeoutMs, int settleMs, string? instruction, int? step, int? steps, string? game, Func<string, Task>? onStatus, CancellationToken ct)
+        int timeoutMs, int settleMs, string? instruction, int? step, int? steps, string? game, Func<string, Task>? onStatus, CancellationToken ct, string? highlight = null)
     {
         onStatus ??= _ => Task.CompletedTask;
         if (watch.Length == 0) throw new McpException("Pass at least one watch spec (see experiment_presets).");
@@ -142,6 +143,7 @@ public static class ExperimentTools
             ["step"] = step, ["steps"] = steps, ["detail"] = $"Watching {watch.Length} value(s) for up to {timeoutMs / 1000} s",
         }, ct);
         await GuideTools.LogAsync(bridges, game, $"Claude: waiting for '{label}'", "step", ct);
+        if (highlight != null) await GuideTools.HighlightAsync(bridges, game, highlight, ct);
         await onStatus("waiting");
         Dictionary<string, string>? current = before, last = before;
         long changedAt = -1, stableSince = -1;
@@ -172,6 +174,7 @@ public static class ExperimentTools
             }
             break;
         }
+        if (highlight != null) await GuideTools.HighlightAsync(bridges, game, null, CancellationToken.None);
         if (changedAt >= 0 && Same(last!, before)) changedAt = -1;
         if (changedAt < 0)
         {
@@ -240,6 +243,7 @@ public static class ExperimentTools
         [Description("Settle time, ms (100-5000, default 500)")] int settleMs = 500,
         [Description("Step number, for the guide panel")] int? step = null,
         [Description("Total steps, for the guide panel")] int? steps = null,
+        [Description("Highlight while waiting (removed after): JSON targets as for the highlight tool, e.g. [{\"item\":\"Chaos Orb\"}]")] string? highlight = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null)
     {
         if (!Regex.IsMatch(experiment, @"^[\w.-]{1,64}$")) throw new McpException("experiment: letters, digits, '-', '_' or '.', up to 64 characters.");
@@ -260,7 +264,7 @@ public static class ExperimentTools
             {
                 // RunStepAsync clamps to 120 s for blocking callers; the non-blocking path passes its own cap.
                 var o = await RunStepAsync(bridges, watch, label, experiment, timeoutMs, settleMs, instruction, step, steps, game,
-                    async s => { state["status"] = s; await WriteInFlight(experiment, state); }, cts.Token);
+                    async s => { state["status"] = s; await WriteInFlight(experiment, state); }, cts.Token, highlight);
                 state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : "failed";
                 state["result"] = o;
             }
@@ -344,6 +348,7 @@ public static class ExperimentTools
         [Description("Max wait per repeat after Start, ms (5000-600000, default 120000)")] int timeoutMs = 120_000,
         [Description("Settle time, ms (100-5000, default 500)")] int settleMs = 500,
         [Description("Start this step by itself as soon as the previous step of the same experiment is captured, so one Start press runs a whole series (queue the first step without chain)")] bool chain = false,
+        [Description("Highlight while the step records (shown after Start, removed after): JSON targets as for the highlight tool")] string? highlight = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
@@ -352,6 +357,7 @@ public static class ExperimentTools
             ["experiment"] = experiment, ["label"] = label, ["instruction"] = instruction, ["watch"] = new JArray(watch),
             ["repeats"] = repeats, ["timeoutMs"] = timeoutMs, ["settleMs"] = settleMs, ["by"] = "Claude", ["chain"] = chain,
         };
+        if (!string.IsNullOrWhiteSpace(highlight)) p["highlight"] = JArray.Parse(highlight);
         if (note != null) p["note"] = note;
         if (title != null) p["title"] = title;
         foreach (var w in watch) Spec.Parse(w);

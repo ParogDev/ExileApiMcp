@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using ExileApiMcp.Bridge;
+using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Newtonsoft.Json.Linq;
@@ -53,6 +54,58 @@ public static class GuideTools
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default) =>
         ToolResults.Json((await bridges.CallAsync(game, "guide.state", null, ct)).Result);
+
+    [McpServerTool(Name = "highlight", Title = "Point at things in game", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Draw attention to things on the user's screen (never clicks): items in the inventory or the visible stash tab " +
+                 "(by name, all matches), any UI element (walker path) or a screen area. Each target has a tier - primary " +
+                 "(click/look here, animated), secondary (related) or context (an area to orient the eye) - and optionally an " +
+                 "order for a sequence (numbered; the current step is emphasised, advance=true moves on). Targets follow the UI. " +
+                 "Use it with the guide card whenever you ask the user to click something. clear=true removes it.")]
+    public static async Task<CallToolResult> Highlight(BridgeRegistry bridges,
+        [Description("Targets: [{item:'Chaos Orb' | path:'GameController.IngameState.IngameUi.StashElement' | rect:[x,y,w,h], label?, tier?: primary|secondary|context, order?}]")] System.Text.Json.JsonElement? targets = null,
+        [Description("Shortcut: item names to highlight as primary targets")] string[]? items = null,
+        [Description("Optional heading, e.g. 'Move these to the stash'")] string? title = null,
+        [Description("Sequence step to show as current (default: the lowest order)")] int? current = null,
+        [Description("Remove after this many seconds (default: until cleared or replaced)")] double? durationSec = null,
+        [Description("Move a sequence to its next step")] bool advance = false,
+        [Description("Remove all highlights")] bool clear = false,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        if (advance) return ToolResults.Json((await bridges.CallAsync(game, "guide.highlight_advance", new JObject(), ct)).Result);
+        var p = new JObject();
+        if (clear) p["clear"] = true;
+        else
+        {
+            var list = targets switch
+            {
+                { ValueKind: System.Text.Json.JsonValueKind.Array } t => JArray.Parse(t.GetRawText()),
+                { ValueKind: System.Text.Json.JsonValueKind.String } s => JArray.Parse(s.GetString()!),   // key=@file, or JSON passed as text
+                _ => new JArray(),
+            };
+            foreach (var i in items ?? []) list.Add(new JObject { ["item"] = i, ["tier"] = "primary" });
+            if (list.Count == 0) throw new McpException("Pass targets (or items), or clear=true.");
+            p["targets"] = list;
+            if (title != null) p["title"] = title;
+            if (current != null) p["current"] = current;
+            if (durationSec != null) p["durationSec"] = durationSec;
+        }
+        var (_, r) = await bridges.CallAsync(game, "guide.highlight", p, ct);
+        if (r is not JObject o || (o["ok"] == null && o["error"] == null))
+            throw new McpException("This HUD's bridge plugin has no highlights yet: update What's an AI Bridge and restart the HUD.");
+        return ToolResults.Json(r);
+    }
+
+    /// <summary>Best-effort highlight from other tools (never throws); null/empty clears.</summary>
+    internal static async Task HighlightAsync(BridgeRegistry bridges, string? game, string? targetsJson, CancellationToken ct)
+    {
+        try
+        {
+            var p = string.IsNullOrWhiteSpace(targetsJson) ? new JObject { ["clear"] = true } : new JObject { ["targets"] = JArray.Parse(targetsJson) };
+            await bridges.CallAsync(game, "guide.highlight", p, ct);
+        }
+        catch { }
+    }
 
     /// <summary>Best-effort guide update from other tools (never throws).</summary>
     internal static async Task SetAsync(BridgeRegistry bridges, string? game, JObject set, CancellationToken ct)
