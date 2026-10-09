@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.49.0";
+    public const string Version = "3.50.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -104,12 +104,20 @@ internal static class McpSetup
     public static IMcpServerBuilder AddExileApiMcp(this IServiceCollection services)
     {
         services.AddSingleton<BridgeRegistry>();
+        services.AddSingleton<ObserveHub>();
+        // Light/dark icon pairs for everything registered with an IconSet icon (Hosting/IconThemes.cs).
+        services.PostConfigure<McpServerOptions>(IconThemes.Apply);
         return services
             .AddMcpServer(o =>
             {
-                o.ServerInfo = new Implementation { Name = "ExileApi MCP", Title = "Path of Exile HUD", Version = Version };
+                o.ServerInfo = new Implementation { Name = "ExileApi MCP", Title = "Path of Exile HUD", Version = Version, Icons = IconSet.Server };
                 o.ServerInstructions = Instructions;
+                // Resource subscriptions are delivered on subscriptions/listen streams (Hosting/Subscriptions.cs).
+                o.Capabilities ??= new ServerCapabilities();
+                o.Capabilities.Resources ??= new ResourcesCapability();
+                o.Capabilities.Resources.Subscribe = true;
             })
+            .WithSubscriptionsListenHandler(Subscriptions.Listen)
             .WithRequestFilters(f => f.AddCallToolFilter(next => async (request, ct) =>
             {
                 // One stderr line per call, which clients such as Claude Desktop keep in their per-server log:

@@ -13,7 +13,7 @@ public static class DataExplorerApp
 {
     public const string ResourceUri = "ui://exile/data-explorer";
 
-    [McpServerResource(UriTemplate = ResourceUri, Name = "data-explorer-ui", Title = "Data explorer", MimeType = McpApps.HtmlMimeType)]
+    [McpServerResource(UriTemplate = ResourceUri, Name = "data-explorer-ui", Title = "Data explorer", MimeType = McpApps.HtmlMimeType, IconSource = ExileApiMcp.Hosting.IconSet.DataExplorerLight)]
     [McpMeta("ui", JsonValue = """{"prefersBorder":true}""")]
     [Description("Interactive explorer of the live HUD object model: expand objects and components, copy paths and plugin C#.")]
     public static string GetUi() => PlayerStatsApp.LoadEmbedded("ui/data-explorer.html") ?? Placeholder;

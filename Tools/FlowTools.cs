@@ -26,7 +26,7 @@ public static class FlowTools
         return s == null ? new JObject { ["recipes"] = new JArray() } : JObject.Parse(new StreamReader(s).ReadToEnd());
     });
 
-    [McpServerTool(Name = "guide_flow", Title = "Guide the user through a multi-step task", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "guide_flow", Title = "Guide the user through a multi-step task", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("Guide the user through a multi-step in-game task: the HUD highlights the next thing to do, re-evaluated from " +
                  "the game state every 100 ms (current step = first step not done; it goes back if the user navigates away; for " +
                  "each step the first option that's possible right now is shown, e.g. right-click the tab if it's in view, else " +

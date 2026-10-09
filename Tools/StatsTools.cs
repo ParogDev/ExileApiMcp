@@ -29,7 +29,7 @@ public static class StatsTools
 
     // ── Showing ──────────────────────────────────────────────────────
 
-    [McpServerTool(Name = "show_player_stats", Title = "Show player stats", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "show_player_stats", Title = "Show player stats", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.PlayerStatsLight)]
     [McpAppUi(ResourceUri = PlayerStatsApp.ResourceUri)]
     // Legacy flat key, alongside the nested _meta.ui.resourceUri, as the official ext-apps servers send it
     // (registerAppTool): hosts built against older MCP Apps drafts look for this one.
@@ -99,7 +99,7 @@ public static class StatsTools
         return ToolResults.Json((await bridges.CallAsync(game, "stats.ui_state", p, ct)).Result);
     }
 
-    [McpServerTool(Name = "stats_page", Title = "Player stats (filtered page)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "stats_page", Title = "Player stats (filtered page)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.PlayerStatsLight)]
     [Description("A page of the player's current stats: Stats.dat key, value, in-game text and category, plus " +
                  "per-category counts and all pinned stats. Arguments override the shared filter/category/sort for this " +
                  "read only (they don't change what the HUD shows - use set_stats_filter for that).")]

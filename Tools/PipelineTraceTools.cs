@@ -12,7 +12,7 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class PipelineTraceTools
 {
-    [McpServerTool(Name = "pipeline_trace", Title = "Time the HUD's render pipeline", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "pipeline_trace", Title = "Time the HUD's render pipeline", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.HudPerformanceLight)]
     [Description("""
         Measure how faithfully the HUD tracks the game, for a few seconds: HUD fps and frame-interval jitter, frame cost,
         Present; when the camera and the nearest players' positions are read and how old that data is when the frame
@@ -155,7 +155,7 @@ public static class PipelineTraceTools
         return ToolResults.Json(r);
     }
 
-    [McpServerTool(Name = "profile_plugin", Title = "Where a plugin's frame time goes", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "profile_plugin", Title = "Where a plugin's frame time goes", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.HudPerformanceLight)]
     [Description("""
         Method-level profile of one HUD plugin for a few seconds: Harmony wraps every method and instance constructor in its assembly (never
         protected stubs), keeps a per-thread call stack, and reports per method calls, self and inclusive time

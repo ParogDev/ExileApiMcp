@@ -25,7 +25,7 @@ public static class ExploreTools
 
     // No UI link: agents call this in loops, and a linked tool opens a panel per call in Desktop.
     // The explorer app calls it like any model-visible tool.
-    [McpServerTool(Name = "explore_object", Title = "Explore the object model", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "explore_object", Title = "Explore the object model", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.DataExplorerLight)]
     [Description("Map out live HUD data: the object at a path and its children, one line each - name: type = preview " +
                  "(structs as X=.. Y=.., objects with their Name and visible/hidden, collections with counts) - plus an " +
                  "entity's components. depth 2-3 expands nested objects. Child paths are parent.Name, parent[i] or " +
@@ -87,7 +87,7 @@ public static class ExploreTools
         };
     }
 
-    [McpServerTool(Name = "show_data_explorer", Title = "Open the data explorer", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "show_data_explorer", Title = "Open the data explorer", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.DataExplorerLight)]
     [McpAppUi(ResourceUri = DataExplorerApp.ResourceUri)]
     [McpMeta("ui/resourceUri", DataExplorerApp.ResourceUri)]
     [Description("Open an interactive explorer of the live HUD object model at a path (clients that support MCP Apps): " +

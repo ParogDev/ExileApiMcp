@@ -25,7 +25,7 @@ public static class MemoryTools
                                   "GameController.IngameState.ServerData.PlayerStashTabs[0]) - its Address is used";
     private const string AddressDesc = "Absolute address instead of a path: number or \"0x...\"";
 
-    [McpServerTool(Name = "memory_layout", Title = "Struct mapping vs live memory", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "memory_layout", Title = "Struct mapping vs live memory", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.MemoryViewLight)]
     [Description("Overlay the offsets struct the HUD itself reads for an object (found by reflection - on PoE2 the real " +
                  "obfuscated struct, not the GameOffsets2 decoys) on live memory: each mapped field with offset, value, set bits " +
                  "for flag fields, and a sanity check (bad floats, pointers that don't point anywhere, broken std::vectors); the " +
@@ -188,7 +188,7 @@ public static class MemoryTools
         return ToolResults.Json(o);
     }
 
-    [McpServerTool(Name = "show_memory_view", Title = "Open the memory view", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "show_memory_view", Title = "Open the memory view", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.MemoryViewLight)]
     [McpAppUi(ResourceUri = MemoryViewApp.ResourceUri)]
     [McpMeta("ui/resourceUri", MemoryViewApp.ResourceUri)]
     [Description("Open the interactive memory view (clients that support MCP Apps) at an object or address: the struct the " +
