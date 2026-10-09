@@ -7,7 +7,7 @@
       "subject": "ServerStashTab (ServerStashTabOffsets)",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 6", "evidence": "memory_correlate over 71 tabs: 11 with affinity vs 60 without, 0 counterexamples; tabs with 1, 2 and 4 affinities; seen clearing when a tab lost its last affinity" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 6", "evidence": "40 tabs: the 7 with bit 6 are exactly those with a non-zero affinity mask at +63 (gems, U, Maps, $, Deli, Ess, Pots); 0 counterexamples. The PoE2 HUD has no Affinity property, so the correlate check (label Affinity) cannot run there; checked by reading +63 directly" }
       },
       "check": { "kind": "correlate", "path": "GameController.IngameState.ServerData.PlayerStashTabs", "label": "Affinity", "expect": "Affinity != 0" }
     },
@@ -17,7 +17,7 @@
       "subject": "ServerStashTab (ServerStashTabOffsets)",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 1", "evidence": "memory_correlate over 71 tabs: 63 typed vs 8 Normal, 0 counterexamples" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 1", "evidence": "40 tabs: all 8 Normal tabs (TabType 0) have Flags 0x0, all 32 others have bit 1; 0 counterexamples" }
       },
       "check": { "kind": "correlate", "path": "GameController.IngameState.ServerData.PlayerStashTabs", "label": "TabType", "expect": "TabType != 0" }
     },
@@ -27,7 +27,7 @@
       "subject": "ServerStashTab (ServerStashTabOffsets.Flags, Affinity)",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 (2 bytes); bit 6 -> +63 (4 bytes)", "evidence": "find_field_access: serializer FUN_141d4d020 / deserializer FUN_141d4d1f0 read and write 2 bytes at +0x3D and 'if (flags & 0x40) read 4 bytes at +0x3F'; UI FUN_140a8e150 tests 0x40 to show the affinity in bold. The HUD maps Flags as 1 byte, so +62 is its high byte" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "FUN_141ce2c50 in PathOfExile_poe2_20261007-984e7bb2.exe", "evidence": "find_field_access: the serializer contains (flags & 0x40) and the 4 bytes at +0x3f, as on PoE1" }
       },
       "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 6, "expectAll": ["0x3d) & 0x40", "0x3f,4"] }
     },
@@ -37,7 +37,7 @@
       "subject": "Inventory (StashElement.VisibleStash) on InvType CurrencyStash",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "VisibleStash.ItemCount = 4474396122048 (an address), ServerInventoryId = 0; ServerInventory.ItemCount = 45 is right", "evidence": "guided experiment stash-ctrl-click (4 steps): ItemCount never followed items moving; VisibleStash.ServerInventory.ItemCount did (45 -> 44 -> 45) and the main inventory count changed every time. On a Normal tab both read correctly (84 items, inventory 156). Use ServerInventory.ItemCount for special-layout tabs. Not yet checked: which other special tab types are affected" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "StashElement.VisibleStash.ItemCount", "evidence": "Queued experiment poe2-stash: with the Currency tab visible, VisibleStash.ItemCount = 0 while VisibleStash.ServerInventory.ItemCount = 4; on the Unique tab it read 4906812532655833088 and ServerInventory was null. Broken on PoE2 too (0 instead of a pointer on Currency)" }
       },
       "check": { "kind": "manual", "how": "Open a Currency stash tab; run_csharp: var s = GameController.IngameState.IngameUi.StashElement.VisibleStash; new { s.ItemCount, s.ServerInventoryId, server = s.ServerInventory?.ItemCount }. Broken if ItemCount is huge / ServerInventoryId 0 while server shows the real count. Repeat on other special tabs (Fragment, Essence, Map...)." }
     },
@@ -57,7 +57,7 @@
       "subject": "ServerStashTab",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 5; +58 (2 bytes)", "evidence": "client conversion FUN_14025ac30 takes the tab's parent link from +0x3A when bit 5 is clear and from its caller when set; all 27 Map stash pages have bit 5 and +58 = 23 (the Map stash tab's index); all 44 top-level tabs have +58 = 0xFFFF. Pages only exist after the stash was opened (the guild Map tab had none). Folders (TabType 16 = StashType.dat Folder) are ordinary top-level tabs, and their members keep Flags bit 5 clear but carry the folder's index in +58: after the user made Folder 2 (tab 79, holding Currency, Maps, Dump leveling) and Folder 3 (tab 78, holding Dump Dump), exactly those 4 tabs had +58 = 79 / 78 and the rest 0xFFFF. The edit dialog's folder dropdown is change 0x20 in FUN_140256270" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "+58 (2 bytes); FUN_1402b2360", "evidence": "Code: (flags & 0x20) and +0x3a as on PoE1. Folders: the user made New Folder (tab 40, TabType 16) and moved Maps into it: Maps +58 = 40, all other tabs 0xFFFF" }
       },
       "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 5, "expectAll": ["0x3d) & 0x20", "0x3a"] }
     },
@@ -67,7 +67,7 @@
       "subject": "ServerStashTab -> ServerData.PlayerInventories",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+40 (inventory id; values 0x9B-0xA6 seen); +61 bit 9 (+62 bit 1)", "evidence": "+40 != 0 exactly when bit 9 is set (12/12 tabs, 0 counterexamples over 71); the 12 values are consecutive, assigned as tabs were opened, and each equals a PlayerInventories Id whose InventType matches the tab (Currency, Delirium, FlaskStash, Fragment, Gem, Metamorph, MapStashInv for Map pages). Moving a map out of a page set it on that page (+40 0xA6, 6 items)" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "+40; +61 bit 9", "evidence": "41 tabs, 36 loaded: bit 9 set exactly when +40 != 0, and every such id is a ServerData.PlayerInventories Id (Maps -> MapStashInv, Fragment tab -> Fragment); 0 counterexamples" }
       },
       "check": { "kind": "manual", "how": "run_csharp: for PlayerStashTabs with (Read<ushort>(Address+61) & 0x200) != 0, Read<uint>(Address+40) must be an Id in ServerData.PlayerInventories whose InventType matches the tab; tabs without bit 9 have 0. Open a not-yet-opened tab to watch it appear." }
     },
@@ -77,7 +77,7 @@
       "subject": "ServerStashTab",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+0 (8 bytes), gated by Flags bit 5", "evidence": "find_field_access: the deserializer zeroes *param_2 unless (flags & 0x20), the serializer writes 8 bytes from +0 when it is set. Bit 5 = child tab, so +0 is per-page data of child tabs (27 Map pages, all different values, e.g. 0x43, 0x83, 0x1CE4C1, 0x19EA0F3200). Experiments: unchanged when the user viewed a page and when a map was moved out of it, so it is neither view state nor contents-derived. It is the page key: see stash.child.page-key" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "+0 (8 bytes), gated by Flags bit 5; FUN_1402b2360", "evidence": "Code: the deserializer gates +0 on (flags & 0x20) as on PoE1. No child tab exists on this account (no maps or uniques owned), so the values could not be observed" }
       },
       "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 5, "expectAll": ["0x3d) & 0x20"] }
     },
@@ -87,7 +87,7 @@
       "subject": "ServerStashTab",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 3", "evidence": "Code: the Edit Stash Tab dialog reader FUN_14025ad60 copies its single checkbox into descriptor +0x24, which FUN_14025ac30 fills from (Flags >> 3) & 1. Experiment stash-public (Dump leveling, tab 33): ticking Public + confirm changed only Flags 02 -> 0A (bit 3); unticking changed only 0A -> 02. No other tab has the bit (none is public)" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "+61 bit 3", "evidence": "Queued experiment poe2-stash on Craft Later (tab 4): ticking Public changed only Flags 02 -> 0A, unticking 0A -> 02" }
       },
       "check": { "kind": "manual", "how": "Watch memory:GameController.IngameState.ServerData.PlayerStashTabs[<n>]:72 (experiment_queue or await_change) while the user ticks and unticks Public in Edit Stash Tab on tab n: only +61 bit 3 may flip." }
     },
@@ -97,7 +97,7 @@
       "subject": "ServerStashTab (child tabs, Flags bit 5)",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+0 (8 bytes)", "evidence": "Map stash (27 pages): kind 0 -> value = Data/BaseItemTypes.dat u32 at +140 (a hash column; 18/18 found: MapKeyTier1-16, MapKeyShaperGuardian, MapKeyNightmareBoss); kind 1 -> value = Data/MapStashUniqueMapInfo.dat u16 at +32 (7/7 found); kind 3 -> value = Data/MapStashSpecialSubstashGroup.dat row (2 = Conqueror1, 4 = Conqueror3). Pages with loaded inventories hold matching items (Tier 3 page: Map (Tier 3) keys; Tier 16 page: Map (Tier 16); Nightmare page: a Nightmare unique map). Found by scanning every loaded .dat for the values (find_in_game_data). Unique stash (7 pages): +0 = Data/UniqueStashTypes.dat row + 1 (two samples: +0 = 3 holds rings, row 2 = Ring; +0 = 2: its server inventory holds 8 items, all of class Amulet (ItemCount 8 = items stored; not the page's collection progress, which the UI showed as 8% by coincidence), row 1 = Amulet - queued experiment unique-pages: opening the Amulet category loaded exactly that page, +40 inventory id 0xAC and Flags bit 9. All 7 pages verified by the items each page loaded (queued experiment unique-pages, chained): +0 2 Amulet, 3 Ring, 4 Claw, 7 Sword (two- and one-handed), 9 Mace, 16 Body Armour, 17 Helmet. Pages exist only for categories with owned uniques; the server numbers each page inventory in load order (+40 0xAC..0xB1). Pitfall seen: a page loaded before the step baseline records nothing, and the next click lands on the wrong label - check the page items, not just the label)" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "unverified", "note": "Not observable on the test account: it owns no maps or uniques, and pages exist only for owned categories (0 child tabs after opening Maps and U). Retry on an account with maps/uniques" }
       },
       "check": { "kind": "manual", "how": "run_csharp over PlayerStashTabs with Flags bit 5: q = Read<ulong>(Address); for Map pages, kind = q & 31, value = q >> 5; name value with find_in_game_data values=[...] (kind 0: BaseItemTypes, kind 1: MapStashUniqueMapInfo, kind 3: MapStashSpecialSubstashGroup row). Compare with the items of a loaded page (Flags bit 9, inventory id at +40)." }
     },
@@ -107,7 +107,7 @@
       "subject": "ServerStashTab",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+60 (1 byte), gated by Flags bit 4", "evidence": "find_field_access: (de)serializer reads or writes 1 byte at +0x3C only if (flags & 0x10). The Edit Stash Tab apply handler FUN_14025b420 diffs old/new tab descriptors (FUN_140256270: 1 name, 2 colour, 4 Flags bit 3 checkbox, 8 this byte, 0x10 guild permissions, 0x20 folder/parent, 0x40 affinities) and applies change 8 only when TabType == 5 (MapStash): it writes the byte to the tab, copies it to every child page (Flags bit 5, +58 == the tab) and sends packet 0xD0 {tab index, byte, stash kind}. 0 with bit 4 clear on all 80 player and 21 guild tabs, including 2 new folders (TabType 16), so folders don't use it. What the Map stash setting is, is unknown (the dialog itself carries it unchanged). Ruled out by experiment map-stash-0x3c (queued, user-run): the Maps tab Edit dialog has no Map-only option; changing colour and setting the Map affinity, then the colour back, changed +44, +61 bit 6 and +63 but never +60. The Map stash panel has no view or filter option (only tier buttons and numbered pages), and tier and page clicks in earlier runs never set bit 4. Likely set by the server or a feature not visible in this league; it is not a user setting" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "+60 (1 byte), gated by Flags bit 4; FUN_141ce2c50", "evidence": "Code: (flags & 0x10) and +0x3c as on PoE1; 0 with bit 4 clear on all 41 tabs" }
       },
       "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 4, "expectAll": ["0x3d) & 0x10", "0x3c"] }
     },
@@ -117,7 +117,7 @@
       "subject": "ServerStashTab (ServerStashTabOffsets.Affinity)",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+63 (32-bit)", "evidence": "memory_correlate storedAt over 71 tabs (12 distinct values)" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "+63 (4 bytes, unmapped by the PoE2 HUD)", "evidence": "The mask is at +63 as on PoE1 (gates-affinity code reads 4 bytes at +0x3f); its set bit equals the tab type on 7/7 tabs. The PoE2 HUD maps no Affinity (hello: stashTabs.affinity unsupported)" }
       },
       "check": { "kind": "stored", "path": "GameController.IngameState.ServerData.PlayerStashTabs", "label": "Affinity" }
     },
@@ -127,9 +127,9 @@
       "subject": "ServerStashTab.Affinity",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "3 Currency, 4 Unique, 5 Map, 6 Divination, 7 Settlers, 8 Essence, 9 Fragment, 10 Sanctum, 11 Mercenary, 12 Delve, 13 Blight, 14 Ultimatum, 15 Delirium, 16 Breach, 17 Flask, 18 Gem, 21 Ritual", "evidence": "one-variable experiment (memory_snapshot/memory_compare, one affinity ticked per step) for 5,7,10,11,14,16,21; population (bit = dedicated TabType) for the rest. The HUD's InventoryTabType names are wrong for 7, 14, 16" },
-        "poe2": { "status": "unverified", "note": "PoE2 has different stash tab types and affinities: expect a different table" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "Data/Balance/StashTabAffinityId.dat (22 rows)", "evidence": "PoE2 table (AbyssItems, Relics, Socketables...; check.byGame.poe2). Bit n = row n on 7/7 tabs: Gems 18, UniqueItems 4, Maps 5, CurrencyItems 3, DeliriumItems 15, Essences 8, Flasks 17, each on the matching tab type" }
       },
-      "check": { "kind": "data", "file": "Data/StashTabAffinityId.dat", "expect": { "3": "CurrencyItems", "4": "UniqueItems", "5": "Maps", "6": "DivinationCards", "7": "SettlersItems", "8": "Essences", "9": "Fragments", "10": "SanctumItems", "11": "MercenaryItems", "12": "DelveItems", "13": "BlightItems", "14": "UltimatumItems", "15": "DeliriumItems", "16": "BreachItems", "17": "Flasks", "18": "Gems", "21": "RitualItems" } },
+      "check": { "kind": "data", "file": "StashTabAffinityId.dat", "expect": { "3": "CurrencyItems", "4": "UniqueItems", "5": "Maps", "6": "DivinationCards", "7": "SettlersItems", "8": "Essences", "9": "Fragments", "10": "SanctumItems", "11": "MercenaryItems", "12": "DelveItems", "13": "BlightItems", "14": "UltimatumItems", "15": "DeliriumItems", "16": "BreachItems", "17": "Flasks", "18": "Gems", "21": "RitualItems" }, "byGame": { "poe2": { "expect": { "0": "AbyssItems", "1": "Relics", "3": "CurrencyItems", "4": "UniqueItems", "5": "Maps", "8": "Essences", "9": "Fragments", "14": "BreachItems", "15": "DeliriumItems", "17": "Flasks", "18": "Gems", "19": "Socketables", "20": "ExpeditionItems", "21": "RitualItems" } } } },
       "dataSource": "Data/StashTabAffinityId.dat: row n = affinity bit n (22 rows: 0/2 unused, 1 Incubators, 19 Socketables, 20 Expedition beyond the PoE1 UI's 17). Data/StashTabAffinities.dat lists the UI affinities in display order with a foreign key to that row. Data/StashTabAffinityByItemClassCategory.dat maps item classes to affinities."
     },
     {
@@ -138,9 +138,9 @@
       "subject": "ServerStashTab.TabType",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "Data/StashType.dat (25 rows)", "evidence": "game_data: 0 Normal, 1 Premium, 2 Trade, 3 Currency, 4 Unique, 5 Map, 6 DivinationCard, 7 Quad, 8 Essence, 9 Fragment, 10/11 PCBang, 12 Delve, 13 Blight, 14 Ultimatum (uses the Metamorph icon; the HUD enum calls it Metamorph), 15 Delirium, 16 Folder, 17 Flask, 18 Gem, 19 Socketable, 20 Expedition, 21 Ritual, 22 Breach, 23 Abyss, 24 Relic. Live tabs: TabType 14 on a tab named 'Metamorph' holds the Ultimatum affinity" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "Data/Balance/StashType.dat (25 rows)", "evidence": "Rows 0-22 match the PoE1 names (0 NormalStash .. 16 Folder, 18 GemStash, 22 BreachStash); PoE2 adds 23 AbyssStash, 24 RelicStash. All 41 tab types name correctly" }
       },
-      "check": { "kind": "data", "file": "Data/StashType.dat", "expect": { "0": "NormalStash", "1": "PremiumStash", "3": "CurrencyStash", "5": "MapStash", "7": "QuadStash", "14": "UltimatumStash", "16": "Folder", "22": "BreachStash" } }
+      "check": { "kind": "data", "file": "StashType.dat", "expect": { "0": "NormalStash", "1": "PremiumStash", "3": "CurrencyStash", "5": "MapStash", "7": "QuadStash", "14": "UltimatumStash", "16": "Folder", "22": "BreachStash" } }
     },
     {
       "id": "stash.affinity.per-tab-type",
@@ -178,7 +178,7 @@
       "subject": "Life (LifeComponentOffsets)",
       "games": {
         "poe1": { "status": "verified", "date": "2026-10-08", "where": "+0x178 / +0x1C8 / +0x210", "evidence": "memory_layout candidates (vtable + self pointer) and the Ghidra constructor FUN_141e678d0" },
-        "poe2": { "status": "unverified" }
+        "poe2": { "status": "verified", "date": "2026-10-08", "where": "Life (t44615) groups at +448 / +536 / +600", "evidence": "memory_layout: each vitals group (Life 356, Mana 175, ES 22) follows a vtable (+424 read by the HUD as f46204, +512, +576) and a pointer back to the Life component at +0 (+440, +592), as on PoE1. Constructor not decompiled on PoE2" }
       },
       "check": { "kind": "manual", "how": "memory_layout path=GameController.Player.GetComponent<Life>(): look for 'vtable' followed by 'self' candidates just before each Health/Mana/EnergyShield field group. Confirm via the vtable at +0 -> Ghidra get_xrefs_to -> decompile the constructor." }
     }
