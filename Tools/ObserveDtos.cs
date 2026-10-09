@@ -7,31 +7,6 @@ namespace ExileApiMcp.Tools;
 // Every type keeps unknown fields in Extra ([JsonExtensionData]): a field the bridge adds later still arrives, and the
 // schema allows additional properties, so new data never needs a server release to pass through.
 
-/// <summary>Shared JSON options for the typed contracts: camelCase on the wire, nulls omitted, bridge casing tolerated.</summary>
-public static class Dto
-{
-    public static readonly JsonSerializerOptions Options = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        NumberHandling = JsonNumberHandling.AllowReadingFromString,
-        // Plain quotes and non-ASCII in payloads (the default escapes them as XXXX: bigger and harder to read).
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
-    /// <summary>A bridge reply (Newtonsoft) as a typed contract; a bridge error object becomes a tool error naming it.</summary>
-    public static T From<T>(Newtonsoft.Json.Linq.JToken token) => token["error"] is { } err && token["ok"] == null
-        ? throw new ModelContextProtocol.McpException($"bridge: {err}: {token["message"]}")
-        : Parse<T>(token);
-
-    private static T Parse<T>(Newtonsoft.Json.Linq.JToken token) =>
-        JsonSerializer.Deserialize<T>(token.ToString(Newtonsoft.Json.Formatting.None), Options)
-        ?? throw new ModelContextProtocol.McpException($"The bridge returned no {typeof(T).Name}.");
-
-    public static JsonElement Element<T>(T value) => JsonSerializer.SerializeToElement(value, Options);
-}
-
 /// <summary>One observer event. Fields per kind are typed; anything else is in Extra.</summary>
 public sealed class ObserveEvent
 {
