@@ -82,6 +82,26 @@
       "check": { "kind": "code", "path": "GameController.IngameState.ServerData.PlayerStashTabs[0]", "offset": 61, "bit": 5, "expectAll": ["0x3d) & 0x20"] }
     },
     {
+      "id": "ui.poe2.area-banner",
+      "title": "PoE2: the 'Entering <area>' banner is a top-level IngameUi child the HUD doesn't map (no IngameUIElements property)",
+      "subject": "IngameUi.Children",
+      "games": {
+        "poe1": { "status": "unverified" },
+        "poe2": { "status": "unverified", "note": "Seen once by passive observation (2026-10-08): child [94] opened on entering Clearfell Encampment, text '<outlinecolour:argb(128,0,0,0)>{Entering Clearfell Encampment}'. Index may shift between patches: identify it by the text. Confirm with more area changes" }
+      },
+      "check": { "kind": "manual", "how": "observe action=start, change area, then observe_events kinds=[ui]: an unmapped panel opening right after the area event whose texts start with the area-entry markup." }
+    },
+    {
+      "id": "ui.poe2.quest-complete-notice",
+      "title": "PoE2: the 'Quest Complete' notice is a top-level IngameUi child the HUD doesn't map (QuestRewardWindow is a different panel)",
+      "subject": "IngameUi.Children",
+      "games": {
+        "poe1": { "status": "unverified" },
+        "poe2": { "status": "unverified", "note": "Seen once by passive observation (2026-10-08): child [43] opened with text 'Quest Complete' while QuestRewardWindow [63] was open after an NPC dialog in Clearfell Encampment, and closed afterwards. Identify by text; confirm on the next quest turn-in" }
+      },
+      "check": { "kind": "manual", "how": "observe action=start, turn in a quest, then observe_events kinds=[ui]: an unmapped panel with text 'Quest Complete' alongside QuestRewardWindow." }
+    },
+    {
       "id": "stash.flags.public",
       "title": "Stash tab Flags bit 3 = Public (the Edit Stash Tab dialog's only checkbox: the tab is listed for trade)",
       "subject": "ServerStashTab",
