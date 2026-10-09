@@ -89,12 +89,18 @@ public static class ObserveTools
     private static CallToolResult Summarise(JToken r)
     {
         var sb = new StringBuilder();
-        foreach (var e in (r["events"] as JArray ?? []).OfType<JObject>())
+        var events = (r["events"] as JArray ?? []).OfType<JObject>().ToList();
+        // New entity kinds come in bursts (a town lists dozens of NPC variants): one line per area, not one per kind.
+        foreach (var g in events.Where(e => e["kind"]?.ToString() == "entity").GroupBy(e => e["area"]?.ToString() ?? "?"))
+            sb.AppendLine($"#{g.First()["seq"]}..#{g.Last()["seq"]} {g.Count()} new entity kind(s) in {g.Key}: " +
+                          string.Join(", ", g.Take(8).Select(e => e["type"]!.ToString().Replace("Metadata/", ""))) + (g.Count() > 8 ? ", ..." : ""));
+        foreach (var e in events.Where(e => e["kind"]?.ToString() != "entity"))
         {
             var kind = e["kind"]?.ToString();
+            var mapped = e["mapped"]?.Type is null or JTokenType.Null ? "UNMAPPED" : e["mapped"]!.ToString();
             sb.AppendLine(kind switch
             {
-                "ui" => $"#{e["seq"]} ui [{e["index"]}] {(e["visible"]?.Value<bool>() == true ? "opened" : "closed")} {e["mapped"]?.ToString() ?? "UNMAPPED"}" +
+                "ui" => $"#{e["seq"]} ui [{e["index"]}] {(e["visible"]?.Value<bool>() == true ? "opened" : "closed")} {mapped}" +
                         (e["firstSeen"]?.Value<bool>() == true ? " (first time)" : "") +
                         (e["texts"] is JArray t && t.Count > 0 ? $" texts: {string.Join(" | ", t.Take(4))}" : ""),
                 "area" => $"#{e["seq"]} area {e["from"]} -> {e["to"]}",
