@@ -16,6 +16,15 @@ How an agent asks a developer for help with a guided experiment: when to ask, ho
   - Collect with `experiment_queue_status`. It diffs finished steps into the experiment record, so `experiment_summary` works as usual.
   - Cancel what you no longer need (`experiment_queue_cancel`).
 - Queue the action and its undo as separate labels, or use repeats on a toggle: each repeat starts from the state the last one left.
+- **Continue by yourself:** right after queuing, start `experiment_queue_wait experiment=<name>` where it can block without holding the conversation.
+  - In Claude Code, run `tools\mcp-call.ps1 experiment_queue_wait experiment=<name> -TimeoutSec 3700` as a background task. Its completion wakes you with the collected results.
+  - Then report and go on; the user should not have to come back and say "done".
+  - On `waiting:true` (timeout), start it again.
+- **A series:** queue the first step plain and the rest with `chain=true`. One Start press then runs them one after another, each starting as soon as the previous one is captured.
+- **Pitfall: the action done before Start.** Users read a queued instruction as "do it now". If the action happens before Start, it is already in the baseline: that step records nothing, the user's next action lands under its label, and every chained step after it shifts by one.
+  - Word the first step "Press Start first, then ...".
+  - For one-way actions (a page that loads once), watch every candidate in each step, so a shifted capture still shows what really changed.
+  - Check results against the content (items, names), not only the label.
 
 ## Phrasing an instruction (the in-game card)
 One action, imperative, about 70 characters, with the key and the mouse target. The card shows it large; longer text wraps and loses the glance.
