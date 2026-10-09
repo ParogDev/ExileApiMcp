@@ -26,11 +26,12 @@ public static class PipelineTraceTools
     public static async Task<CallToolResult> PipelineTrace(BridgeRegistry bridges,
         [Description("Trace length in ms (500-20000, default 4000)")] int durationMs = 4000,
         [Description("How many of the nearest players to watch (0-32, default 8)")] int entities = 8,
+        [Description("Also return per-frame arrays (series: tMs, intervalMs, workMs, pluginsMs, gcPauseMs) for timelines; adds ~5 KB per second traced")] bool series = false,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 20_000);
-        var (bridge, started) = await bridges.CallAsync(game, "pipeline.trace", new JObject { ["durationMs"] = durationMs, ["entities"] = entities }, ct);
+        var (bridge, started) = await bridges.CallAsync(game, "pipeline.trace", new JObject { ["durationMs"] = durationMs, ["entities"] = entities, ["series"] = series }, ct);
         var id = started["id"]?.Value<string>();
         if (id == null) return ToolResults.Json(started);   // instrumentation_disabled / busy / harmony_unavailable
         var g = bridge.Game == "auto" ? game : bridge.Game;
