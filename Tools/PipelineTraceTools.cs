@@ -162,17 +162,19 @@ public static class PipelineTraceTools
         API calls a method makes count as its own time. Find the hot method first with pipeline_trace (pluginTickMs /
         pluginRenderMs), then profile that plugin. Needs the bridge setting 'Allow HUD Instrumentation'.
         Example result: Whats An Azmeri Wisp's Tick at 2.9 ms per frame -> a 20 Hz filtered scan, 33x less CPU.
+        bridge_self_perf names the bridge step that costs; profile_plugin name="Whats An AI Bridge" method=<step> finds the method.
         """)]
     public static async Task<CallToolResult> ProfilePlugin(BridgeRegistry bridges,
         [Description("Plugin name as the HUD lists it (hud_plugins), e.g. 'Whats An Azmeri Wisp' (or empty with assembly)")] string name = "",
         [Description("Instead of a plugin: a loaded HUD assembly to profile part of, e.g. ExileCore (PoE1; PoE2's ExileCore2 is obfuscated and refuses patching)")] string? assembly = null,
-        [Description("With assembly: type full-name substring to profile (required), e.g. EntityListWrapper")] string? filter = null,
+        [Description("Type full-name substring to profile: required with assembly, optional for a plugin, e.g. EntityListWrapper")] string? filter = null,
+        [Description("Method name substring to profile, e.g. Draw or Stats. Profiling the bridge itself (Whats An AI Bridge) needs method or filter; its profiler and trace code is never patched")] string? method = null,
         [Description("Profile length in ms (500-20000, default 4000)")] int durationMs = 4000,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 20_000);
-        var (bridge, started) = await bridges.CallAsync(game, "profile.plugin", new JObject { ["name"] = name, ["durationMs"] = durationMs, ["assembly"] = assembly, ["filter"] = filter }, ct);
+        var (bridge, started) = await bridges.CallAsync(game, "profile.plugin", new JObject { ["name"] = name, ["durationMs"] = durationMs, ["assembly"] = assembly, ["filter"] = filter, ["method"] = method }, ct);
         var id = started["id"]?.Value<string>();
         if (id == null) return ToolResults.Json(started);
         var g = bridge.Game == "auto" ? game : bridge.Game;

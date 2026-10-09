@@ -25,6 +25,7 @@ Measured on PoE2 (ExileCore2), 2026-10-09, in town with ~600 entities loaded, wi
 | Call | allocates | Instead |
 |---|---|---|
 | `Element.IsVisibleLocal` (first per element per frame) | ~3.6 KB (the HUD caches the whole element struct) | read the flag bit: PoE1 `Flags` +0x1E8, PoE2 +0x168, bit 11 (calibrate by matching `IsVisibleLocal`) |
+| `Stats.StatDictionary` (first read per frame; cached within the frame) | ~110 B per stat: 36-44 KB and ~58 us for a player with 317 stats (PoE2) | read at 4 Hz or less and keep your own snapshot; compare it before rebuilding anything derived (the bridge returns the same list when no stat changed) |
 | `Memory.Read<T>` on an address whose 4 KB page isn't cached this frame | ~3 KB (a page is rented, and most end up as garbage) | for scattered small reads, read from the leaf backend into a stack buffer (bridge `RawRead<T>`) |
 | `Entity.Path.Split(...)`, string building per entity per frame | per entity | cache by path: string work once per path |
 
