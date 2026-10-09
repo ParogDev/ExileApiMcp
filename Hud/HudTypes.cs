@@ -76,6 +76,17 @@ public sealed class HudTypes
 
     public IEnumerable<Type> AllTypes() => Assemblies.SelectMany(SafeTypes);
 
+    private ConcurrentDictionary<string, Type?>? _byName;
+
+    /// <summary>A type by full name ('Ns.Type', nested 'Ns.Outer+Inner') in the HUD's assemblies or the runtime.</summary>
+    public Type? FindType(string fullName) => (_byName ??= new()).GetOrAdd(fullName, n =>
+    {
+        foreach (var a in Assemblies) { try { if (a.GetType(n) is { } t) return t; } catch { } }
+        try { if (_mlc.CoreAssembly?.GetType(n) is { } core) return core; } catch { }
+        foreach (var a in _mlc.GetAssemblies()) { try { if (a.GetType(n) is { } t) return t; } catch { } }
+        return null;
+    });
+
     public static IEnumerable<Type> SafeTypes(Assembly a)
     {
         try { return a.GetTypes(); }

@@ -46,6 +46,7 @@ public static class MemoryTools
         var (bridge, result) = await Call(bridges, game, "memory.layout", p, ct);
         if (result["error"] != null) return ToolResults.Json(result);
         result["game"] = bridge.Game;
+        LabelWithHudProperties(bridges, bridge.Game, result);
         return Result(LayoutOutline(result), result);
     }
 
@@ -250,6 +251,26 @@ public static class MemoryTools
         StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(full.ToString(Formatting.None)),
     };
 
+    /// <summary>Add to each field the HUD properties whose getters read it (hud_property_map, from IL). Best effort.</summary>
+    private static void LabelWithHudProperties(BridgeRegistry bridges, string game, JObject r)
+    {
+        try
+        {
+            var structName = r["struct"]?.ToString();
+            if (structName == null) return;
+            var hud = HudDevTools.Installs(bridges, game).FirstOrDefault();
+            if (hud == null) return;
+            var byOffset = Hud.PropertyMap.For(Hud.HudTypes.For(hud))
+                .Where(e => e.Struct == structName && e.Offset != null && e.FieldPath != "(whole struct)")
+                .GroupBy(e => e.Offset!.Value)
+                .ToDictionary(g => g.Key, g => g.Select(e => $"{e.Type}.{e.Property}").Distinct().ToList());
+            foreach (var f in (r["fields"] as JArray ?? []).OfType<JObject>())
+                if (f["off"]?.Value<int>() is { } off && byOffset.TryGetValue(off, out var props))
+                    f["hud"] = new JArray(props.Take(6));
+        }
+        catch { }
+    }
+
     internal static string LayoutOutline(JObject r)
     {
         var sb = new StringBuilder();
@@ -265,6 +286,7 @@ public static class MemoryTools
             if (f["ghidra"] != null) line.Append("  ghidra ").Append(f["ghidra"]);
             var check = f["check"]?.ToString();
             if (check is not ("ok" or null)) line.Append("  !").Append(check).Append(f["why"] != null ? $": {f["why"]}" : "");
+            if (f["hud"] is JArray hudProps && hudProps.Count > 0) line.Append("  [HUD: ").Append(string.Join(", ", hudProps)).Append(']');
             rows.Add((f["off"]!.Value<int>(), line.ToString()));
         }
         foreach (var g in (r["gaps"] as JArray ?? []).OfType<JObject>())
