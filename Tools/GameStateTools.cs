@@ -140,6 +140,19 @@ public static class BridgeTools
                 if (FindingsTools.ToCheck(b.Game) is { Count: > 0 } pending)
                     entry["findingsToCheck"] = $"{pending.Count} finding(s) verified on another game but not on {b.Game}: {string.Join(", ", pending)}. " +
                                                "Run verify_finding before relying on them (findings lists all).";
+                // A HUD update changes the API under our code: say so the first time anyone looks (fail at the broken link).
+                try
+                {
+                    if (HudDevTools.Installs(bridges, b.Game).FirstOrDefault() is { } hud)
+                    {
+                        var (build, _, created) = Hud.ApiSnapshot.Ensure(hud);
+                        var snaps = Hud.ApiSnapshot.List(b.Game);
+                        if (snaps.Count >= 2 && snaps[^1].build == build && (created || (DateTime.UtcNow - snaps[^1].at).TotalDays < 3))
+                            entry["hudApiChanged"] = $"HUD build {build} differs from the previous one ({snaps[^2].build}): run hud_api_diff game={b.Game} " +
+                                                     "to see removed/renamed members and moved offsets, and which of our files use them.";
+                    }
+                }
+                catch { }
             }
             catch (BridgeException ex)
             {
