@@ -6,6 +6,7 @@ PoE1's `GameOffsets.dll` is genuine. For example, `StatsComponentOffsets.SubStat
 
 ## Runtime truth (2026-10-09)
 The decoys are in the **metadata on disk** (what `hud_type` and MetadataLoadContext read). Inside the running HUD the CLR uses the real layout, and reflection there returns the real `[FieldOffset]`. `hud_runtime_layout` measures every field of a struct at runtime (sentinel bytes in a boxed instance), and with `path=` maps each property of the live object to its field and offset and checks it against fresh memory. Verified on PoE2: ServerStashTabOffsets (Flags +0x3D, TabType +0x34, Color +0x2C), Positioned (GridPosition +0x444, WorldPosition +0x490), Render t13978 (Pos +0x138, Bounds +0x144), Life t44615 (Max/Current: life +0x1DC/+0x1E0, mana +0x234/+0x238, ES +0x274/+0x278), Camera t32679 (Width +0x270, matrix +0x100). Use it before the Ghidra route below.
+UI elements: the visibility flag (`IsVisibleLocal`) is bit 11 of the element's flags word at **+0x168** on PoE2 (PoE1: +0x1E8), found 2026-10-09 by matching `IsVisibleLocal` on all 124 children of IngameUi (one unique match).
 
 ## What to do instead
 1. **Use the HUD's managed API, not raw offsets.** ExileCore2 itself reads the real layout, so `GetComponent<Stats>()`, `Entity.Stats` and the like are correct even when the published struct isn't.
