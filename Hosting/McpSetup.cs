@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.45.0";
+    public const string Version = "3.45.1";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -33,6 +33,7 @@ internal static class McpSetup
         ranges and structure-looking data in them. watch_memory finds the bytes and bits that change when the user does
         something. Their 'ghidra' addresses go straight to the ghidra MCP (vtable -> xrefs -> constructor). Knowledge
         pack shared/memory-mapping has the method. show_memory_view opens it for the user. Read-only.
+        Not sure which tool fits? Knowledge pack shared/tool-map maps questions to tools.
         "Why is the HUD slow / laggy / not drawing?": start with hud_health_report (one call, ends with the next step).
         Overlay accuracy and HUD performance (a drawing that lags or wobbles, a plugin that costs frame time): pipeline_trace,
         profile_plugin, overlay_accuracy, render_lab; method and measured findings in knowledge pack shared/render-fidelity.
