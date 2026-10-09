@@ -231,6 +231,16 @@
         "poe2": { "status": "verified", "date": "2026-10-08", "where": "Life (t44615) groups at +448 / +536 / +600", "evidence": "memory_layout: each vitals group (Life 356, Mana 175, ES 22) follows a vtable (+424 read by the HUD as f46204, +512, +576) and a pointer back to the Life component at +0 (+440, +592), as on PoE1. Constructor not decompiled on PoE2" }
       },
       "check": { "kind": "manual", "how": "memory_layout path=GameController.Player.GetComponent<Life>(): look for 'vtable' followed by 'self' candidates just before each Health/Mana/EnergyShield field group. Confirm via the vtable at +0 -> Ghidra get_xrefs_to -> decompile the constructor." }
+    },
+    {
+      "id": "stats.raw-vectors",
+      "title": "Player stats live as (GameStat id: int32, value: int32) pairs in two std::vectors behind the Stats component; overlapping ids take the main vector's value",
+      "subject": "Stats (StatsComponentOffsets)",
+      "games": {
+        "poe1": { "status": "unverified" },
+        "poe2": { "status": "verified", "date": "2026-10-09", "where": "Stats +0x160 (SubStatsPtr) -> +0xF8 begin / +0x100 end: main, 46 pairs; Stats +0x1C8 (SubStats2Ptr) -> +0xF8 / +0x100: secondary, 292 pairs", "evidence": "run_csharp: StatDictionary 317 stats = union of both; 21 ids are in both and the dictionary holds the main value (e.g. id 100: secondary 9, main 13, dictionary 13). The bridge (StatsRaw.cs) finds the vectors by matching the dictionary and re-validates every 2 s: on, 318 of 364 dictionary reads skipped" }
+      },
+      "check": { "kind": "manual", "how": "bridge.self_perf: statsRawCheck.on = true with vectors = 2 (the bridge calibrates and validates this every 2 s; broken names the failing link). By hand: run_csharp, read Stats.Address + 0x160 and + 0x1C8, then (begin, end) at +0xF8 of each, and compare the int pairs with Stats.StatDictionary." }
     }
   ]
 }
