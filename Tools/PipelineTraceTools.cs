@@ -147,6 +147,48 @@ public static class PipelineTraceTools
         return ToolResults.Json(r);
     }
 
+    [McpServerTool(Name = "profile_plugin", Title = "Where a plugin's frame time goes", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("""
+        Method-level profile of one HUD plugin for a few seconds: Harmony wraps every method in its assembly (never
+        protected stubs), keeps a per-thread call stack, and reports per method calls, self and inclusive time
+        (ms per second of wall time, and us per call), then unpatches. Self = inclusive minus profiled callees, so HUD
+        API calls a method makes count as its own time. Find the hot method first with pipeline_trace (pluginTickMs /
+        pluginRenderMs), then profile that plugin. Needs the bridge setting 'Allow HUD Instrumentation'.
+        Example result: Whats An Azmeri Wisp's Tick at 2.9 ms per frame -> a 20 Hz filtered scan, 33x less CPU.
+        """)]
+    public static async Task<CallToolResult> ProfilePlugin(BridgeRegistry bridges,
+        [Description("Plugin name as the HUD lists it (hud_plugins), e.g. 'Whats An Azmeri Wisp'")] string name,
+        [Description("Profile length in ms (500-20000, default 4000)")] int durationMs = 4000,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        durationMs = Math.Clamp(durationMs, 500, 20_000);
+        var (bridge, started) = await bridges.CallAsync(game, "profile.plugin", new JObject { ["name"] = name, ["durationMs"] = durationMs }, ct);
+        var id = started["id"]?.Value<string>();
+        if (id == null) return ToolResults.Json(started);
+        var g = bridge.Game == "auto" ? game : bridge.Game;
+        await Task.Delay(durationMs + 1000, ct);   // + patching time
+        JToken r = started;
+        for (var i = 0; i < 60 && r["status"]?.Value<string>() != "done"; i++)
+        {
+            try { (_, r) = await bridges.CallAsync(g, "profile.result", new JObject { ["id"] = id }, ct); }
+            catch (McpException) { }
+            if (r["status"]?.Value<string>() != "done") await Task.Delay(500, ct);
+        }
+        if (r["status"]?.Value<string>() != "done") return ToolResults.Json(r);
+        var sb = new StringBuilder();
+        sb.AppendLine($"{r["plugin"]}: {r["methodsPatched"]} methods for {r["durationMs"]} ms, {r["calls"]} calls, {r["selfTotalMsPerSecond"]} ms of CPU per second in its code");
+        sb.AppendLine("self ms/s | incl ms/s | us/call | calls | method");
+        foreach (var m in r["top"] as JArray ?? [])
+            sb.AppendLine($"{m["selfMsPerSecond"],9} | {m["inclMsPerSecond"],9} | {m["selfUsPerCall"],7} | {m["calls"],5} | {m["method"]}");
+        if (r["refused"] is JArray { Count: > 0 } refused) sb.AppendLine("Not profiled: " + string.Join("; ", refused));
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
+            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(r.ToString(Newtonsoft.Json.Formatting.None)),
+        };
+    }
+
     private static string Summary(JToken r)
     {
         if (r["status"]?.Value<string>() != "done") return r.ToString(Newtonsoft.Json.Formatting.None);
