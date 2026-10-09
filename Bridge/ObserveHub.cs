@@ -12,21 +12,23 @@ namespace ExileApiMcp.Bridge;
 ///   exile://observe/{game}/layers/{layer}       an event of that layer (its map changed)
 /// No per-client state: listeners are the open listen requests; the cursor is the bridge's own sequence number.
 /// </summary>
-public sealed class ObserveHub(BridgeRegistry bridges)
+public sealed class ObserveHub(BridgeRegistry bridges) : IResourceHub
 {
     public const string Prefix = "exile://observe/";
     private readonly ConcurrentDictionary<long, (HashSet<string> uris, Action<string> signal)> _listeners = new();
     private readonly ConcurrentDictionary<string, Task> _pumps = new();
     private long _nextId;
 
-    public static bool Handles(string uri) => uri.StartsWith(Prefix, StringComparison.Ordinal) && GameOf(uri) is "poe1" or "poe2";
+    public bool Handles(string uri) => IsObserveUri(uri);
+
+    public static bool IsObserveUri(string uri) => uri.StartsWith(Prefix, StringComparison.Ordinal) && GameOf(uri) is "poe1" or "poe2";
 
     private static string? GameOf(string uri) => uri.Length > Prefix.Length ? uri[Prefix.Length..].Split('/')[0] : null;
 
     /// <summary>Signal calls for each listened URI that changed, until the returned handle is disposed.</summary>
     public IDisposable Listen(IEnumerable<string> uris, Action<string> signal)
     {
-        var set = uris.Where(Handles).ToHashSet(StringComparer.Ordinal);
+        var set = uris.Where(IsObserveUri).ToHashSet(StringComparer.Ordinal);
         var id = Interlocked.Increment(ref _nextId);
         _listeners[id] = (set, signal);
         foreach (var game in set.Select(GameOf).OfType<string>().Distinct())

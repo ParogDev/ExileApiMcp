@@ -34,6 +34,9 @@ export class FakePerf {
   traceMs = 3500;
   /** How long a profile_plugin run takes (the real one is ~4.8 s). */
   profileMs = 1800;
+  /** perf_watch: how long until the "server" has the next report (the real cadence is 15 s). */
+  watchMs = 4000;
+  private watchSeq = 0;
   log: CallLogEntry[] = [];
   onChange?: () => void;
   private refreshes = 0;
@@ -46,9 +49,10 @@ export class FakePerf {
       if (name === "show_hud_performance") await sleep(this.latencyMs + jitter + (this.scenario === "offline" || this.scenario === "instrumentation-off" ? 0 : this.traceMs));
       else if (name === "profile_plugin") await sleep(this.latencyMs + jitter + this.profileMs);
       else if (name === "overlay_accuracy") await sleep(this.latencyMs + jitter + 2500);
+      else if (name === "perf_watch") await sleep(this.latencyMs + jitter + (Number(args.since ?? 0) >= this.watchSeq && this.watchSeq > 0 ? this.watchMs : 0));
       else await sleep(this.latencyMs + jitter);
       // The health report never throws for an unreachable bridge: it returns the desktop line and "Trace: bridge unreachable".
-      if (name !== "show_hud_performance" && (this.scenario === "offline" || (this.scenario === "flaky" && Math.random() < 0.3))) {
+      if (name !== "show_hud_performance" && name !== "perf_watch" && (this.scenario === "offline" || (this.scenario === "flaky" && Math.random() < 0.3))) {
         throw new Error(UNREACHABLE);
       }
       const result = this.dispatch(name, args);
@@ -69,6 +73,7 @@ export class FakePerf {
   private dispatch(name: string, a: Record<string, unknown>): CallToolResult {
     switch (name) {
       case "show_hud_performance": return this.report();
+      case "perf_watch": return this.watch();
       case "profile_plugin": return this.profile(String(a.name ?? ""));
       case "hud_plugin_lint": return this.lint(String(a.plugin ?? ""));
       case "overlay_accuracy": return json(this.overlay());
@@ -89,6 +94,16 @@ export class FakePerf {
     const r: Report = this.scenario === "fps200" ? synthFps200(this.refreshes) : this.scenario === "clean" ? synthClean(this.refreshes) : perturb(BASE, this.refreshes);
     r.desktop = desktop;
     return json(r as unknown as Record<string, unknown>, `${screen}\nFrames: ${r.trace!.hudFps} fps ...`);
+  }
+
+  /** perf_watch: the next report wrapped as a PerfSnapshot (the server re-traces on its cadence while watched). */
+  private watch(): CallToolResult {
+    const r = this.report();
+    const report = r.structuredContent as Record<string, unknown> | undefined;
+    const snap = { game: "poe2", seq: ++this.watchSeq, at: new Date().toISOString(), fresh: true, intervalSec: 15, report };
+    const first = r.content?.[0];
+    const t = first && "text" in first ? String(first.text) : "";
+    return json(snap, `#${snap.seq} new\n${t}`);
   }
 
   // ── profile_plugin ─────────────────────────────────────────────────
