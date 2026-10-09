@@ -38,7 +38,7 @@ jobs:
         run: |
           npm ci --no-audit --no-fund --no-progress
           npm run build
-          for app in player-stats data-explorer memory-view hud-performance; do
+          for app in player-stats data-explorer memory-view hud-performance control-center; do
             if ! cmp -s "dist/$app.html" "../ui/$app.html"; then
               echo "::error file=ui/$app.html::Stale UI bundle: run ui-src/build.ps1 and commit ui/$app.html"
               exit 1

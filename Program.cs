@@ -60,6 +60,7 @@ static async Task RunHttpAsync(string[] args)
     app.UseLocalHttpSecurity(token);
     app.UseRateLimiter();
     app.MapMcp("/mcp");
+    app.MapControlCenter();
 
     Console.Error.WriteLine($"[ExileApiMcp] HTTP on http://127.0.0.1:{port}/mcp (bearer token: {LocalHttpSecurity.TokenFilePath})");
     await app.RunAsync();

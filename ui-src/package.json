@@ -9,8 +9,9 @@
     "build:explorer": "vite build --mode explorer",
     "build:memory": "vite build --mode memory",
     "build:perf": "vite build --mode perf",
+    "build:control": "vite build --mode control",
     "build:harness": "vite build --mode harness",
-    "build": "npm run typecheck && npm run build:app && npm run build:explorer && npm run build:memory && npm run build:perf && npm run build:harness",
+    "build": "npm run typecheck && npm run build:app && npm run build:explorer && npm run build:memory && npm run build:perf && npm run build:control && npm run build:harness",
     "preview": "vite preview --host 0.0.0.0 --port 5174 --strictPort"
   },
   "dependencies": {

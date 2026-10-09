@@ -7,7 +7,7 @@ Source for the interactive panels that ExileApiMcp serves as MCP Apps. The serve
 | Toolchain | Docker only. No Node or npm on Windows; `node_modules` lives in a named Docker volume |
 | Output | `../ui/player-stats.html` (`ui://exile/player-stats`), `../ui/data-explorer.html` (`ui://exile/data-explorer`), `../ui/memory-view.html` (`ui://exile/memory-view`) and `../ui/hud-performance.html` (`ui://exile/hud-performance`), all committed |
 
-Four apps share `src/styles.css`, `src/components.tsx` and `src/icons.tsx`:
+Five apps share `src/styles.css`, `src/components.tsx` and `src/icons.tsx`:
 
 | App | Entry | Source | Opened by |
 |---|---|---|---|
@@ -15,8 +15,9 @@ Four apps share `src/styles.css`, `src/components.tsx` and `src/icons.tsx`:
 | Data explorer | `data-explorer.html` → `src/explorer/main.tsx` | `src/explorer/*` | `show_data_explorer {path?, game?}` |
 | Memory view | `memory-view.html` → `src/memory/main.tsx` | `src/memory/*` | `show_memory_view {path?, address?, type?, mode?, preset?, experiment?, game?}` |
 | HUD performance | `hud-performance.html` → `src/perf/main.tsx` | `src/perf/*` | `show_hud_performance {game?}` |
+| Control center | `control-center.html` → `src/control/main.tsx` | `src/control/*` (the four apps above become its pages standalone) | `show_control_center` as an MCP App; standalone at `http://127.0.0.1:<port>/app#t=<token>` |
 
-`vite build` takes one input per run (single-file plugin), so `npm run build` runs it five times: default (stats), `--mode explorer`, `--mode memory`, `--mode perf`, `--mode harness`. Tailwind scans the whole source tree, so a class added to one app can change another app's CSS: rebuild and commit all bundles together.
+`vite build` takes one input per run (single-file plugin), so `npm run build` runs it six times: default (stats), `--mode explorer`, `--mode memory`, `--mode perf`, `--mode control`, `--mode harness`. Tailwind scans the whole source tree, so a class added to one app can change another app's CSS: rebuild and commit all bundles together.
 
 ## Commands
 
@@ -29,11 +30,11 @@ From the scaffolding root (Windows PowerShell 5.1):
 | npm without npm, e.g. add a pinned package | `... build.ps1 -Npm "install -E pkg@1.2.3"` |
 | Real host against the real server: ext-apps **basic-host** on http://localhost:8080 | start the server with `run.cmd --http`, then `... ui-src\basic-host.ps1` (`-Stop`, `-Rebuild`) |
 
-After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuilds on every start. **CI rebuilds the UI and fails if any of `ui/player-stats.html`, `ui/data-explorer.html`, `ui/memory-view.html` or `ui/hud-performance.html` doesn't match its source**, so commit the rebuilt files with the source change.
+After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuilds on every start. **CI rebuilds the UI and fails if any of `ui/player-stats.html`, `ui/data-explorer.html`, `ui/memory-view.html`, `ui/hud-performance.html` or `ui/control-center.html` doesn't match its source**, so commit the rebuilt files with the source change.
 
 ## Three ways to see the apps, fastest first
 
-1. **Dev harness** (`dist/harness.html`): a fake host plus a fake server per app. No game, HUD or server needed. Every state is reachable from the URL, so screenshots are deterministic. `app=stats` (default), `app=explorer`, `app=memory` or `app=perf` picks the app; `bare=1` renders only the app's iframe, filling the viewport (pixel-exact captures in a narrow browser pane).
+1. **Dev harness** (`dist/harness.html`): a fake host plus a fake server per app. No game, HUD or server needed. Every state is reachable from the URL, so screenshots are deterministic. `app=stats` (default), `app=explorer`, `app=memory`, `app=perf` or `app=control` picks the app; `bare=1` renders only the app's iframe, filling the viewport (pixel-exact captures in a narrow browser pane).
    ```
    /harness.html?app=stats&theme=dark&width=380&scenario=offline&latency=400&display=fullscreen&vars=none&simulate=0
    /harness.html?app=explorer&path=GameController.Player&theme=dark&width=380&scenario=flaky&bare=1
@@ -46,8 +47,12 @@ After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuil
    /harness.html?app=perf&scenario=display-off&trace=300        (the capture as taken; refreshes "trace" for 300 ms instead of 3.5 s)
    /harness.html?app=perf&scenario=fps200&display=fullscreen     (~600 frames at 200 fps)
    /harness.html?app=perf&scenario=clean                        (nothing stands out: the empty states)
+   /harness.html?app=control&theme=dark&width=380                (the MCP App inside a host: held calls and polling)
+   /harness.html?app=control&standalone=1&page=tools/observe_layers   (the page at /app: push, resources, the permission route)
+   /harness.html?app=control&standalone=1&scenario=push&page=observer (events every 400 ms, perf reports every 2 s)
+   /harness.html?app=control&standalone=1&scenario=no-hud&page=settings
    ```
-   - `scenario`: stats: `live`, `offline`, `not-in-game`, `empty`, `flaky` (30% errors plus jitter); explorer: `live`, `offline`, `flaky`; memory: those plus `ghidra-down` (every `find_field_access` fails like the real server does without the headless Ghidra); perf: `live`, `display-off`, `offline`, `instrumentation-off`, `flaky`, `fps200`, `clean`.
+   - `scenario`: stats: `live`, `offline`, `not-in-game`, `empty`, `flaky` (30% errors plus jitter); explorer: `live`, `offline`, `flaky`; memory: those plus `ghidra-down` (every `find_field_access` fails like the real server does without the headless Ghidra); perf: `live`, `display-off`, `offline`, `instrumentation-off`, `flaky`, `fps200`, `clean`; control: `live`, `offline` (the bridge files exist, the HUD does not answer), `no-hud` (no bridge running), `flaky`, `push` (events every 400 ms, perf reports every 2 s while watched).
    - `vars=none` drops the host style variables to test the app's own fallbacks.
    - `simulate=0` stops the simulated game (random vitals and stat changes; drifting Life values).
    - `path=` (explorer) is the `show_data_explorer` argument: where the tree opens. A bad path shows the error state.
@@ -189,6 +194,35 @@ Answers "why is my HUD slow or stuttering?" at a glance and leads to the next st
 - **Layout:** inline: banners, tiles, timeline, frame split + plugins, GC health, findings + next steps, results. Fullscreen: tiles, timeline and plugins on the left, GC, findings and results on the right (stacked below `sm`).
 - **Colours** (`styles.css`): frame = neutral, spike = amber, GC pause = magenta (the thing the panel points at), plugins = blue, HUD core = teal; both themes.
 - **Model context:** fps, interval stats, the verdict, GC numbers, the ArrayPool state, the costliest plugins, the findings and the latest done results, debounced and deduplicated.
+
+## How the control center works
+
+The place to see and drive everything the server offers when nobody is playing: every tool with a form, every plugin's settings, the observer, the HUD's health, and (standalone) the four apps above as pages. One app, two hosts: an MCP App inside Claude (`ui://exile/control-center`, opened by `show_control_center`) and the same single file served by the server at `/app`, which talks MCP over HTTP itself.
+
+| File | Role |
+|---|---|
+| `src/control/main.tsx` | Entry. A token in the URL hash (`#t=…`, from the launcher) or in `sessionStorage` means **standalone**: it keeps the token, strips it from the URL and talks to `location.origin` with `HttpMcp`. Otherwise a page inside an iframe is an **MCP App** (`useApp`, tool calls through the host, the catalog seeded from `ontoolresult`). A page on its own with no token shows where to get one |
+| `src/control/host.ts` | The one host interface every screen uses: `callTool`, and standalone-only `readResource`, `listen` (subscriptions) and `postSettings` (the permission route); `ask` / `updateModelContext` / `fullscreen` only inside a host |
+| `src/control/http.ts` | Standalone transport, the way `tools/mcp-call.ps1` does it: `POST /mcp` with the bearer token, `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method` / `Mcp-Name` headers, the 2026-07-28 `_meta` client info; the answer is JSON or the last `data:` event of an SSE response. `subscriptions/listen` is a held SSE stream (acknowledged, then `notifications/resources/updated {uri}`), reconnected with backoff 1 s → 30 s. `POST /app/api/settings` for permission settings |
+| `src/control/types.ts` | `hud_catalog`, `hud_settings` / `hud_settings_set`, the observer and perf shapes. **Mirrors `Tools/ControlDtos.cs`, `Tools/ObserveDtos.cs` and `Tools/PerfDtos.cs`; change both together** |
+| `src/control/schema.ts` | Pure: a tool's `inputSchema` → form fields (type, nullable, required, default, choices from `enum` or from a description like "list \| set \| remove", ranges from "(1-500, default 100)"), validation and the minimal arguments to send; an `outputSchema`'s property order and descriptions for the result view |
+| `src/control/store.ts` | `ControlStore`, framework-free: the catalog, which bridges are up (`bridge_status` every 20 s), the selected game, the health report (push or held `perf_watch`), the observer (status, events, layers, one layer map), settings per game with pending keys and the undo of the last change, the tool runs made from the Tools page, the route (`#/page/id` standalone), toasts |
+| `src/control/ControlCenter.tsx` | The shell: 44 px header (game badge, title, server version, HUD chips, the push / polling pill, Show me, theme and expand), a sidebar from `md` up and a strip of tabs below it, the page, toasts, the tour layer |
+| `src/control/pages/Overview.tsx` | HUD health (fps, spikes, GC with the frame strip; watch = push standalone, held `perf_watch` inside a host; Trace now), quick actions, the latest events, the server and its bridges |
+| `src/control/pages/Tools.tsx` | Search (`/`), families, the tool cards with their catalog icons and badges (read-only / writes / destructive / typed / app); a tool page with the form from the schema (`game` filled from the selected HUD), Call (a confirmation for destructive tools, Stop waiting for held calls), the result as Result (typed order, tables for arrays of objects) / Text / JSON, and the earlier calls to load or re-run. Resources (readable standalone, with their template parameters) and prompts under their own tabs |
+| `src/control/pages/Settings.tsx` | Every plugin as a card, groups as sections, the control per kind (toggle, range slider + number, text, list, colour with alpha, hotkey read-only, button), optimistic changes that flash when the HUD confirms, an 8 s undo bar, pulled n ago / Pull now, search. **Permission settings** (`permission: true`) never go through a tool: standalone they go through `host.postSettings` behind a confirmation that says what the permission allows; inside a host they are read-only with where to change them |
+| `src/control/pages/Observer.tsx` | Observation on/off with its counts, layers as specs (pause, remove, Map; add with id, path, mode, Hz, key; the preflight's broken link shown on the row), the layer map (units ranked by changes, mapped = blue, unmapped = hatched, unmapped-only filter) and the live events feed (kind filters, pause, entering animation) |
+| `src/control/pages/Embedded.tsx` | Standalone pages that are the existing apps: `PerfStore`, `MemoryStore`, `ExplorerStore` and `StatsStore` get the control center's tool caller; created on first visit and kept |
+| `src/control/tour/engine.tsx` | The **"Show me" tours**: a `TourProvider` with data-driven tours; each step targets an element by its `data-tour` id (`tour/ids.ts`), may run an action first (go to a page, type a search, click), and shows a spotlight that morphs between targets, a card (below / above the target; a bottom sheet under 560 px) with the message, progress dots and Back / Next / Done, and a bobbing pointer. Keyboard: Right / Enter, Left, Escape. Completed tours are remembered (`localStorage`) and marked in the menu |
+| `src/control/tour/tours.tsx` | The tours: *Around the control center*, *Try a tool*, *Add an observer layer*, *Change a setting safely*, *Read the performance timeline* |
+| `src/control/ui.tsx` | Primitives on the shared tokens: Button (quiet / primary ring-tinted / ghost / danger), Switch, Slider, Select, Segmented, Card, Badge, Stat, the catalog icon per theme, JsonView / JsonTable, Confirm, Show me |
+
+- **Calls:** `hud_catalog` once (or seeded by the host), `bridge_status` every 20 s, `observe action=status` + `observe_layers action=list` when the observer is needed, `observe_events {since}` every 2.5 s inside a host (standalone: the `exile://observe/{game}/events` and `/layers` subscriptions, re-read on each update), `perf_watch {since, timeoutSec: 25}` held open while watching inside a host (standalone: the `exile://perf/{game}/report` subscription), `hud_settings {game}` on Pull, `hud_settings_set {plugin, path, value, game}` per change, `observe_layers action=set|remove`, `observe_layer_map {layer, unmappedOnly}`.
+- **Push vs pull:** the header pill says how data arrives (Push with the last update, Connecting / Reconnecting, Held calls, Polling) and the settings page says when it was last pulled. Nothing polls while the page is hidden.
+- **Layout:** below `md` (48 rem) a tab strip under the header and single-column pages (the inline MCP App); from `md` a 12.5 rem sidebar; cards split into columns at `lg`. Standalone and fullscreen fill the window with the page scrolling inside.
+- **Motion:** page mount lift, rows rising with a stagger, event rows sliding in, the live dot breathing, the undo bar draining, switch knobs sliding, the tour spotlight morphing and its pointer bobbing; all off under `prefers-reduced-motion`.
+
+The **control** fake server (`dev/fakeControl.ts`) answers `hud_catalog` from the real capture (`dev/control/catalog.json`, 95 tools, 31 families), `bridge_status`, synthesised `hud_settings` / `hud_settings_set` (the bridge plugin's real settings class plus Health Bars, ReAgent and Ninja Pricer for the other kinds; permission and read-only settings refused like the server), the observer (40 seeded events, more while observing, layers with a preflight that fails for paths containing "Missing", a layer map), perf through `FakePerf`, and the explorer, memory and stats fakes behind their tools so the standalone pages work; any other tool answers with a sample built from its output schema. `standalone=1` renders the control center without an iframe over a host with `readResource`, `listen` (updates pushed on every event) and `postSettings`; `page=` opens a route. `harness.store` is the `ControlStore`; `harness.server.emit()` emits an event.
 
 ## Conventions
 
