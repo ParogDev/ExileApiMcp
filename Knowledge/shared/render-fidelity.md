@@ -35,7 +35,7 @@ How to find out why an overlay drawing (health bar, path, circle) doesn't sit on
 3. **Change one variable per run:** TargetFps, delayMs, a plugin setting. Compare bias (`lagPx.avg`) and jitter (`lagPx.sd`).
 
 ## Rules
-- **The overlay is invisible in captures while the display is off** (Windows idle timeout, `Win32_DesktopMonitor` Availability 8): the HUD runs normally but isn't composited. Check before debugging "nothing draws".
+- **The overlay is invisible in captures while the display is off** (Windows idle timeout): the HUD runs normally but isn't composited. `bridge_status` reports it under `desktop` (`displayLikelyOff`, `gameForeground`, with a warning). Check it before debugging "nothing draws".
 - **The HUD overlay only shows while the game is the foreground window.** Focus it before capturing. Background games also throttle their frame rate.
 - **Never move the character unless the user granted it for this session**, and then sparingly. Prefer `await_motion` and moments the user creates.
 - **Runtime changes to HUD settings** (TargetFps via `run_csharp`) are saved when the HUD closes. Put them back.
