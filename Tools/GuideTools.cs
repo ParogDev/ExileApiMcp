@@ -28,7 +28,9 @@ public static class GuideTools
         [Description("Step number")] int? step = null,
         [Description("Total steps")] int? steps = null,
         [Description("One extra line under the instruction")] string? detail = null,
-        [Description("Add this line to the guide's log")] string? log = null,
+        [Description("Add this line to the guide's log (shown as a toast that fades in 3 s)")] string? log = null,
+        [Description("The log line's kind, which sets its toast's colour and icon: agent (default) | step | result | warn | error")] string? logKind = null,
+        [Description("A 2-3 word toast title, e.g. 'Low life' (shown in caps); default: from the kind")] string? logTitle = null,
         [Description("Remove the instruction card")] bool clear = false,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
@@ -43,7 +45,12 @@ public static class GuideTools
         if (detail != null) set["detail"] = detail;
         JToken? state = null;
         if (set.Count > 0) state = (await bridges.CallAsync(game, "guide.set", set, ct)).Result;
-        if (log != null) await bridges.CallAsync(game, "guide.log", new JObject { ["text"] = log, ["kind"] = "agent" }, ct);
+        if (log != null)
+        {
+            var line = new JObject { ["text"] = log, ["kind"] = logKind is "step" or "result" or "warn" or "error" ? logKind : "agent" };
+            if (logTitle != null) line["title"] = logTitle;
+            await bridges.CallAsync(game, "guide.log", line, ct);
+        }
         state ??= (await bridges.CallAsync(game, "guide.state", null, ct)).Result;
         // After a change the bridge only acknowledges it ({ok, rev}); otherwise this is the full state.
         return set.Count > 0 ? TypedReply.Of<GuideAck>(state) : TypedReply.Of<GuideState>(state);
