@@ -137,9 +137,15 @@ public static class PipelineTraceTools
         [Description("Path to target on/off")] bool? path = null,
         [Description("'waypoint', 'transition', or an entity path substring")] string? target = null,
         [Description("Time alignment in ms (0-100)")] double? delayMs = null,
+        [Description("Instead of toggling: compare Radar-style and lab path drawing offline on this area's grid (simulated walk to target): backwards starts, jaggedness, line jumps")] bool compare = false,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
+        if (compare)
+        {
+            var (_, c) = await bridges.CallAsync(game, "lab.compare_paths", new JObject { ["target"] = target }, ct);
+            return ToolResults.Json(c);
+        }
         var p = new JObject();
         if (walls != null) p["walls"] = walls; if (path != null) p["path"] = path;
         if (target != null) p["target"] = target; if (delayMs != null) p["delayMs"] = delayMs;
