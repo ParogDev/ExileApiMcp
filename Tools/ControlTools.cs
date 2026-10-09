@@ -73,6 +73,57 @@ public static class ControlTools
         return Dto.Result(result, text);
     }
 
+    [McpServerTool(Name = "hud_settings", Title = "Settings of the HUD's plugins", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(SettingsResult), IconSource = IconSet.ServerLight)]
+    [Description("The settings of every loaded HUD plugin (or one), found by reflection: path, label, group, kind (toggle, range, " +
+                 "text, list, color, hotkey, button), value, limits or choices, and whether it is a permission setting or read-only. " +
+                 "Secrets (session ids, tokens, connection strings) are never shown. Change one with hud_settings_set.")]
+    public static async Task<CallToolResult> HudSettings(BridgeRegistry bridges,
+        [Description("Only this plugin (as the HUD lists it, e.g. Whats An AI Bridge)")] string? plugin = null,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var (_, r) = await bridges.CallAsync(game, "settings.describe", plugin == null ? new Newtonsoft.Json.Linq.JObject() : new() { ["plugin"] = plugin }, ct);
+        var result = Dto.From<SettingsResult>(r);
+        var sb = new System.Text.StringBuilder($"{result.Game}: {result.Plugins.Count} plugin(s)\n");
+        foreach (var p in result.Plugins)
+        {
+            sb.AppendLine($"{p.Plugin}{(p.Enabled ? "" : " (disabled)")}: {p.Settings.Count} settings");
+            foreach (var g in p.Settings.GroupBy(s => s.Group ?? ""))
+                sb.AppendLine($"  {(g.Key.Length > 0 ? g.Key + ": " : "")}{string.Join(", ", g.Select(s => $"{s.Label} = {s.Value?.ToString() ?? "-"}{(s.Permission ? " [permission]" : "")}"))}");
+        }
+        return Dto.Result(result, sb.ToString());
+    }
+
+    [McpServerTool(Name = "hud_settings_set", Title = "Change a HUD plugin setting", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(SettingChangeResult), IconSource = IconSet.ServerLight)]
+    [Description("Change one setting of a loaded HUD plugin (path and kinds from hud_settings): toggles take true/false, ranges a " +
+                 "number within their limits, lists one of their choices, colours #RRGGBB(AA), text a string. The HUD saves it on " +
+                 "exit like a menu change. Permission settings (Allow C# Scripts, Allow HUD Instrumentation, Allow Plugin Reload) " +
+                 "can't be changed here: the user changes them in game or in the control center. Hotkeys are set in game.")]
+    public static async Task<CallToolResult> HudSettingsSet(BridgeRegistry bridges,
+        [Description("Plugin as the HUD lists it")] string plugin,
+        [Description("Setting path from hud_settings (e.g. ShowAgentGuide, Section.Child)")] string path,
+        [Description("New value: true/false, a number, a choice, #RRGGBB(AA) or text")] JsonElement value,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var v = Newtonsoft.Json.Linq.JToken.Parse(value.GetRawText());
+        var (_, r) = await bridges.CallAsync(game, "settings.set", new Newtonsoft.Json.Linq.JObject { ["plugin"] = plugin, ["path"] = path, ["value"] = v }, ct);
+        var result = Dto.From<SettingChangeResult>(r);
+        return Dto.Result(result, $"{result.Plugin}: {result.Setting.Label} {result.Previous?.ToString() ?? "-"} -> {result.Setting.Value?.ToString() ?? "-"}");
+    }
+
+    [McpServerTool(Name = "show_control_center", Title = "Open the Hexile control center", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(CatalogResult), IconSource = IconSet.ServerLight)]
+    [ModelContextProtocol.Extensions.Apps.McpAppUi(ResourceUri = Apps.ControlCenterApp.ResourceUri)]
+    [McpMeta("ui/resourceUri", Apps.ControlCenterApp.ResourceUri)]
+    [Description("Open the Hexile control center (clients that support MCP Apps): every tool with a form to try it, the HUD " +
+                 "plugins' settings, observer layers and live views. Outside Claude it runs standalone at /app on this server " +
+                 "(tools\\control-center.ps1 opens it). Other clients get the catalog, as hud_catalog.")]
+    public static CallToolResult ShowControlCenter(IOptions<McpServerOptions> options, BridgeRegistry bridges, IEnumerable<IResourceHub> hubs)
+        => HudCatalog(options, bridges, hubs);
+
     /// <summary>The tool's family: the class declaring it (ObserveTools -> Observe).</summary>
     private static string FamilyOf(McpServerTool t) => Families.Value.TryGetValue(t.ProtocolTool.Name, out var f) ? f : "Other";
 

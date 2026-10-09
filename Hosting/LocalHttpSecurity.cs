@@ -11,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 ///   1. Kestrel binds 127.0.0.1 only (see Program).
 ///   2. Host header allowlist (localhost / 127.0.0.1 / [::1]) - blocks DNS-rebinding. -> 421
 ///   3. Origin, when present, must be a loopback origin (spec: servers MUST validate Origin). -> 403
-///   4. Bearer token on every request, constant-time compare. -> 401
+///   4. Bearer token on every request (except GET /app, the control center page, which holds none), constant-time compare. -> 401
 ///      Token: MCP_HTTP_TOKEN env var, else %LOCALAPPDATA%\ExileApiMcp\http-token.txt (created with
 ///      a random value on first run; only your account can read your LocalAppData). Loopback is
 ///      reachable by every local account, so this token - not the bind address - is the boundary.
@@ -62,6 +62,9 @@ internal static class LocalHttpSecurity
                 ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
                 return;
             }
+
+            // The control center page carries no secret (its token comes in the URL fragment): served without one.
+            if (ControlCenterRoutes.IsPublicPage(ctx.Request)) { await next(); return; }
 
             var auth = Encoding.UTF8.GetBytes(ctx.Request.Headers.Authorization.ToString());
             if (!CryptographicOperations.FixedTimeEquals(auth, expected))
