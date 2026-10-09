@@ -21,10 +21,19 @@ Measured on PoE2 (ExileCore2), 2026-10-09, in town with ~600 entities loaded, wi
 
 **Worked example.** Whats An Azmeri Wisp read `DistancePlayer` on every entity (~550) in two passes: 550 x 2.9 µs x 2 ≈ 3.2 ms per frame, which matched the profile (2.9 ms). After filtering on `Path`/`Type` first and scanning at 20 Hz it was 33x cheaper.
 
+## UI elements (first per element per frame, PoE2, worker thread, 5-run medians)
+| Call | cost | Cheaper equivalent |
+|---|---|---|
+| `Element.GetClientRect()` | **13-32 us, 2.6-4.3 KB** | `Element.GetClientRectCache`: the HUD's 200 ms `TimeCache` of the same rect (0.3 us, no allocation; both games). Use it for UI that doesn't move (skill bar, stash and inventory slots); call `GetClientRect()` once per element per frame only for UI that moves |
+| `Element.IsVisible` | 8 us, 3.3 KB on a skill-bar slot (depth 6); 2.6 us, 113 B on a top-level panel | it walks the parents: check at 10 Hz (visibility rarely matters within 100 ms), or `IsVisibleLocal` on the element and `IsVisible` on the shared parent once per frame (exact when they share a parent) |
+| `Element.IsVisibleLocal` | 4.6 us, 2.7 KB | the flag bit (below) |
+
+**Worked example (UI).** Skill DPS checks `IsVisible` on each of ~5 skill slots every frame: 2.7 ms of CPU and 0.76 MB of garbage per second for a label that changes once a second (`research/patches/skilldps-visibility-10hz.patch`).
+
 ## Allocation (garbage = GC pauses; research/hud-gc.md)
 | Call | allocates | Instead |
 |---|---|---|
-| `Element.IsVisibleLocal` (first per element per frame) | ~3.6 KB (the HUD caches the whole element struct) | read the flag bit: PoE1 `Flags` +0x1E8, PoE2 +0x168, bit 11 (calibrate by matching `IsVisibleLocal`) |
+| `Element.IsVisibleLocal` (first per element per frame) | ~2.7-3.6 KB (the HUD caches the whole element struct) | read the flag bit: PoE1 `Flags` +0x1E8, PoE2 +0x168, bit 11 (calibrate by matching `IsVisibleLocal`) |
 | `Stats.StatDictionary` (first read per frame; cached within the frame) | ~110 B per stat: 36-44 KB and ~58 us for a player with 317 stats (PoE2) | read at 4 Hz or less and keep your own snapshot; compare it before rebuilding anything derived (the bridge returns the same list when no stat changed) |
 | `Memory.Read<T>` on an address whose 4 KB page isn't cached this frame | ~3 KB (a page is rented, and most end up as garbage) | for scattered small reads, read from the leaf backend into a stack buffer (bridge `RawRead<T>`) |
 | `Entity.Path.Split(...)`, string building per entity per frame | per entity | cache by path: string work once per path |
