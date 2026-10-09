@@ -58,7 +58,7 @@ public static class ObserveTools
                  "task) so you wake when there is something to learn, instead of polling. Returns waiting:true on timeout.")]
     public static async Task<CallToolResult> ObserveWait(BridgeRegistry bridges,
         [Description("Sequence number already handled (from the last observe_* result)")] long since = 0,
-        [Description("Wake for these kinds (default: first-seen unmapped panels, area, level). 'ui' = every panel change")] string[]? kinds = null,
+        [Description("Wake for these kinds (default: ui-new, area, level). ui-new = an unmapped panel opening for the first time; ui = every panel change; area; level; entity")] string[]? kinds = null,
         [Description("Wake once at least this many noteworthy events are waiting (default 1)")] int minEvents = 1,
         [Description("Max wait, seconds (5-3600, default 1800)")] int timeoutSec = 1800,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
@@ -67,7 +67,7 @@ public static class ObserveTools
         var until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSec, 5, 3600));
         var wide = kinds is { Length: > 0 } ? kinds.ToHashSet() : null;
         bool Noteworthy(JObject e) => wide != null
-            ? wide.Contains(e["kind"]!.ToString())
+            ? wide.Contains(e["kind"]!.ToString()) || (wide.Contains("ui-new") && e["kind"]!.ToString() == "ui" && e["firstSeen"]?.Value<bool>() == true)
             : e["kind"]!.ToString() switch { "area" or "level" => true, "ui" => e["firstSeen"]?.Value<bool>() == true, _ => false };
         while (true)
         {

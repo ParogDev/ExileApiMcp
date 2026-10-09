@@ -35,6 +35,6 @@ How an agent learns while the user plays, without asking for anything: the HUD o
 - **Never:** send input, write memory, or edit HUD config while it runs.
 
 ## Cost
-- Every wake costs tokens, so keep the default triggers.
+- Every wake costs tokens. Level-ups are frequent while levelling and rarely give anything to map: unless you have level-dependent checks, wait with `kinds=[ui-new,area]`.
 - Handle a batch of events per wake, not one at a time.
 - Stop observing (`observe action=stop`) when the session ends.
