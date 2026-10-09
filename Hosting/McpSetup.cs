@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.19.0";
+    public const string Version = "3.20.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -40,6 +40,7 @@ internal static class McpSetup
         Users find this engaging and it settles questions that static reading can't. Never send input yourself.
         If the user may not be at the game right now, queue the step instead (experiment_queue): it waits on the in-game
         card until they press Start, the HUD records it without you, and experiment_queue_status collects it later.
+        Don't wait for the user to say they are done: run experiment_queue_wait in the background and continue when it returns.
         experiment_presets has ready-made stash experiments. Knowledge pack shared/working-with-users says how to word
         an instruction and what goes on the card, in detail and in chat. The Memory View's Experiments tab
         (show_memory_view) lets the user run a preset themselves or follow your run step by step.

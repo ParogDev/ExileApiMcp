@@ -343,20 +343,21 @@ public static class ExperimentTools
         [Description("Card title, e.g. 'Stash: which checkbox is Flags bit 3?'")] string? title = null,
         [Description("Max wait per repeat after Start, ms (5000-600000, default 120000)")] int timeoutMs = 120_000,
         [Description("Settle time, ms (100-5000, default 500)")] int settleMs = 500,
+        [Description("Start this step by itself as soon as the previous step of the same experiment is captured, so one Start press runs a whole series (queue the first step without chain)")] bool chain = false,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         var p = new JObject
         {
             ["experiment"] = experiment, ["label"] = label, ["instruction"] = instruction, ["watch"] = new JArray(watch),
-            ["repeats"] = repeats, ["timeoutMs"] = timeoutMs, ["settleMs"] = settleMs, ["by"] = "Claude",
+            ["repeats"] = repeats, ["timeoutMs"] = timeoutMs, ["settleMs"] = settleMs, ["by"] = "Claude", ["chain"] = chain,
         };
         if (note != null) p["note"] = note;
         if (title != null) p["title"] = title;
         foreach (var w in watch) Spec.Parse(w);
         var (_, r) = await bridges.CallAsync(game, "experiment.queue", p, ct);
         NeedQueue(r);
-        if (r["error"] == null) r["next"] = "The user presses Start on the in-game guide card. Check experiment_queue_status later (it imports finished steps).";
+        if (r["error"] == null) r["next"] = "The user presses Start on the in-game guide card. To continue on your own when they finish, run experiment_queue_wait experiment=<name> in the background (it returns when nothing of it is queued or running and collects the results); experiment_queue_status checks any time.";
         return ToolResults.Json(r);
     }
 
@@ -378,7 +379,13 @@ public static class ExperimentTools
         {
             var status = s["status"]?.ToString();
             sb.AppendLine($"[{status}] {s["id"]} {s["experiment"]}/{s["label"]} x{s["repeats"]} ({s["captured"]} recorded): {s["instruction"]}");
-            if (status is "queued" or "running" || s["collected"]?.Value<bool>() == true || (s["captured"]?.Value<int>() ?? 0) == 0) continue;
+            if (status is "queued" or "running" || s["collected"]?.Value<bool>() == true) continue;
+            if ((s["captured"]?.Value<int>() ?? 0) == 0)
+            {
+                // Failed / skipped with nothing recorded: reported once, then out of the default listing.
+                await bridges.CallAsync(gameName, "experiment.collected", new JObject { ["id"] = s["id"] }, ct);
+                continue;
+            }
             var (_, full) = await bridges.CallAsync(gameName, "experiment.result", new JObject { ["id"] = s["id"] }, ct);
             var specs = (full["watch"] as JArray ?? []).Select(w => Spec.Parse(w.ToString())).ToList();
             foreach (var sp in specs) await sp.PrepareAsync(bridges, gameName, ct);
@@ -417,6 +424,36 @@ public static class ExperimentTools
             Content = [new TextContentBlock { Text = sb.ToString().TrimEnd() }],
             StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(list.ToString(Formatting.None)),
         };
+    }
+
+    [McpServerTool(Name = "experiment_queue_wait", Title = "Wait until the user has run the queued steps", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Block until no step of the experiment is queued or running any more (the user pressed Start and finished, " +
+                 "or skipped), then collect the results like experiment_queue_status. Use it so you continue on your own when " +
+                 "the user is done, instead of waiting for them to tell you: run it in the background where your client can " +
+                 "(Claude Code: tools\\mcp-call.ps1 experiment_queue_wait experiment=<name> -TimeoutSec 3700 as a background " +
+                 "task; you are woken when it returns). Returns waiting:true on timeout - call it again.")]
+    public static async Task<CallToolResult> ExperimentQueueWait(BridgeRegistry bridges,
+        [Description("Experiment whose queued steps to wait for (omit: any queued step)")] string? experiment = null,
+        [Description("Max wait, seconds (5-3600, default 1800)")] int timeoutSec = 1800,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSec, 5, 3600));
+        while (true)
+        {
+            JToken list;
+            try { (_, list) = await bridges.CallAsync(game, "experiment.queued", new JObject(), ct); }
+            catch (McpException) when (DateTime.UtcNow < until) { await Task.Delay(5000, ct); continue; }   // HUD restarting
+            NeedQueue(list);
+            var open = (list["steps"] as JArray ?? []).OfType<JObject>().Count(s =>
+                s["status"]?.ToString() is "queued" or "running" && (experiment == null || s["experiment"]?.ToString() == experiment));
+            if (open == 0) break;
+            if (DateTime.UtcNow >= until)
+                return ToolResults.Json(new JObject { ["waiting"] = true, ["open"] = open, ["experiment"] = experiment,
+                    ["note"] = "Still queued or running: the user hasn't finished. Call experiment_queue_wait again." });
+            await Task.Delay(2000, ct);
+        }
+        return await ExperimentQueueStatus(bridges, false, game, ct);
     }
 
     [McpServerTool(Name = "experiment_queue_cancel", Title = "Remove a queued step", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
