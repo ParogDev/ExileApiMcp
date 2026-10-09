@@ -213,6 +213,10 @@ public static class PipelineTraceTools
             sb.AppendLine("Plugin Render (avg / p95 ms): " + string.Join(", ", plugins.Properties().Take(6).Select(p => $"{p.Name} {p.Value["avg"]}/{p.Value["p95"]}")));
         if (r["pluginTickMs"] is JObject ticks && ticks.Count > 0)
             sb.AppendLine("Plugin Tick (avg / p95 ms): " + string.Join(", ", ticks.Properties().Take(6).Select(p => $"{p.Name} {p.Value["avg"]}/{p.Value["p95"]}")));
+        if (r["gc"] is JObject gc)
+            sb.AppendLine($"GC: {gc["allocMBPerSecond"]} MB/s allocated ({gc["fetchedMBPerSecond"]} MB/s fetched from the game), gen0 {gc["gen0"]} / gen1 {gc["gen1"]} / gen2 {gc["gen2"]}, pauses {gc["pauseMsTotal"]} ms total");
+        if (r["pluginAllocKBPerFrame"]?["render"] is JObject ar && ar.Count > 0)
+            sb.AppendLine("Plugin allocation (KB per frame, Render): " + string.Join(", ", ar.Properties().Take(6).Select(p => $"{p.Name} {p.Value}")));
         var watch = r["watch"];
         sb.AppendLine($"Watched: camera {(watch?["camera"]?.Value<bool>() == true ? "yes" : "NO")}, {(watch?["entities"] as JArray)?.Count ?? 0} player(s)");
         if (r["patches"]?["refused"] is JArray { Count: > 0 } refused)

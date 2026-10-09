@@ -38,7 +38,7 @@ public static class PluginLintTools
                 var hot = findings.Where(f => f.InLoop).ToList();
                 sb.AppendLine($"{hud.Game} {src.Folder}: {findings.Count} expensive call site(s) on Tick/Render paths, {hot.Count} in loops/lambdas");
                 foreach (var f in findings.Take(12))
-                    sb.AppendLine($"  {(f.InLoop ? "LOOP" : "    ")} {f.Method}: {f.Call} x{f.Count} (~{f.CostNs:N0} ns each) -> {f.Advice}");
+                    sb.AppendLine($"  {(f.InLoop ? "LOOP" : "    ")} {f.Method}: {f.Call} x{f.Count} ({(f.CostNs > 0 ? $"~{f.CostNs:N0} ns each" : "allocates")}) -> {f.Advice}");
                 if (findings.Count > 12) sb.AppendLine($"  ... +{findings.Count - 12} more (structuredContent)");
                 result.Add(new JObject
                 {

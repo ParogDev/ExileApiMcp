@@ -67,10 +67,17 @@ public static class PluginLint
         var findings = new List<Finding>();
         foreach (var mh in reach)
         {
+            var isLambda0 = md.GetString(md.GetMethodDefinition(mh).Name).StartsWith("<", StringComparison.Ordinal);
             var groups = new Dictionary<(string call, bool loop), (int n, int ns, string advice)>();
             foreach (var c in calls.GetValueOrDefault(mh) ?? [])
             {
-                if (c.ldftn || Target(md, c.token) is not { } t || !Costs.TryGetValue(t, out var cost)) continue;
+                if (c.ldftn || Target(md, c.token) is not { } t) continue;
+                if (!Costs.TryGetValue(t, out var cost))
+                {
+                    // Allocations in per-item code: garbage every frame, GC pauses at high fps (frame-time spikes).
+                    if (!c.inLoop && !isLambda0 || Alloc(t) is not { } a) continue;
+                    cost = (0, a);
+                }
                 var key = ($"{t.type}.{t.member.Replace("get_", "")}", c.inLoop);
                 groups[key] = groups.TryGetValue(key, out var g) ? (g.n + 1, cost.ns, cost.advice) : (1, cost.ns, cost.advice);
             }
@@ -86,6 +93,17 @@ public static class PluginLint
         }
         return findings.OrderByDescending(f => f.InLoop).ThenByDescending(f => f.CostNs * f.Count).ToList();
     }
+
+    /// <summary>Allocating BCL calls worth flagging in per-item code, with the fix.</summary>
+    private static string? Alloc((string type, string member) t) => t switch
+    {
+        ("Enumerable", "ToList" or "ToArray" or "ToDictionary" or "ToHashSet" or "Where" or "Select" or "OrderBy" or "OrderByDescending" or "GroupBy" or "Concat" or "SelectMany" or "Distinct") =>
+            "LINQ allocates enumerators/lists per item per frame: use a for loop over a reused buffer",
+        ("String", "Format" or "Concat" or "Join" or "Substring" or "Replace" or "Split") =>
+            "builds a new string per item per frame: cache it and rebuild only when the value changes",
+        ("DefaultInterpolatedStringHandler", "ToStringAndClear") => "string interpolation per item per frame: cache the text, rebuild on change",
+        _ => null,
+    };
 
     /// <summary>The (declaring type simple name, member name) of a call target outside the plugin.</summary>
     private static (string type, string member)? Target(MetadataReader md, int token)
