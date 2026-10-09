@@ -38,6 +38,33 @@ public static class DevPrompts
         Report what you verified and how (which tool showed what), not just that it should work.
         """;
 
+    [McpServerPrompt(Name = "optimize_plugin", Title = "Make a HUD plugin cheaper per frame, with measurements")]
+    [Description("Find and fix what a plugin costs per frame: lint, trace, profile, fix, measure again.")]
+    public static string OptimizePlugin(
+        [Description("Plugin folder or project name, e.g. 'Whats An Azmeri Wisp'")] string plugin,
+        [Description("'poe1' or 'poe2' (optional)")] string? game = null) => $"""
+        Make the HUD plugin "{plugin}"{GameText(game)} cheaper per frame without changing what it shows. Measure
+        before and after; report numbers, not impressions. Read knowledge pack shared/api-costs first (what HUD calls
+        cost, and the cheaper equivalents).
+
+        1. Static: hud_plugin_lint plugin="{plugin}". It lists expensive HUD calls on Tick/Render paths, with measured
+           costs, and flags those in loops or per-item lambdas. These are candidates: on-demand code shows up too.
+        2. Live cost: pipeline_trace (needs the bridge setting "Allow HUD Instrumentation"). Look at the plugin's
+           Tick and Render ms per frame and at frame work (plugins vs HUD core). Do it where the plugin has work:
+           a town with few entities hides per-entity costs.
+        3. Where the time goes: profile_plugin name="{plugin}". It gives self and inclusive time per method. Self
+           time that is high in a loop over entities usually means cold HUD calls (DistancePlayer ~2.9 us, Entity.Pos
+           ~2.4 us, Stats ~25 us per entity per frame).
+        4. Fix, in order of payoff:
+           - Filter on cached members (Path, Type, IsValid, your own classification) before expensive ones.
+           - Classify at 10-20 Hz and refresh positions every frame (Render.Pos on a held component).
+           - Hold component references; take one Camera.Snapshot per frame.
+           Keep behaviour identical; note any added latency, e.g. "detected up to 50 ms later".
+        5. reload_plugin plugin="{plugin}" perf=true shows its Tick/Render cost before and after the reload. Repeat
+           profile_plugin to confirm the hot method is gone.
+        6. Report a before/after table (ms per frame, ms of CPU per second) and what each change traded.
+        """;
+
     [McpServerPrompt(Name = "investigate_stat", Title = "Explain a player stat from live evidence")]
     [Description("Explain where a player stat's value comes from, using live data and the shared stats view.")]
     public static string InvestigateStat(
