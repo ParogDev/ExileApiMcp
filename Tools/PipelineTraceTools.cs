@@ -163,13 +163,15 @@ public static class PipelineTraceTools
         Example result: Whats An Azmeri Wisp's Tick at 2.9 ms per frame -> a 20 Hz filtered scan, 33x less CPU.
         """)]
     public static async Task<CallToolResult> ProfilePlugin(BridgeRegistry bridges,
-        [Description("Plugin name as the HUD lists it (hud_plugins), e.g. 'Whats An Azmeri Wisp'")] string name,
+        [Description("Plugin name as the HUD lists it (hud_plugins), e.g. 'Whats An Azmeri Wisp' (or empty with assembly)")] string name = "",
+        [Description("Instead of a plugin: a loaded HUD assembly to profile part of, e.g. ExileCore (PoE1; PoE2's ExileCore2 is obfuscated and refuses patching)")] string? assembly = null,
+        [Description("With assembly: type full-name substring to profile (required), e.g. EntityListWrapper")] string? filter = null,
         [Description("Profile length in ms (500-20000, default 4000)")] int durationMs = 4000,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 20_000);
-        var (bridge, started) = await bridges.CallAsync(game, "profile.plugin", new JObject { ["name"] = name, ["durationMs"] = durationMs }, ct);
+        var (bridge, started) = await bridges.CallAsync(game, "profile.plugin", new JObject { ["name"] = name, ["durationMs"] = durationMs, ["assembly"] = assembly, ["filter"] = filter }, ct);
         var id = started["id"]?.Value<string>();
         if (id == null) return ToolResults.Json(started);
         var g = bridge.Game == "auto" ? game : bridge.Game;
