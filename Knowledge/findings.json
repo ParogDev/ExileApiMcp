@@ -112,6 +112,16 @@
       "check": { "kind": "manual", "how": "observe action=start, open the Checkpoints panel, then observe_events kinds=[ui]: an unmapped panel with text 'Checkpoints'; explore_object IngameUi.Children[<index>] while it is open." }
     },
     {
+      "id": "ui.poe2.stash-tab-settings",
+      "title": "PoE2: the Edit Stash Tab dialog ('Stash Tab Settings') is a top-level IngameUi child the HUD doesn't map",
+      "subject": "IngameUi.Children",
+      "games": {
+        "poe1": { "status": "unverified" },
+        "poe2": { "status": "unverified", "note": "Seen once by passive observation (2026-10-09) as child [121] (1728x1080, one 655x520 child). Rows under [0][1]: [0] title 'Stash Tab Settings'; [2] Name (current name at [2][1][0][0]); [3] Colour; [4] Public (Flags bit 3, see stash.flags.public); [5] Guild Tab Permissions; [6] 'delete folder'; [7] Affinities, 14 options in UI order at [7][1][n][0]: Currency, Delirium, Essence, Fragment, Waystone, Breach, Unique, Flask, Gem, Augment, Expedition, Ritual, Abyss, Relics; [8] help text; [9] 'This Stash Tab cannot be edited.' (hidden when editable). Child paths read after it closed (still in memory); confirm while open" }
+      },
+      "check": { "kind": "manual", "how": "observe action=start, right-click a stash tab > Edit, then explore_object IngameUi.Children[<index of the unmapped panel with text 'Stash Tab Settings'>] while it is open." }
+    },
+    {
       "id": "stash.flags.public",
       "title": "Stash tab Flags bit 3 = Public (the Edit Stash Tab dialog's only checkbox: the tab is listed for trade)",
       "subject": "ServerStashTab",
