@@ -21,7 +21,7 @@ public static class PluginLint
     {
         [("Entity", "get_Stats")] = (25000, "read only for entities already classified as interesting, at 10-20 Hz"),
         [("Entity", "get_Buffs")] = (7000, "read only for interesting entities, at 10-20 Hz"),
-        [("Entity", "get_DistancePlayer")] = (2900, "filter on Path/Type/IsValid first; compare grid positions yourself"),
+        [("Entity", "get_DistancePlayer")] = (2900, "filter on Path/Type/IsValid first; it equals the distance between Positioned.GridPosition of entity and player (player once per frame, compare squared)"),
         [("Entity", "get_Pos")] = (2400, "hold the Render component: Entity.Pos == Render.Pos + (0,0,Render.Bounds.Z), ~7x cheaper"),
         [("Entity", "get_PosNum")] = (2400, "hold the Render component: Render.PosNum + (0,0,Bounds.Z) (verify on PoE1)"),
         [("Entity", "get_GridPos")] = (530, "hold the Positioned component and use GridPosition"),

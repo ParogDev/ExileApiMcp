@@ -8,7 +8,7 @@ Measured on PoE2 (ExileCore2), 2026-10-09, in town with ~600 entities loaded, wi
 |---|---|---|---|
 | `Entity.Stats` | **23,000-28,000** | 254 | read only for entities you've already classified as interesting, and at 10-20 Hz |
 | `Entity.Buffs` | **5,500-8,700** | 190 | the same |
-| `Entity.DistancePlayer` | **2,900** | 837 | test cheap members first. For distance, compare grid positions yourself (player's once per frame) |
+| `Entity.DistancePlayer` | **2,900** | 837 | **exactly** the distance between `Positioned.GridPosition` of the entity and of the player (verified on all 597 entities, PoE2): read the player's once per frame and compare squared distances. Test cheap members first anyway |
 | `Entity.Pos` | **2,300-2,400** | 319 | **exactly** `Render.Pos + (0, 0, Render.Bounds.Z)` on a held `Render` (verified on all 535 entities, PoE2): ~7x cheaper. `Render.Pos` alone is offset in Z by the bounds height |
 | `Entity.GridPos` | 530 | 394 | `Positioned.GridPosition` on a held component |
 | `Entity.IsAlive` | 100-280 | 314 | |
