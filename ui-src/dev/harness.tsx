@@ -14,7 +14,7 @@
 //   /harness.html?app=memory&path=GameController.IngameState.ServerData.PlayerStashTabs[0]&theme=dark&width=380
 //   /harness.html?app=memory&address=0x41137889400            (a raw read, no struct)
 
-import { StrictMode, useEffect, useRef, useState } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { McpUiDisplayMode, McpUiStyles, McpUiTheme } from "@modelcontextprotocol/ext-apps";
@@ -23,9 +23,13 @@ import { FakeServer, type CallLogEntry } from "./fakeServer";
 import { FakeExplorer } from "./fakeExplore";
 import { FakeMemory } from "./fakeMemory";
 import { FakePerf } from "./fakePerf";
+import { FakeControl } from "./fakeControl";
+import { ControlCenter } from "../src/control/ControlCenter";
+import { ControlStore } from "../src/control/store";
+import { parseCallResult, type Host } from "../src/control/host";
 import "../src/styles.css";
 
-type AppName = "stats" | "explorer" | "memory" | "perf";
+type AppName = "stats" | "explorer" | "memory" | "perf" | "control";
 
 interface FakeHost {
   scenario: string;
@@ -37,7 +41,7 @@ interface FakeHost {
 }
 
 const params = new URLSearchParams(location.search);
-const appName: AppName = params.get("app") === "explorer" ? "explorer" : params.get("app") === "memory" ? "memory" : params.get("app") === "perf" ? "perf" : "stats";
+const appName: AppName = params.get("app") === "explorer" ? "explorer" : params.get("app") === "memory" ? "memory" : params.get("app") === "perf" ? "perf" : params.get("app") === "control" ? "control" : "stats";
 const APPS: Record<AppName, { title: string; html: string; scenarios: string[]; initialTool: string; initialArgs: () => Record<string, unknown> }> = {
   stats: { title: "Player stats", html: "./player-stats.html", scenarios: ["live", "offline", "not-in-game", "empty", "flaky"], initialTool: "stats_ui_state", initialArgs: () => ({}) },
   explorer: { title: "Data explorer", html: "./data-explorer.html", scenarios: ["live", "offline", "flaky"], initialTool: "show_data_explorer", initialArgs: () => ({ path: params.get("path") ?? "GameController", game: "poe2" }) },
@@ -59,9 +63,14 @@ const APPS: Record<AppName, { title: string; html: string; scenarios: string[]; 
     title: "HUD performance", html: "./hud-performance.html", scenarios: ["live", "display-off", "offline", "instrumentation-off", "flaky", "fps200", "clean"], initialTool: "show_hud_performance",
     initialArgs: () => ({ game: "poe2" }),
   },
+  control: {
+    title: "Control center", html: "./control-center.html", scenarios: ["live", "offline", "no-hud", "flaky", "push"], initialTool: "hud_catalog",
+    initialArgs: () => ({}),
+  },
 };
 const APP = APPS[appName];
-const server: FakeHost = appName === "explorer" ? new FakeExplorer() : appName === "memory" ? new FakeMemory() : appName === "perf" ? new FakePerf() : new FakeServer();
+// control: the fake MCP server as the control center sees it (catalog, settings, observer, perf, the other fakes behind their tools).
+const server: FakeHost = appName === "explorer" ? new FakeExplorer() : appName === "memory" ? new FakeMemory() : appName === "perf" ? new FakePerf() : appName === "control" ? new FakeControl() : new FakeServer();
 server.scenario = params.get("scenario") ?? "live";
 server.latencyMs = Number(params.get("latency") ?? (appName === "stats" ? 40 : 60));
 // memory runner: user=acts|nothing|never (never = the full countdown runs until harness.server.act() or the timeout);
@@ -73,6 +82,8 @@ if (server instanceof FakeMemory) {
   if (params.get("run") === "follow") setTimeout(() => void server.agentRun(undefined, params.get("follow") === "slow" ? 40_000 : undefined), 1500);
 }
 // perf: trace=<ms> is how long a refresh "traces" (default 3500, like the real tool); profile=<ms> a profile_plugin run.
+// control: trace=<ms> for the perf page / health reports (default 900 in this fake).
+if (server instanceof FakeControl && params.get("trace")) server.perf.traceMs = Number(params.get("trace"));
 if (server instanceof FakePerf) {
   if (params.get("trace")) server.traceMs = Number(params.get("trace"));
   if (params.get("profile")) server.profileMs = Number(params.get("profile"));
@@ -116,7 +127,8 @@ function Harness() {
 
   // Host: AppBridge without an MCP client; tool calls go to the fake server.
   useEffect(() => {
-    const iframe = frame.current!;
+    if (!frame.current) return; // standalone control center: no iframe
+    const iframe = frame.current;
     let disposed = false;
     (async () => {
       const html = await (await fetch(APP.html)).text();
@@ -162,6 +174,7 @@ function Harness() {
   useEffect(() => { server.scenario = scenario; }, [scenario]);
 
   useEffect(() => {
+    if (server instanceof FakeControl && params.get("standalone") === "1") return; // StandaloneHarness owns window.harness
     (window as unknown as { harness: unknown }).harness = {
       app: appName, server, hud: server instanceof FakeServer ? server.hud : undefined,
       setScenario: (s: string) => setScenario(s),
@@ -172,6 +185,11 @@ function Harness() {
 
   const full = display === "fullscreen";
   const others = (Object.keys(APPS) as AppName[]).filter((a) => a !== appName);
+  // standalone=1 (control): the control center rendered directly, not in an iframe, with a host that can read resources,
+  // listen (push) and post permission changes, as the page served at /app has. page=tools/observe_layers opens a route.
+  if (server instanceof FakeControl && params.get("standalone") === "1") {
+    return <StandaloneHarness server={server} theme={theme} scenario={scenario} onScenario={setScenario} />;
+  }
   // bare=1: only the app's iframe, filling the viewport (for pixel-exact screenshots in a narrow pane).
   if (params.get("bare") === "1") {
     return (
@@ -203,6 +221,15 @@ function Harness() {
         <Field label={`Latency ${server.latencyMs} ms`}>
           <input type="range" min={0} max={1500} step={10} value={server.latencyMs} onChange={(e) => { server.latencyMs = Number(e.target.value); force((n) => n + 1); }} className="w-full" />
         </Field>
+        {server instanceof FakeControl && (
+          <Field label="Simulate the HUD">
+            <div className="flex flex-wrap gap-1">
+              <Btn onClick={() => server.emit()}>observer event now</Btn>
+              <Btn onClick={() => { server.observing = !server.observing; force((n) => n + 1); }}>{server.observing ? "stop observing (in game)" : "start observing (in game)"}</Btn>
+            </div>
+            <p className="mt-1 text-fg-3">The catalog is the real capture (95 tools). Settings are synthesised (the bridge plugin + 3 others). Add a layer whose path contains "Missing" to see a preflight failure. standalone=1 renders the control center as the page at /app (push, resources, permission route); scenarios: live, offline, no-hud, flaky, push.</p>
+          </Field>
+        )}
         {server instanceof FakeServer && (
           <Field label="Simulate a change in the HUD panel">
             <div className="flex flex-wrap gap-1">
@@ -298,3 +325,45 @@ function Btn({ children, onClick }: { children: React.ReactNode; onClick: () => 
 }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><Harness /></StrictMode>);
+
+// ── Standalone control center (no iframe): the host the page at /app has, over the fake server ──────────────────
+
+function StandaloneHarness({ server, theme, scenario, onScenario }: { server: FakeControl; theme: McpUiTheme; scenario: string; onScenario: (s: string) => void }) {
+  const [t, setT] = useState<"light" | "dark">(theme === "dark" ? "dark" : "light");
+  const store = useMemo(() => {
+    const host: Host = {
+      mode: "standalone",
+      theme: t,
+      callTool: async (name, args) => { const t0 = performance.now(); const r = await server.handle(name, args); return parseCallResult(r, Math.round(performance.now() - t0)); },
+      readResource: (u) => server.readResource(u),
+      listen: (u, f, s) => server.listen(u, f, s),
+      postSettings: (b) => server.postSettings(b),
+      setTheme: setT,
+    };
+    const s = new ControlStore(host);
+    const page = params.get("page");
+    if (page) { location.hash = "#/" + page; s.routeFromHash(); }
+    return s;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  store.host.theme = t;
+  useEffect(() => { document.documentElement.dataset.theme = t; }, [t]);
+  useEffect(() => { store.start(); return () => store.stop(); }, [store]);
+  useEffect(() => {
+    (window as unknown as { harness: unknown }).harness = { app: "control", server, store, setScenario: onScenario, setTheme: setT, log: () => server.log };
+  }, [server, store, onScenario]);
+  return (
+    <>
+      <ControlCenter key={t} store={store} />
+      {params.get("bare") !== "1" && (
+        <div className="fixed bottom-1 left-1 z-50 flex items-center gap-1 rounded-md border border-line bg-surface px-1.5 py-0.5 text-[10px] text-fg-3 opacity-70 shadow-lg hover:opacity-100">
+          harness · scenario
+          <select value={scenario} onChange={(e) => onScenario(e.target.value)} className="rounded border border-line bg-surface px-1 text-fg">
+            {APPS.control.scenarios.map((s) => <option key={s}>{s}</option>)}
+          </select>
+          <button type="button" onClick={() => server.emit()} className="rounded border border-line px-1 hover:bg-surface-3">event</button>
+        </div>
+      )}
+    </>
+  );
+}
