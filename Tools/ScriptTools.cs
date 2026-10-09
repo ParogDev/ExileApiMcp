@@ -11,7 +11,8 @@ namespace ExileApiMcp.Tools;
 [McpServerToolType]
 public static class ScriptTools
 {
-    [McpServerTool(Name = "run_csharp", Title = "Run C# in the HUD", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
+    [McpServerTool(Name = "run_csharp", Title = "Run C# in the HUD", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ScriptResult))]
     [Description("""
         Compile and run a C# script inside the running HUD (Roslyn scripting), for testing a theory against the live
         object model with real code: LINQ over entities, reflection into non-public members, calling into other plugins.
@@ -38,7 +39,7 @@ public static class ScriptTools
         var (bridge, started) = await bridges.CallAsync(game, "script.run",
             new JObject { ["code"] = code, ["thread"] = thread, ["timeoutMs"] = timeoutMs }, ct);
         var id = started["id"]?.Value<string>();
-        if (id == null || started["status"]?.Value<string>() == "rejected") return ToolResults.Json(started);
+        if (id == null || started["status"]?.Value<string>() == "rejected") return TypedReply.Of<ScriptResult>(started);
 
         var g = bridge.Game == "auto" ? game : bridge.Game;
         // Compiling takes ~0.5-3 s (the first script of a HUD run is the slowest), then the run itself.
@@ -53,7 +54,7 @@ public static class ScriptTools
             catch (McpException) { continue; } // the main thread can be busy with the script itself
             if (r["status"]?.Value<string>() is "done" or "unknown") return Result(r);
         }
-        return ToolResults.Json(new JObject
+        return TypedReply.Of<ScriptResult>(new JObject
         {
             ["id"] = id, ["status"] = "timeout",
             ["message"] = "No result yet. If the script loops forever on the main thread, the HUD is frozen and needs a restart.",
@@ -63,6 +64,6 @@ public static class ScriptTools
     private static CallToolResult Result(JToken r)
     {
         if (r is JObject o && o["ok"]?.Value<bool>() == false && o["error"] == null) o["error"] = "failed";
-        return ToolResults.Json(r);
+        return TypedReply.Of<ScriptResult>(r);
     }
 }

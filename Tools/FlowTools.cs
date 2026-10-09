@@ -26,7 +26,8 @@ public static class FlowTools
         return s == null ? new JObject { ["recipes"] = new JArray() } : JObject.Parse(new StreamReader(s).ReadToEnd());
     });
 
-    [McpServerTool(Name = "guide_flow", Title = "Guide the user through a multi-step task", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
+    [McpServerTool(Name = "guide_flow", Title = "Guide the user through a multi-step task", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(FlowStateResult), IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("Guide the user through a multi-step in-game task: the HUD highlights the next thing to do, re-evaluated from " +
                  "the game state every 100 ms (current step = first step not done; it goes back if the user navigates away; for " +
                  "each step the first option that's possible right now is shown, e.g. right-click the tab if it's in view, else " +
@@ -44,12 +45,13 @@ public static class FlowTools
         switch (action)
         {
             case "recipes":
-                return ToolResults.Json(new JObject { ["recipes"] = new JArray((Recipes.Value["recipes"] as JArray ?? []).OfType<JObject>()
-                    .Select(r => new JObject { ["id"] = r["id"], ["title"] = r["title"], ["games"] = r["games"], ["params"] = r["params"] })) });
+                var recipes = new JObject { ["recipes"] = new JArray((Recipes.Value["recipes"] as JArray ?? []).OfType<JObject>()
+                    .Select(r => new JObject { ["id"] = r["id"], ["title"] = r["title"], ["games"] = r["games"], ["params"] = r["params"] })) };
+                return Dto.Result(TypedReply.Parse<FlowRecipeList>(recipes), recipes.ToString(Formatting.None));
             case "state":
-                return ToolResults.Json(Need((await bridges.CallAsync(game, "guide.flow_state", new JObject(), ct)).Result));
+                return TypedReply.Of<FlowStateResult>(Need((await bridges.CallAsync(game, "guide.flow_state", new JObject(), ct)).Result));
             case "stop":
-                return ToolResults.Json(Need((await bridges.CallAsync(game, "guide.flow", new JObject { ["stop"] = true }, ct)).Result));
+                return TypedReply.Of<FlowStateResult>(Need((await bridges.CallAsync(game, "guide.flow", new JObject { ["stop"] = true }, ct)).Result));
         }
         JObject f;
         if (flow is { ValueKind: JsonValueKind.Object or JsonValueKind.String } fl)
@@ -57,11 +59,12 @@ public static class FlowTools
         else if (recipe != null)
             f = await ExpandAsync(bridges, game, recipe, ParseArgs(args), ct);
         else throw new McpException("Pass recipe (+ args) or flow. action=recipes lists the recipes.");
-        if (action == "expand") return ToolResults.Json(f);
+        // The flow itself: its shape is the recipe's (FlowStateResult only describes the keys it shares, e.g. title and steps[].label).
+        if (action == "expand") return Dto.Result(TypedReply.Parse<JsonElement>(f), f.ToString(Formatting.None));
         f["timeoutSec"] = timeoutSec;
         var r = Need((await bridges.CallAsync(game, "guide.flow", f, ct)).Result);
         if (r["error"] == null) r["next"] = "The HUD guides the user step by step. Read progress with guide_flow action=state; it ends by itself when the goal holds.";
-        return ToolResults.Json(r);
+        return TypedReply.Of<FlowStateResult>(r);
     }
 
     /// <summary>Expand a recipe: derive values from game data, then substitute ${...} everywhere (keys too).</summary>

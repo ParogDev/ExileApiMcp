@@ -25,7 +25,8 @@ public static class ExploreTools
 
     // No UI link: agents call this in loops, and a linked tool opens a panel per call in Desktop.
     // The explorer app calls it like any model-visible tool.
-    [McpServerTool(Name = "explore_object", Title = "Explore the object model", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.DataExplorerLight)]
+    [McpServerTool(Name = "explore_object", Title = "Explore the object model", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ExploreNode), IconSource = ExileApiMcp.Hosting.IconSet.DataExplorerLight)]
     [Description("Map out live HUD data: the object at a path and its children, one line each - name: type = preview " +
                  "(structs as X=.. Y=.., objects with their Name and visible/hidden, collections with counts) - plus an " +
                  "entity's components. depth 2-3 expands nested objects. Child paths are parent.Name, parent[i] or " +
@@ -83,11 +84,12 @@ public static class ExploreTools
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = outline }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(root.ToString(Formatting.None)),
+            StructuredContent = Dto.Element(Dto.From<ExploreNode>(root)),
         };
     }
 
-    [McpServerTool(Name = "show_data_explorer", Title = "Open the data explorer", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.DataExplorerLight)]
+    [McpServerTool(Name = "show_data_explorer", Title = "Open the data explorer", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ExploreNode), IconSource = ExileApiMcp.Hosting.IconSet.DataExplorerLight)]
     [McpAppUi(ResourceUri = DataExplorerApp.ResourceUri)]
     [McpMeta("ui/resourceUri", DataExplorerApp.ResourceUri)]
     [Description("Open an interactive explorer of the live HUD object model at a path (clients that support MCP Apps): " +
@@ -99,7 +101,8 @@ public static class ExploreTools
         CancellationToken ct = default)
         => ExploreObject(bridges, path, 1, 0, 50, game, ct);
 
-    [McpServerTool(Name = "find_in_object", Title = "Find where a value or member lives", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "find_in_object", Title = "Find where a value or member lives", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(FindInObjectResult))]
     [Description("Search the live object graph under a path for members whose name matches, or whose value contains, " +
                  "what you're looking for - e.g. where the 356 shown in game lives (value=356), or every '*Resist*' member " +
                  "(name=resist). Breadth-first over explore_object results, skipping back-references and memory plumbing; " +
@@ -181,7 +184,7 @@ public static class ExploreTools
         };
         if (queue.Count > 0) o["incomplete"] = $"Stopped after opening {opened} objects ({queue.Count} left): raise maxNodes, lower depth or search a narrower root.";
         if (matches.Count == 0) o["note"] = "No match. Values are compared against one-line previews (strings, numbers, struct fields).";
-        return ToolResults.Json(o);
+        return Dto.Result(TypedReply.Parse<FindInObjectResult>(o), o.ToString(Formatting.None));
     }
 
     private static async Task<(BridgeClient bridge, JObject result)> ExploreAsync(BridgeRegistry bridges, string? game,

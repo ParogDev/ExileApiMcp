@@ -29,7 +29,8 @@ public static class StatsTools
 
     // ── Showing ──────────────────────────────────────────────────────
 
-    [McpServerTool(Name = "show_player_stats", Title = "Show player stats", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.PlayerStatsLight)]
+    [McpServerTool(Name = "show_player_stats", Title = "Show player stats", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ShowPlayerStatsResult), IconSource = ExileApiMcp.Hosting.IconSet.PlayerStatsLight)]
     [McpAppUi(ResourceUri = PlayerStatsApp.ResourceUri)]
     // Legacy flat key, alongside the nested _meta.ui.resourceUri, as the official ext-apps servers send it
     // (registerAppTool): hosts built against older MCP Apps drafts look for this one.
@@ -59,7 +60,7 @@ public static class StatsTools
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = DescribeForText(summary) }],
-            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<JsonElement>(summary.ToString(Formatting.None)),
+            StructuredContent = Dto.Element(TypedReply.Parse<ShowPlayerStatsResult>(summary)),
         };
     }
 
@@ -83,7 +84,8 @@ public static class StatsTools
 
     // ── Reading ──────────────────────────────────────────────────────
 
-    [McpServerTool(Name = "stats_ui_state", Title = "Stats view state (poll)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "stats_ui_state", Title = "Stats view state (poll)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(StatsUiStateResult))]
     // Visible to the model too: Claude Desktop's local bridge only routes tools whose visibility includes
     // "model", so an app-only tool is unreachable from the panel there ("Unable to reach exileapi").
     [McpAppUi(ResourceUri = PlayerStatsApp.ResourceUri, Visibility = [McpUiToolVisibility.Model, McpUiToolVisibility.App])]
@@ -96,10 +98,11 @@ public static class StatsTools
     {
         var p = new JObject();
         if (sinceRev.HasValue) p["sinceRev"] = sinceRev.Value;
-        return ToolResults.Json((await bridges.CallAsync(game, "stats.ui_state", p, ct)).Result);
+        return TypedReply.Of<StatsUiStateResult>((await bridges.CallAsync(game, "stats.ui_state", p, ct)).Result);
     }
 
-    [McpServerTool(Name = "stats_page", Title = "Player stats (filtered page)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.PlayerStatsLight)]
+    [McpServerTool(Name = "stats_page", Title = "Player stats (filtered page)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(StatsPageResult), IconSource = ExileApiMcp.Hosting.IconSet.PlayerStatsLight)]
     [Description("A page of the player's current stats: Stats.dat key, value, in-game text and category, plus " +
                  "per-category counts and all pinned stats. Arguments override the shared filter/category/sort for this " +
                  "read only (they don't change what the HUD shows - use set_stats_filter for that).")]
@@ -118,19 +121,21 @@ public static class StatsTools
         if (category != null) p["category"] = category;
         if (sortBy != null) p["sortBy"] = sortBy;
         if (sortDesc != null) p["sortDesc"] = sortDesc;
-        return ToolResults.Json((await bridges.CallAsync(game, "stats.page", p, ct)).Result);
+        return TypedReply.Of<StatsPageResult>((await bridges.CallAsync(game, "stats.page", p, ct)).Result);
     }
 
-    [McpServerTool(Name = "get_stat", Title = "One stat", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "get_stat", Title = "One stat", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(StatDetailResult))]
     [Description("One stat by Stats.dat key: current value and in-game text (or present:false when the player lacks it), " +
                  "Stats.dat record type and weapon-local flag, pinned state. Errors with unknown_stat for keys this game build doesn't have.")]
     public static async Task<CallToolResult> GetStat(BridgeRegistry bridges, [Description(KeyDesc)] string key,
         [Description(G)] string? game = null, CancellationToken ct = default) =>
-        ToolResults.Json((await bridges.CallAsync(game, "stats.get", new JObject { ["key"] = key }, ct)).Result);
+        TypedReply.Of<StatDetailResult>((await bridges.CallAsync(game, "stats.get", new JObject { ["key"] = key }, ct)).Result);
 
     // ── Changing the shared view (visible to the user in the HUD and the app) ──
 
-    [McpServerTool(Name = "set_stat_pinned", Title = "Pin / unpin a stat", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "set_stat_pinned", Title = "Pin / unpin a stat", Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(StatsMutationResult))]
     [Description("Pin or unpin a stat in the shared stats view (shows in the HUD panel and the app). Idempotent.")]
     public static async Task<CallToolResult> SetStatPinned(BridgeRegistry bridges, [Description(KeyDesc)] string key,
         [Description("true to pin, false to unpin")] bool pinned = true,
@@ -138,7 +143,8 @@ public static class StatsTools
         [Description(G)] string? game = null, CancellationToken ct = default) =>
         await Mutate(bridges, game, "stats.set_pinned", new JObject { ["key"] = key, ["pinned"] = pinned }, expectedRev, ct);
 
-    [McpServerTool(Name = "set_stats_filter", Title = "Set stats filter", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "set_stats_filter", Title = "Set stats filter", Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(StatsMutationResult))]
     [Description("Set the shared stats view's search text and/or category (what the user sees in the HUD panel and the app).")]
     public static async Task<CallToolResult> SetStatsFilter(BridgeRegistry bridges,
         [Description("Search text; empty string clears it; omit to keep")] string? text = null,
@@ -152,7 +158,8 @@ public static class StatsTools
         return await Mutate(bridges, game, "stats.set_filter", p, expectedRev, ct);
     }
 
-    [McpServerTool(Name = "select_stat", Title = "Select a stat", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "select_stat", Title = "Select a stat", Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(StatsMutationResult))]
     [Description("Highlight one stat in the shared view (e.g. to point the user at it), or clear the selection with no key.")]
     public static async Task<CallToolResult> SelectStat(BridgeRegistry bridges,
         [Description(KeyDesc + "; omit to clear")] string? key = null,
@@ -160,7 +167,8 @@ public static class StatsTools
         [Description(G)] string? game = null, CancellationToken ct = default) =>
         await Mutate(bridges, game, "stats.select", new JObject { ["key"] = key }, expectedRev, ct);
 
-    [McpServerTool(Name = "set_stats_view", Title = "Set stats view options", Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "set_stats_view", Title = "Set stats view options", Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(StatsMutationResult))]
     [Description("Set the shared view's sort and whether the in-HUD stats panel is open.")]
     public static async Task<CallToolResult> SetStatsView(BridgeRegistry bridges,
         [Description("'category', 'key' or 'value'; omit to keep")] string? sortBy = null,
@@ -180,6 +188,6 @@ public static class StatsTools
         long? expectedRev, CancellationToken ct)
     {
         if (expectedRev.HasValue) p["expectedRev"] = expectedRev.Value;
-        return ToolResults.Json((await bridges.CallAsync(game, method, p, ct)).Result);
+        return TypedReply.Of<StatsMutationResult>((await bridges.CallAsync(game, method, p, ct)).Result);
     }
 }

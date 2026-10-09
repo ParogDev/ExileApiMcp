@@ -43,7 +43,8 @@ public static class KnowledgeTools
         return list.OrderBy(p => p.Game == "shared" ? 0 : 1).ThenBy(p => p.Game).ThenBy(p => p.Topic).ToList();
     }
 
-    [McpServerTool(Name = "knowledge", Title = "HUD dev knowledge packs", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = ExileApiMcp.Hosting.IconSet.KnowledgeLight)]
+    [McpServerTool(Name = "knowledge", Title = "HUD dev knowledge packs", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(KnowledgeResult), IconSource = ExileApiMcp.Hosting.IconSet.KnowledgeLight)]
     [Description("Verified facts for ExileApi (PoE1) / ExileCore2 (PoE2) plugin development: how the HUD compiles and reloads " +
                  "plugins, PoE2 API differences, obfuscated PoE2 offsets, player-stat identity and resistance layers, and " +
                  "how to ask the user for in-game help (shared/working-with-users). " +
@@ -62,7 +63,10 @@ public static class KnowledgeTools
             var match = packs.Where(p => $"{p.Game}/{p.Topic}".Equals(t, StringComparison.OrdinalIgnoreCase)
                                          || p.Topic.Equals(t, StringComparison.OrdinalIgnoreCase)).ToList();
             if (match.Count == 1)
-                return new CallToolResult { Content = [new TextContentBlock { Text = match[0].Text }] };
+            {
+                var pack = new KnowledgePackInfo { Topic = $"{match[0].Game}/{match[0].Topic}", Title = match[0].Title, Summary = match[0].Summary, Uri = match[0].Uri };
+                return new CallToolResult { Content = [new TextContentBlock { Text = match[0].Text }], StructuredContent = Dto.Element(new KnowledgeResult { Pack = pack }) };
+            }
             throw new McpException(match.Count == 0
                 ? $"No knowledge pack '{topic}'. Available: {string.Join(", ", packs.Select(p => $"{p.Game}/{p.Topic}"))}"
                 : $"'{topic}' is ambiguous: {string.Join(", ", match.Select(p => $"{p.Game}/{p.Topic}"))}");
@@ -77,9 +81,9 @@ public static class KnowledgeTools
                     if (lines[i].Contains(search, StringComparison.OrdinalIgnoreCase))
                         hits.Add(new JObject { ["pack"] = $"{p.Game}/{p.Topic}", ["line"] = i + 1, ["text"] = lines[i].Trim() });
             }
-            return ToolResults.Json(new JObject { ["search"] = search, ["hits"] = hits });
+            return Typed(new JObject { ["search"] = search, ["hits"] = hits });
         }
-        return ToolResults.Json(new JObject
+        return Typed(new JObject
         {
             ["packs"] = new JArray(packs.Select(p => new JObject
             {
@@ -87,6 +91,8 @@ public static class KnowledgeTools
             })),
         });
     }
+
+    private static CallToolResult Typed(JObject o) => Dto.Result(TypedReply.Parse<KnowledgeResult>(o), o.ToString(Newtonsoft.Json.Formatting.None));
 
     [McpServerResource(UriTemplate = "exile://knowledge/{game}/{topic}", Name = "knowledge-pack", MimeType = "text/markdown", IconSource = ExileApiMcp.Hosting.IconSet.KnowledgeLight)]
     [Description("A knowledge pack: game is 'shared', 'poe1' or 'poe2'. The knowledge tool lists them.")]
