@@ -9,7 +9,7 @@ Measured on PoE2 (ExileCore2), 2026-10-09, in town with ~600 entities loaded, wi
 | `Entity.Stats` | **23,000-28,000** | 254 | read only for entities you've already classified as interesting, and at 10-20 Hz |
 | `Entity.Buffs` | **5,500-8,700** | 190 | the same |
 | `Entity.DistancePlayer` | **2,900** | 837 | test cheap members first. For distance, compare grid positions yourself (player's once per frame) |
-| `Entity.Pos` | **2,300-2,400** | 319 | read it once per entity per frame and keep it. `GetComponent<Render>().Pos` (250-390) has the **same X/Y but a different Z** on PoE2 (~120 units on 521 of 565 entities): fine for X/Y work (distances, minimap), not a drop-in for world drawing |
+| `Entity.Pos` | **2,300-2,400** | 319 | **exactly** `Render.Pos + (0, 0, Render.Bounds.Z)` on a held `Render` (verified on all 535 entities, PoE2): ~7x cheaper. `Render.Pos` alone is offset in Z by the bounds height |
 | `Entity.GridPos` | 530 | 394 | `Positioned.GridPosition` on a held component |
 | `Entity.IsAlive` | 100-280 | 314 | |
 | `GetComponent<Render>()` | 230-250 | 150 | hold the reference: it returns the same object for the entity's lifetime |
@@ -30,7 +30,7 @@ Measured on PoE2 (ExileCore2), 2026-10-09, in town with ~600 entities loaded, wi
 
 ## Patterns
 - **Filter cheap, then expensive.** `Path`/`Type`/`Rarity`/`IsValid` and your own cached classification come first; `DistancePlayer`, `Buffs`, `Stats` only for the few survivors.
-- **Classify slowly, project per frame.** Category, mods, buffs and stats change rarely: compute them at 10-20 Hz. Positions need every frame: read `Entity.Pos` once per entity per frame, or the held `Render.Pos` where only X/Y matter (its Z differs).
+- **Classify slowly, project per frame.** Category, mods, buffs and stats change rarely: compute them at 10-20 Hz. Positions need every frame: `Render.Pos + (0,0,Render.Bounds.Z)` on the held component equals `Entity.Pos`.
 - **Hold component references** (`Life`, `Render`, `Positioned`) per tracked entity.
 - **One camera snapshot per frame.** It's cheaper per point, and every point uses the same camera.
 - **Lint before you profile:** `hud_plugin_lint plugin=<name>` lists these calls on Tick/Render paths offline, flags the ones in loops or per-item lambdas, and gives the cheaper equivalent. It's a static heuristic: code that only runs on demand (e.g. a query handler called from Render) shows up too, so confirm with `profile_plugin`.
