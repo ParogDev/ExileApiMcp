@@ -56,18 +56,21 @@ public static class PipelineTraceTools
         and from the camera matrix and position read fresh from game memory at that moment. Reports the pixel error
         (avg/p50/p95/max, frames over 1 px), split into the camera's and the position's share, plus how often each was
         stale. Offsets are found at start by matching the HUD's own values in fresh bytes (calibration in the result);
-        projectionSelfCheckPx must be ~0. draw=true marks both on screen (fresh: orange cross, HUD: grey ring) for
-        screenshots. Read-only. Meaningful only while things move: ask the user to run around (camera panning).
+        projectionSelfCheckPx must be ~0. draw=true marks both on screen as 5 px squares (fresh: cyan, HUD: magenta;
+        tools/fidelity finds them in screenshots). Read-only. Meaningful only while things move: ask the user to run
+        around (camera panning).
         """)]
     public static async Task<CallToolResult> OverlayAccuracy(BridgeRegistry bridges,
         [Description("Run length in ms (500-60000, default 5000)")] int durationMs = 5000,
         [Description("How many of the nearest players (yours included) to track (1-32, default 8)")] int entities = 8,
         [Description("Mark both projections on screen")] bool draw = false,
+        [Description("Track entities whose metadata path contains this (e.g. a static chest or NPC as an anchor) instead of the nearest players")] string? path = null,
+        [Description("Draw the cyan (fresh) marker from the state this many ms ago (0-100), to align with the game image's own latency")] double delayMs = 0,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 60_000);
-        var (bridge, started) = await bridges.CallAsync(game, "tracker.start", new JObject { ["durationMs"] = durationMs, ["entities"] = entities, ["draw"] = draw }, ct);
+        var (bridge, started) = await bridges.CallAsync(game, "tracker.start", new JObject { ["durationMs"] = durationMs, ["entities"] = entities, ["draw"] = draw, ["path"] = path, ["delayMs"] = delayMs }, ct);
         var id = started["id"]?.Value<string>();
         if (id == null) return ToolResults.Json(started);
         var g = bridge.Game == "auto" ? game : bridge.Game;
