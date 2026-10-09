@@ -161,6 +161,7 @@ public static class BridgeTools
             }
             return entry;
         }));
-        return ToolResults.Json(new JObject { ["bridges"] = new JArray(results) });
+        // Whether the user's screen can show the HUD right now (display on, game in front): see Hud/DesktopState.cs.
+        return ToolResults.Json(new JObject { ["bridges"] = new JArray(results), ["desktop"] = Hud.DesktopState.Read() });
     }
 }
