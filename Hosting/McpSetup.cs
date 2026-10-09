@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.35.0";
+    public const string Version = "3.36.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -35,6 +35,7 @@ internal static class McpSetup
         pack shared/memory-mapping has the method. show_memory_view opens it for the user. Read-only.
         Overlay accuracy and HUD performance (a drawing that lags or wobbles, a plugin that costs frame time): pipeline_trace,
         profile_plugin, overlay_accuracy, render_lab; method and measured findings in knowledge pack shared/render-fidelity.
+        Writing or optimising plugin code: knowledge pack shared/api-costs has measured ns per HUD API call and the cheaper equivalents.
         Work WITH the user. When an answer depends on game state they can change (what a field means, whether a mapping
         holds, what an action does), don't guess: run a guided experiment (prompt guided_experiment). Ask for one action
         per step, shown in the game itself (await_change with instruction drives the HUD's agent guide card: waiting ->
