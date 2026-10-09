@@ -202,6 +202,15 @@ public static class PipelineTraceTools
         };
     }
 
+    [McpServerTool(Name = "bridge_self_perf", Title = "The AI Bridge plugin's own cost per frame", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("The bridge plugin's own time (us) and allocation (bytes) per frame for each of its Render steps (stats panel, guide panel, observer, render lab...), averaged since the previous call; the call resets the counters. The profiler refuses to profile the bridge, so use this after changing the bridge's per-frame code: call once to reset, wait, call again.")]
+    public static async Task<CallToolResult> BridgeSelfPerf(BridgeRegistry bridges,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null, CancellationToken ct = default)
+    {
+        var (_, r) = await bridges.CallAsync(game, "bridge.self_perf", null, ct);
+        return ToolResults.Json(r);
+    }
+
     private static string Summary(JToken r)
     {
         if (r["status"]?.Value<string>() != "done") return r.ToString(Newtonsoft.Json.Formatting.None);
