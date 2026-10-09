@@ -202,7 +202,7 @@ public static class PipelineTraceTools
         string T(string key, string stat) => r["timelineMs"]?[key]?[stat]?.ToString() ?? "-";
         var sb = new StringBuilder();
         sb.AppendLine($"{r["frames"]} frames in {r["durationMs"]} ms: HUD {r["hudFps"]} fps, frame interval {S("frameIntervalMs")} ms (sd {S("frameIntervalMs", "sd")}, max {S("frameIntervalMs", "max")}), " +
-                      $"frame work {S("updateMs")} ms (p95 {S("updateMs", "p95")}), Present {S("presentCallMs")} ms");
+                      $"frame work {S("updateMs")} ms (p95 {S("updateMs", "p95")}): plugins {S("pluginsMs")} + HUD core {S("coreMs")}, Present {S("presentCallMs")} ms");
         sb.AppendLine($"Data age at Present: camera {S("cameraDataAgeAtPresentMs", "p50")} ms (p95 {S("cameraDataAgeAtPresentMs", "p95")}), " +
                       $"entities {S("entityDataAgeAtPresentMs", "p50")} ms (p95 {S("entityDataAgeAtPresentMs", "p95")}); camera-entity skew {S("cameraEntityDataSkewMs", "p50")} ms");
         sb.AppendLine($"Timeline (ms after frame start, p50): cache cycle {T("cacheCycleAfterFrameStart", "p50")}, camera read {T("cameraReadAfterFrameStart", "p50")}, " +
