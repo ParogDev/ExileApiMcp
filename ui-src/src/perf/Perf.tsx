@@ -332,7 +332,7 @@ function GcPanel({ gc, trace, report, pool, onCopied }: { gc: Gc; trace: Trace; 
             <div className="min-w-0 flex-1">
               <div className="font-semibold">The page cache churns through the shared ArrayPool</div>
               <p className="mt-0.5 text-fg-2">The HUD cycles about <span className="tnum font-medium text-fg">{fmtInt(pool.cycles)}</span> memory pages per frame, but the shared ArrayPool keeps only <span className="tnum font-medium text-fg">{fmtInt(pool.keeps)}</span> per size. The rest are dropped and reallocated every frame: that is most of the {fmtNum(gc.allocMBPerSecond, 0)} MB/s, and what the collector keeps pausing for.</p>
-              <p className="mt-1 text-fg-2">Fix: start the HUD with this environment variable (decimal), then trace again.</p>
+              <p className="mt-1 text-fg-2">Mitigation, not a cure: this environment variable (decimal) lets the pool keep the pages. Measured: about 4x less allocation and half the total pause, but each pause gets longer, so spikes stay. The cure is a pool of long-lived pages in the HUD itself (research/hud-gc.md).</p>
               <div className="mt-1 flex items-center gap-1">
                 <code className="code-wrap min-w-0 flex-1 rounded bg-surface px-1.5 py-1 font-code text-[10.5px] text-fg">{POOL_ENV}</code>
                 <CopyButton text={POOL_ENV} onCopied={onCopied} />
@@ -398,7 +398,7 @@ function describe(report: Report, t: Trace, a: SpikeAnalysis, snap: Snapshot, ga
     `HUD performance panel (${game ?? "?"}) shows a ${(t.durationMs / 1000).toFixed(0)} s trace: ${t.hudFps.toFixed(1)} fps, interval avg ${fmtMs(t.frameIntervalMs.avg)} p95 ${fmtMs(t.frameIntervalMs.p95)} max ${fmtMs(t.frameIntervalMs.max)}; work ${fmtMs(t.updateMs.avg)} = plugins ${fmtMs(t.pluginsMs.avg)} + core ${fmtMs(t.coreMs.avg)}.`,
     a.verdict,
     t.gc ? `GC: ${t.gc.allocMBPerSecond.toFixed(0)} MB/s allocated (${t.gc.fetchedMBPerSecond.toFixed(0)} MB/s fetched from the game), ${t.gc.gen0}/${t.gc.gen1}/${t.gc.gen2} collections, ${t.gc.pauseMsTotal.toFixed(0)} ms paused.` : "",
-    pool.state === "churn" ? `ArrayPool churn: cycles ~${pool.cycles} pages per frame, keeps ${pool.keeps}; fix ${POOL_ENV}.` : "",
+    pool.state === "churn" ? `ArrayPool churn: cycles ~${pool.cycles} pages per frame, keeps ${pool.keeps}; mitigation  (halves total GC pause; pauses get longer).` : "",
     top ? `Costliest plugins: ${top}; by allocation ${alloc}.` : "",
     report.findings?.length ? `Findings: ${report.findings.join(" | ")}` : "Findings: nothing stands out.",
   ];

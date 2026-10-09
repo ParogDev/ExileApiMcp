@@ -66,7 +66,7 @@ public static class HealthReportTools
             var cycled = gc["fetchedPagesPerFrame"]?.Value<double?>();
             if (keeps is { } k && cycled is { } c && c > k && gc["allocMBPerSecond"]?.Value<double>() > 50)
                 findings.Add($"the shared ArrayPool keeps {k} pages per size but the page cache cycles ~{c:F0} per frame, so most become garbage: " +
-                             "start the HUD with DOTNET_SYSTEM_BUFFERS_SHAREDARRAYPOOL_MAXARRAYSPERPARTITION=256 (decimal; scaffolding: <HUD>\\hud-env.txt, research/hud-gc.md)");
+                             "DOTNET_SYSTEM_BUFFERS_SHAREDARRAYPOOL_MAXARRAYSPERPARTITION=256 (decimal) halves total GC pause but makes each pause longer; the cure is a HUD-side pool of long-lived pages (scaffolding research/hud-gc.md)");
             else if (gc["sharedArrayPool"]?["broken"]?.Value<string>() is { } broken)
                 findings.Add($"cannot check the ArrayPool limits: {broken}");
             if (gc["pauseMsTotal"]?.Value<double>() > 60) findings.Add($"GC pauses {gc["pauseMsTotal"]} ms per 3 s: see research/hud-gc.md (page cache churn) and plugin allocation below");
