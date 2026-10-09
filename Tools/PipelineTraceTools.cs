@@ -156,7 +156,7 @@ public static class PipelineTraceTools
 
     [McpServerTool(Name = "profile_plugin", Title = "Where a plugin's frame time goes", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
     [Description("""
-        Method-level profile of one HUD plugin for a few seconds: Harmony wraps every method in its assembly (never
+        Method-level profile of one HUD plugin for a few seconds: Harmony wraps every method and instance constructor in its assembly (never
         protected stubs), keeps a per-thread call stack, and reports per method calls, self and inclusive time
         (ms per second of wall time, and us per call), then unpatches. Self = inclusive minus profiled callees, so HUD
         API calls a method makes count as its own time. Find the hot method first with pipeline_trace (pluginTickMs /
