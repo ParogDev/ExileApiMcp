@@ -3,12 +3,13 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
-// Four builds into dist/, all single-file (vite-plugin-singlefile takes one input per build):
+// Five builds into dist/, all single-file (vite-plugin-singlefile takes one input per build):
 //   default          player-stats.html  -> embedded in the server as ui://exile/player-stats
 //   --mode explorer  data-explorer.html -> embedded as ui://exile/data-explorer
 //   --mode memory    memory-view.html   -> embedded as ui://exile/memory-view
-//   --mode harness   harness.html       -> dev-only fake host that loads any app (?app=stats|explorer|memory)
-const INPUTS: Record<string, string> = { explorer: "data-explorer.html", memory: "memory-view.html", harness: "harness.html" };
+//   --mode perf      hud-performance.html -> embedded as ui://exile/hud-performance
+//   --mode harness   harness.html       -> dev-only fake host that loads any app (?app=stats|explorer|memory|perf)
+const INPUTS: Record<string, string> = { explorer: "data-explorer.html", memory: "memory-view.html", perf: "hud-performance.html", harness: "harness.html" };
 
 export default defineConfig(({ mode }) => {
   const input = INPUTS[mode] ?? "player-stats.html";

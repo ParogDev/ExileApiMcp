@@ -24,7 +24,9 @@ public static class HealthReportTools
         Needs 'Allow HUD Instrumentation' for step 2.
         """)]
     public static async Task<CallToolResult> HudHealthReport(BridgeRegistry bridges,
-        [Description(BridgeRegistry.GameParamDescription)] string? game = null, CancellationToken ct = default)
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        [Description("Also return the trace's per-frame series (trace.series) for a frame timeline")] bool series = false,
+        CancellationToken ct = default)
     {
         var sb = new StringBuilder();
         var o = new JObject();
@@ -35,7 +37,7 @@ public static class HealthReportTools
         JToken r;
         try
         {
-            var (bridge, started) = await bridges.CallAsync(game, "pipeline.trace", new JObject { ["durationMs"] = 3000, ["entities"] = 0 }, ct);
+            var (bridge, started) = await bridges.CallAsync(game, "pipeline.trace", new JObject { ["durationMs"] = 3000, ["entities"] = 0, ["series"] = series }, ct);
             var id = started["id"]?.Value<string>();
             if (id == null) { sb.AppendLine($"Trace: {started["message"] ?? started["error"]}"); return Done(sb, o); }
             var g = bridge.Game == "auto" ? game : bridge.Game;
@@ -64,7 +66,7 @@ public static class HealthReportTools
             var cycled = gc["fetchedPagesPerFrame"]?.Value<double?>();
             if (keeps is { } k && cycled is { } c && c > k && gc["allocMBPerSecond"]?.Value<double>() > 50)
                 findings.Add($"the shared ArrayPool keeps {k} pages per size but the page cache cycles ~{c:F0} per frame, so most become garbage: " +
-                             "start the HUD with DOTNET_SYSTEM_BUFFERS_SHAREDARRAYPOOL_MAXARRAYSPERPARTITION=256 (decimal; scaffolding: <HUD>\\hud-env.txt, research/hud-gc.md)");
+                             "DOTNET_SYSTEM_BUFFERS_SHAREDARRAYPOOL_MAXARRAYSPERPARTITION=256 (decimal) halves total GC pause but makes each pause longer; the cure is a HUD-side pool of long-lived pages (scaffolding research/hud-gc.md)");
             else if (gc["sharedArrayPool"]?["broken"]?.Value<string>() is { } broken)
                 findings.Add($"cannot check the ArrayPool limits: {broken}");
             if (gc["pauseMsTotal"]?.Value<double>() > 60) findings.Add($"GC pauses {gc["pauseMsTotal"]} ms per 3 s: see research/hud-gc.md (page cache churn) and plugin allocation below");
@@ -76,6 +78,13 @@ public static class HealthReportTools
         foreach (var p in (r["pluginTickMs"] as JObject)?.Properties() ?? [])
             if (plugins.All(x => x.name != p.Name)) plugins.Add((p.Name, p.Value["avg"]?.Value<double>() ?? 0, 0, r["pluginAllocKBPerFrame"]?["tick"]?[p.Name]?.Value<double>() ?? 0));
         var top = plugins.OrderByDescending(p => p.tick + p.render).Take(5).ToList();
+        // Structured for apps: every traced plugin, costliest first, and the actions the findings suggest.
+        o["plugins"] = new JArray(plugins.OrderByDescending(p => p.tick + p.render).Select(p => new JObject
+        {
+            ["name"] = p.name, ["tickMs"] = Math.Round(p.tick, 3), ["renderMs"] = Math.Round(p.render, 3), ["allocKBPerFrame"] = Math.Round(p.alloc, 1),
+        }));
+        var actions = new JArray();
+        var lint = new JArray();
         if (top.Count > 0)
         {
             sb.AppendLine("Costliest plugins (ms per frame Tick+Render, KB allocated per frame):");
@@ -92,10 +101,13 @@ public static class HealthReportTools
                 var src = hud.SourcePlugins().FirstOrDefault(s => Key(s.Folder) == Key(p.name) || Key(s.ProjectName ?? "") == Key(p.name));
                 var dll = src == null ? null : FindDll(hud, src);
                 if (dll == null) continue;
+                actions.Add(Action($"Lint {src!.Folder}", "hud_plugin_lint", new JObject { ["plugin"] = src.Folder }));
                 try
                 {
                     var hot = PluginLint.Lint(dll).Where(f => f.InLoop && f.CostNs > 0).OrderByDescending(f => f.CostNs * f.Count).Take(3).ToList();
                     if (hot.Count > 0) sb.AppendLine($"Lint {src!.Folder}: " + string.Join("; ", hot.Select(f => $"{f.Method} {f.Call} in a loop (~{f.CostNs:N0} ns)")));
+                    foreach (var f in hot)
+                        lint.Add(new JObject { ["plugin"] = src!.Folder, ["method"] = f.Method, ["call"] = f.Call, ["count"] = f.Count, ["costNs"] = f.CostNs, ["advice"] = f.Advice });
                 }
                 catch { }
             }
@@ -103,8 +115,27 @@ public static class HealthReportTools
             findings.Add($"{worst.name} costs {worst.tick + worst.render:F2} ms per frame: profile_plugin name=\"{worst.name}\" (prompt optimize_plugin)");
         sb.AppendLine(findings.Count == 0 ? "Nothing stands out. For drawings that lag or wobble: overlay_accuracy and knowledge pack shared/render-fidelity." : "Next:\n  - " + string.Join("\n  - ", findings));
         o["findings"] = new JArray(findings);
+        o["lint"] = lint;
+        if (worstAlloc.alloc > 50) actions.Add(Action($"Profile {worstAlloc.name}'s allocation", "profile_plugin", new JObject { ["name"] = worstAlloc.name }));
+        if (top.FirstOrDefault() is { name: not null } w0 && w0.tick + w0.render > 0.3 && w0.name != worstAlloc.name)
+            actions.Add(Action($"Profile {w0.name}", "profile_plugin", new JObject { ["name"] = w0.name }));
+        actions.Add(Action("Check drawing lag", "overlay_accuracy", new JObject()));
+        o["actions"] = actions;
         return Done(sb, o);
     }
+
+    private static JObject Action(string label, string tool, JObject args) => new() { ["label"] = label, ["tool"] = tool, ["args"] = args };
+
+    [McpServerTool(Name = "show_hud_performance", Title = "Open the HUD performance panel", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [ModelContextProtocol.Extensions.Apps.McpAppUi(ResourceUri = Apps.HudPerformanceApp.ResourceUri)]
+    [McpMeta("ui/resourceUri", Apps.HudPerformanceApp.ResourceUri)]
+    [Description("Open a live panel of the running HUD's performance (clients that support MCP Apps): a frame timeline with GC " +
+                 "pauses marked, the frame work split into plugins and HUD core, the costliest plugins by time and by " +
+                 "allocation, and the findings with one-click next steps (profile_plugin, hud_plugin_lint). Other clients get " +
+                 "the same text as hud_health_report. Needs 'Allow HUD Instrumentation'.")]
+    public static Task<CallToolResult> ShowHudPerformance(BridgeRegistry bridges,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null, CancellationToken ct = default)
+        => HudHealthReport(bridges, game, series: true, ct);
 
     private static string Key(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
