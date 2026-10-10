@@ -43,6 +43,7 @@ public static class HealthReportTools
         sb.AppendLine(desk["warning"] is { } w ? $"Screen: {w}" : "Screen: display on, game in front.");
 
         JToken r;
+        var t0 = DateTime.UtcNow;
         try
         {
             var (bridge, started) = await bridges.CallAsync(game, "pipeline.trace", new JObject { ["durationMs"] = 3000, ["entities"] = 0, ["series"] = series }, ct);
@@ -56,6 +57,19 @@ public static class HealthReportTools
                 try { (_, r) = await bridges.CallAsync(g, "pipeline.trace_result", new JObject { ["id"] = id }, ct); } catch (McpException) { }
                 if (r["status"]?.Value<string>() != "done") await Task.Delay(250, ct);
             }
+            if (r["status"]?.Value<string>() != "done" && HudRestartState.Since(bridges, g, t0) is { } cut) throw new HudRestartedException(cut, "The health report's trace");
+        }
+        catch (HudRestartedException ex)
+        {
+            o["interrupted"] = ex.Restart.Json();
+            sb.AppendLine($"Trace: {ex.Message} Run hud_health_report again once the HUD is back.");
+            return (o, sb.ToString());
+        }
+        catch (McpException ex) when (HudRestartState.Since(bridges, game, t0) is { } cut)
+        {
+            o["interrupted"] = cut.Json();
+            sb.AppendLine($"Trace: {cut.Text("The health report's trace")}. Run hud_health_report again once the HUD is back.");
+            return (o, sb.ToString());
         }
         catch (McpException ex) { sb.AppendLine($"Trace: bridge unreachable ({ex.Message})"); return (o, sb.ToString()); }
         o["trace"] = r;

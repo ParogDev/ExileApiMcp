@@ -31,6 +31,7 @@ public static class PipelineTraceTools
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 20_000);
+        var t0 = DateTime.UtcNow;
         var (bridge, started) = await bridges.CallAsync(game, "pipeline.trace", new JObject { ["durationMs"] = durationMs, ["entities"] = entities, ["series"] = series }, ct);
         var id = started["id"]?.Value<string>();
         if (id == null) return ToolResults.Json(started);   // instrumentation_disabled / busy / harmony_unavailable
@@ -41,9 +42,12 @@ public static class PipelineTraceTools
         for (var i = 0; i < 20 && r["status"]?.Value<string>() == "running"; i++)
         {
             try { (_, r) = await bridges.CallAsync(g, "pipeline.trace_result", new JObject { ["id"] = id }, ct); }
+            catch (McpException) when (HudRestartState.Since(bridges, g, t0) is { } rs) { return HudRestartState.Interrupted(rs, "pipeline_trace"); }
             catch (McpException) { }
             if (r["status"]?.Value<string>() == "running") await Task.Delay(250, ct);
         }
+        // Not done, or an unknown id from a HUD that came back: a restart in between lost the trace.
+        if (r["status"]?.Value<string>() != "done" && HudRestartState.Since(bridges, g, t0) is { } cut) return HudRestartState.Interrupted(cut, "pipeline_trace");
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = Summary(r) }],
@@ -179,6 +183,7 @@ public static class PipelineTraceTools
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 20_000);
+        var t0 = DateTime.UtcNow;
         var (bridge, started) = await bridges.CallAsync(game, "profile.plugin", new JObject { ["name"] = name, ["durationMs"] = durationMs, ["assembly"] = assembly, ["filter"] = filter, ["method"] = method }, ct);
         var id = started["id"]?.Value<string>();
         if (id == null) return ToolResults.Json(started);
@@ -188,9 +193,11 @@ public static class PipelineTraceTools
         for (var i = 0; i < 60 && r["status"]?.Value<string>() != "done"; i++)
         {
             try { (_, r) = await bridges.CallAsync(g, "profile.result", new JObject { ["id"] = id }, ct); }
+            catch (McpException) when (HudRestartState.Since(bridges, g, t0) is { } rs) { return HudRestartState.Interrupted(rs, $"profile_plugin {name}"); }
             catch (McpException) { }
             if (r["status"]?.Value<string>() != "done") await Task.Delay(500, ct);
         }
+        if (r["status"]?.Value<string>() != "done" && HudRestartState.Since(bridges, g, t0) is { } cut) return HudRestartState.Interrupted(cut, $"profile_plugin {name}");
         if (r["status"]?.Value<string>() != "done") return ToolResults.Json(r);
         var sb = new StringBuilder();
         sb.AppendLine($"{r["plugin"]}: {r["methodsPatched"]} methods for {r["durationMs"]} ms, {r["calls"]} calls, {r["selfTotalMsPerSecond"]} ms of CPU per second in its code");
