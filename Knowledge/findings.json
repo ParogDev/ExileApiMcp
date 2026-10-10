@@ -257,7 +257,7 @@
       "subject": "Element.GetClientRect under IngameUi.WorldMap (waypoint Teleport and caravan Travel maps)",
       "games": {
         "poe1": { "status": "unverified", "note": "PoE1's HUD uses the same x scale (Camera.Width / 2560 / (aspect / 1.6) = Height / 1600); whether the PoE1 game pans its world map by W/2560 is unmeasured. The bridge's highlight correction is off on PoE1 (WorldMapPanCorrected) until it is" },
-        "poe2": { "status": "verified", "date": "2026-10-10", "where": "1920x1080: 0.075 px per layout unit of WorldMap[0].Position.X (pan clamps at +-422.4 on the Act 2 map: +-31.7 px)", "evidence": "Whats A Route: pan.X -2.9 -> HUD x 883.7 vs orb ~881; pan.X -340.8 -> HUD 766.9 vs orb ~740 (27 px = 340.8 x 0.079). Bridge highlights (guided drags with the user, Teleport view): at pan -422.4 the raw box was 32-35 px right of the icon, corrected ~2 px; at +422.4 raw 31.7 px left, corrected ~1-2 px. Vertical is exact. Node offsets inside the container are right; only the pan is under-scaled. Read the pan from the node's live rect (rect.X / sy - its offsets below WorldMap[0]), not WorldMap[0].Position: that read trails a drag (15 px avg, 31 px max during drags)" }
+        "poe2": { "status": "verified", "date": "2026-10-10", "where": "1920x1080: 0.075 px per layout unit of WorldMap[0].Position.X (pan clamps at +-422.4 on the Act 2 map: +-31.7 px)", "evidence": "Whats A Route: pan.X -2.9 -> HUD x 883.7 vs orb ~881; pan.X -340.8 -> HUD 766.9 vs orb ~740 (27 px = 340.8 x 0.079). Bridge highlights (guided drags with the user, Teleport view): at pan -422.4 the raw box was 32-35 px right of the icon, corrected ~2 px; at +422.4 raw 31.7 px left, corrected ~1-2 px. Vertical is exact. Node offsets inside the container are right; only the pan is under-scaled. Read the pan raw from WorldMap[0] +0x100 (finding ui.worldmap.pan-offset): WorldMap[0].Position and the rects built from it are cached and trail a drag (9.4 px avg, 52 px max)" }
       },
       "check": {
         "kind": "script",
@@ -284,6 +284,36 @@
           ": Math.Abs(r.Value.X - byHeight) < 1 ? new { verdict = \"pass\", where = $\"{cam.Width}x{cam.Height}, pan.X {pan:F1}\", evidence = $\"HUD rect.X {r.Value.X:F1} = (pan + node offsets) x H/1600 ({byHeight:F1}); the game pans by W/2560, so the box is {drift:F1} px off (correct by pan.X x (W/2560 - H/1600))\" }",
           ": Math.Abs(r.Value.X - byWidth) < 1 ? new { verdict = \"differs\", where = $\"{cam.Width}x{cam.Height}, pan.X {pan:F1}\", evidence = $\"HUD rect.X {r.Value.X:F1} already scales the pan by W/2560 ({byWidth:F1}): the HUD fixed it, drop the correction\" }",
           ": new { verdict = \"fail\", where = $\"{cam.Width}x{cam.Height}, pan.X {pan:F1}\", evidence = $\"HUD rect.X {r.Value.X:F1} matches neither H/1600 ({byHeight:F1}) nor W/2560 ({byWidth:F1}) pan scaling: the rect formula changed\" }"
+        ]
+      }
+    },
+    {
+      "id": "ui.worldmap.pan-offset",
+      "title": "The world map's pan (WorldMap[0].Position, layout units) is two floats at WorldMap[0] +0x100; read raw, it is current while the HUD's cached Position trails a drag",
+      "subject": "IngameUi.WorldMap[0] (pan container element)",
+      "games": {
+        "poe1": { "status": "unverified" },
+        "poe2": { "status": "verified", "date": "2026-10-10", "where": "WorldMap[0] +0x100 (x), +0x104 (y), float", "evidence": "At rest +0x100/+0x104 = Position exactly (339.7334, 109.62964). Whats A Route: over 667 samples while dragging, the cached Position trailed the raw read by 9.4 px avg, 52 px max. The bridge calibrates it each time the map opens (CalibratePan: hint, else a scan of the first 0x400 bytes) and moves highlight boxes with it every frame; mid-drag screenshots show boxes on their icons" }
+      },
+      "check": {
+        "kind": "script",
+        "how": "Open the waypoint (Teleport) or caravan Travel map and leave it still (ideally panned away from 0, 0); the script compares the floats at +0x100 with WorldMap[0].Position and scans 0x400 bytes if they moved.",
+        "code": [
+          "var wm = GameController.IngameState.IngameUi.WorldMap;",
+          "var c0 = wm != null && wm.Address != 0 && wm.IsVisible && wm.ChildCount > 0 ? wm.GetChildAtIndex(0) : null;",
+          "var m = GameController.Memory;",
+          "var p1 = c0?.Position; System.Threading.Thread.Sleep(50); var p2 = c0?.Position;",
+          "bool Same(float a, float b) => Math.Abs(a - b) < 0.01f;",
+          "var atRest = c0 != null && Same(p1.Value.X, p2.Value.X) && Same(p1.Value.Y, p2.Value.Y);",
+          "var hit = c0 != null && Same(m.Read<float>(c0.Address + 0x100), p2.Value.X) && Same(m.Read<float>(c0.Address + 0x104), p2.Value.Y);",
+          "int? moved = null;",
+          "if (atRest && !hit && (p2.Value.X != 0 || p2.Value.Y != 0)) for (var off = 0; off + 8 <= 0x400 && moved == null; off += 4) if (Same(m.Read<float>(c0.Address + off), p2.Value.X) && Same(m.Read<float>(c0.Address + off + 4), p2.Value.Y)) moved = off;",
+          "c0 == null ? (object)new { verdict = \"not now\", evidence = \"the world map is closed: open a waypoint (Teleport) or the caravan's Travel map\" }",
+          ": !atRest ? new { verdict = \"not now\", evidence = \"the map is moving: let go of it\" }",
+          ": hit && p2.Value.X == 0 && p2.Value.Y == 0 ? new { verdict = \"not now\", evidence = \"pan is (0, 0), which any zeroed pair matches: drag the map away from its start first\" }",
+          ": hit ? new { verdict = \"pass\", where = \"WorldMap[0] +0x100 (x), +0x104 (y), float\", evidence = $\"+0x100 = ({m.Read<float>(c0.Address + 0x100):F2}, {m.Read<float>(c0.Address + 0x104):F2}) = Position ({p2.Value.X:F2}, {p2.Value.Y:F2})\" }",
+          ": moved != null ? new { verdict = \"fail\", where = $\"WorldMap[0] +0x{moved:X}\", evidence = $\"moved: Position ({p2.Value.X:F2}, {p2.Value.Y:F2}) is at +0x{moved:X} now, +0x100 reads {m.Read<float>(c0.Address + 0x100):F2}: update the bridge's WorldMapPanOffset hint\" }",
+          ": new { verdict = \"fail\", evidence = $\"no float pair equal to Position ({p2.Value.X:F2}, {p2.Value.Y:F2}) in WorldMap[0]'s first 0x400 bytes (+0x100 reads {m.Read<float>(c0.Address + 0x100):F2})\" }"
         ]
       }
     }
