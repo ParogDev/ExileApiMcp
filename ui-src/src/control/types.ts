@@ -111,12 +111,88 @@ export interface ObserveEvent {
   area?: string | null;
   type?: string | null;
   entityType?: string | null;
+  // struct mode
+  off?: string | null;
+  len?: number | null;
+  i32?: string | null;
+  i64?: string | null;
+  // hud: the HUD's own hiccups (spike | reload), so they aren't mistaken for game events
+  cause?: string | null;
+  intervalMs?: number | null;
+  typicalMs?: number | null;
+  gcMs?: number | null;
+  gen0?: number | null;
+  gen1?: number | null;
+  gen2?: number | null;
+  suppressed?: number | null;
+  plugin?: string | null;
+  ok?: boolean | null;
+  durationMs?: number | null;
+  // agent: what an agent asked of the HUD or the user
+  method?: string | null;
+  params?: Record<string, unknown> | null;
   [k: string]: unknown;
 }
 
 export interface ObserveEventsResult { enabled: boolean; seq: number; events: ObserveEvent[] }
 
-export interface LayerSpec { id: string; path: string; mode: string; hz: number; enabled: boolean; key?: string | null }
+/** observe_timeline: around=<seq> gives centre + events; layer + unit gives changes, companions and recentChanges. */
+export interface TimelineCompanion { event: string; count: number; avgDtMs: number }
+export interface TimelineResult {
+  journalEvents: number;
+  windowMs: number;
+  centre?: number | null;
+  events?: ObserveEvent[] | null;
+  layer?: string | null;
+  unit?: string | null;
+  changes?: number | null;
+  companions?: TimelineCompanion[] | null;
+  recentChanges?: ObserveEvent[] | null;
+  [k: string]: unknown;
+}
+
+/** observe_series {layer, unit, windowMs?} (Tools/ObserveSeries.cs): one unit's values over time, its shape, and how
+ *  it relates to other events. An older server may not offer the tool: the UI checks the catalog first. */
+export interface SeriesPoint { at: string; seq?: number | null; value?: string | null; number?: number | null; [k: string]: unknown }
+export interface SeriesRelation {
+  event: string;
+  layer?: string | null;
+  unit?: string | null;
+  name?: string | null;
+  /** How many of this unit's changes had the other event within the window. */
+  together?: number | null;
+  /** How many of those pairs were numeric on both sides. */
+  numeric?: number | null;
+  /** same value | same step | step xK … */
+  relation?: string | null;
+  /** How many pairs the relation held in. */
+  holds?: number | null;
+  strength?: number | null;
+  [k: string]: unknown;
+}
+export interface SeriesResult {
+  layer: string;
+  unit: string;
+  name?: string | null;
+  journalEvents?: number | null;
+  changes?: number | null;
+  windowMs?: number | null;
+  numeric?: boolean | null;
+  distinct?: number | null;
+  /** toggle | states | counter | timer | continuous | text */
+  shape?: string | null;
+  min?: number | null;
+  max?: number | null;
+  stepTypical?: number | null;
+  intervalMedianMs?: number | null;
+  intervalRegular?: boolean | null;
+  topValues?: { value: string; count: number }[] | null;
+  relations?: SeriesRelation[] | null;
+  points?: SeriesPoint[] | null;
+  [k: string]: unknown;
+}
+
+export interface LayerSpec { id: string; path: string; mode: string; hz: number; enabled: boolean; key?: string | null; props?: string[] | null }
 
 export interface LayerStatus {
   spec: LayerSpec;

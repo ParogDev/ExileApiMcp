@@ -7,7 +7,7 @@ import type { Toast } from "../sync";
 import { errorText, isUnreachable, type Host, type ListenState, type ToolResult } from "./host";
 import type {
   BridgeEntry, Catalog, CatalogTool, Game, LayerMapResult, LayersResult, ObserveEvent, ObserveEventsResult, ObserveStatus,
-  PerfSnapshot, SettingChangeResult, SettingNode, SettingsResult,
+  PerfSnapshot, SeriesResult, SettingChangeResult, SettingNode, SettingsResult, TimelineResult,
 } from "./types";
 
 export type Page = "overview" | "tools" | "settings" | "observer" | "perf" | "memory" | "explorer" | "stats";
@@ -62,6 +62,17 @@ export interface ObserverState {
   lastEventAt?: number;
 }
 
+/** The timeline view: the selected event and what was read about it (observe_timeline around / companions, observe_series). */
+export interface TimelineState {
+  /** seq of the selected event. */
+  selected?: number;
+  around?: { seq: number; windowMs: number; loading: boolean; result?: TimelineResult; error?: string };
+  companions?: { layer: string; unit: string; windowMs: number; loading: boolean; result?: TimelineResult; error?: string };
+  series?: { layer: string; unit: string; loading: boolean; result?: SeriesResult; error?: string };
+  /** Events the journal returned that the memory ring no longer has (older sessions): drawn too, keyed by seq. */
+  journal: Readonly<Record<number, ObserveEvent>>;
+}
+
 export interface HealthState {
   snapshot?: PerfSnapshot;
   at?: number;
@@ -85,6 +96,7 @@ export interface Snapshot {
   game?: Game;
   health: HealthState;
   observer: ObserverState;
+  timeline: TimelineState;
   settings: Record<string, SettingsState>;
   undo?: UndoEntry;
   runs: ToolRun[];
@@ -99,13 +111,19 @@ export interface Snapshot {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export const EVENTS_POLL_MS = 2500;
 export const GAMES_POLL_MS = 20_000;
-export const MAX_EVENTS = 300;
+/** The bridge's own ring holds 1000 events: keep as many, so the timeline shows everything the HUD still has. */
+export const MAX_EVENTS = 1000;
+/** observe_events caps limit at 500; the first poll catches up in two rounds at most. */
+const EVENTS_POLL_LIMIT = 500;
+
+const EMPTY_TIMELINE: TimelineState = { journal: {} };
 
 export class ControlStore {
   private snap: Snapshot = {
     route: { page: "overview" }, loadingCatalog: false, games: [],
     health: { watching: false, loading: false, via: "off", history: [] },
     observer: { events: [], seq: 0, busy: false },
+    timeline: EMPTY_TIMELINE,
     settings: {}, runs: [], toolQuery: "", listen: "off", toasts: [], calls: 0,
   };
   private listeners = new Set<() => void>();
@@ -224,10 +242,13 @@ export class ControlStore {
 
   setGame(game: Game) {
     if (game === this.snap.game) return;
-    this.set({ game, observer: { events: [], seq: 0, busy: false }, health: { ...this.snap.health, snapshot: undefined, history: [] } });
+    this.set({ game, observer: { events: [], seq: 0, busy: false }, timeline: EMPTY_TIMELINE, health: { ...this.snap.health, snapshot: undefined, history: [] } });
     this.resubscribe();
     void this.pollEvents();
   }
+
+  /** Does the server offer this tool? (observe_series may not exist yet on an older server.) */
+  hasTool(name: string): boolean { return !!this.snap.catalog?.tools.some((t) => t.name === name); }
 
   get gamesUp(): Game[] { return this.snap.games.filter((g) => g.status === "connected").map((g) => g.game as Game); }
 
@@ -255,6 +276,8 @@ export class ControlStore {
     if (!this.host.readResource) return;
     try {
       if (uri.endsWith("/events")) {
+        // The resource carries the newest 100; the first time, fill the ring from the tool (up to 1000, the bridge's own).
+        if (this.snap.observer.seq === 0) await this.catchUpEvents();
         const { json } = await this.host.readResource(uri);
         this.applyEvents(json as ObserveEventsResult);
       } else if (uri.endsWith("/layers")) {
@@ -354,6 +377,20 @@ export class ControlStore {
     }
   }
 
+  /** Everything the bridge still holds: observe_events {since, limit: 500}, at most two rounds (the ring is 1000). */
+  private async catchUpEvents() {
+    const gen = this.gen;
+    for (let round = 0; round < 2 && this.snap.game; round++) {
+      try {
+        const r = await this.call("observe_events", this.gameArgs({ since: this.snap.observer.seq, limit: EVENTS_POLL_LIMIT }), { quiet: true });
+        if (gen !== this.gen || r.isError) return;
+        const d = r.data as ObserveEventsResult;
+        this.applyEvents(d);
+        if (!d?.events || d.events.length < EVENTS_POLL_LIMIT) return;
+      } catch { return; }
+    }
+  }
+
   /** The live events feed: push re-reads the resource; otherwise observe_events {since} every 2.5 s while visible. */
   private async pollEvents() {
     clearTimeout(this.eventsTimer);
@@ -361,7 +398,7 @@ export class ControlStore {
     const gen = this.gen;
     if (!this.host.listen && !document.hidden && this.snap.game && this.snap.catalog) {
       try {
-        const r = await this.call("observe_events", this.gameArgs({ since: this.snap.observer.seq, limit: 200 }), { quiet: true });
+        const r = await this.call("observe_events", this.gameArgs({ since: this.snap.observer.seq, limit: EVENTS_POLL_LIMIT }), { quiet: true });
         if (gen !== this.gen) return;
         if (!r.isError) this.applyEvents(r.data as ObserveEventsResult);
       } catch { /* the bridge is down: the games poll shows it */ }
@@ -425,6 +462,75 @@ export class ControlStore {
   }
 
   closeLayerMap() { this.set({ observer: { ...this.snap.observer, map: undefined } }); }
+
+  // ── Timeline ─────────────────────────────────────────────────────
+
+  private patchTimeline(patch: Partial<TimelineState>) { this.set({ timeline: { ...this.snap.timeline, ...patch } }); }
+
+  /** Every event the timeline knows: the memory ring plus what journal reads brought back, by seq. */
+  eventBySeq(seq: number): ObserveEvent | undefined {
+    return this.snap.observer.events.find((e) => e.seq === seq) ?? this.snap.timeline.journal[seq];
+  }
+
+  /** Select an event (undefined clears). Reads what happened around it; for a layer event also its unit's companions
+   *  and, when the server offers observe_series, its series. Reads for the previous selection are dropped. */
+  selectTimelineEvent(seq: number | undefined, windowMs = 1000) {
+    if (seq === this.snap.timeline.selected) return;
+    this.patchTimeline({ selected: seq, around: undefined, companions: undefined, series: undefined });
+    if (seq === undefined) return;
+    void this.loadAround(seq, windowMs);
+    const e = this.eventBySeq(seq);
+    if (e?.kind === "layer" && e.layer && e.unit) {
+      void this.loadCompanions(e.layer, e.unit, windowMs);
+      if (this.hasTool("observe_series")) void this.loadSeries(e.layer, e.unit);
+    }
+  }
+
+  async loadAround(seq: number, windowMs = 1000) {
+    this.patchTimeline({ around: { seq, windowMs, loading: true, result: this.snap.timeline.around?.seq === seq ? this.snap.timeline.around.result : undefined } });
+    try {
+      const r = await this.call("observe_timeline", this.gameArgs({ around: seq, windowMs }));
+      if (this.snap.timeline.selected !== seq) return;
+      if (r.isError) throw new Error(r.text || "observe_timeline failed");
+      const result = r.data as TimelineResult;
+      // Journal events the ring no longer has become drawable too.
+      const known = new Set(this.snap.observer.events.map((e) => e.seq));
+      let journal = this.snap.timeline.journal;
+      for (const e of result?.events ?? []) if (!known.has(e.seq) && !journal[e.seq]) journal = { ...journal, [e.seq]: e };
+      this.patchTimeline({ around: { seq, windowMs, loading: false, result }, journal });
+    } catch (e) {
+      if (this.snap.timeline.selected !== seq) return;
+      this.patchTimeline({ around: { seq, windowMs, loading: false, error: errorText(e) } });
+    }
+  }
+
+  async loadCompanions(layer: string, unit: string, windowMs = 1000) {
+    const selected = this.snap.timeline.selected;
+    this.patchTimeline({ companions: { layer, unit, windowMs, loading: true } });
+    try {
+      const r = await this.call("observe_timeline", this.gameArgs({ layer, unit, windowMs }));
+      if (this.snap.timeline.selected !== selected) return;
+      if (r.isError) throw new Error(r.text || "observe_timeline failed");
+      this.patchTimeline({ companions: { layer, unit, windowMs, loading: false, result: r.data as TimelineResult } });
+    } catch (e) {
+      if (this.snap.timeline.selected !== selected) return;
+      this.patchTimeline({ companions: { layer, unit, windowMs, loading: false, error: errorText(e) } });
+    }
+  }
+
+  async loadSeries(layer: string, unit: string, windowMs?: number) {
+    const selected = this.snap.timeline.selected;
+    this.patchTimeline({ series: { layer, unit, loading: true } });
+    try {
+      const r = await this.call("observe_series", this.gameArgs(windowMs ? { layer, unit, windowMs } : { layer, unit }));
+      if (this.snap.timeline.selected !== selected) return;
+      if (r.isError) throw new Error(r.text || "observe_series failed");
+      this.patchTimeline({ series: { layer, unit, loading: false, result: r.data as SeriesResult } });
+    } catch (e) {
+      if (this.snap.timeline.selected !== selected) return;
+      this.patchTimeline({ series: { layer, unit, loading: false, error: errorText(e) } });
+    }
+  }
 
   // ── Settings ─────────────────────────────────────────────────────
 
