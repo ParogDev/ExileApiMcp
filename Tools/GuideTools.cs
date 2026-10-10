@@ -240,7 +240,10 @@ public static class GuideTools
             if (want != null)
             {
                 var have = v.Verdicts.Select(x => x.Key).Concat(v.Verdicts.Select(x => x.Id)).Where(x => x != null).ToHashSet(StringComparer.Ordinal)!;
-                done = want.All(k => have.Contains(k));
+                // A key whose question expired unanswered can no longer be answered: it counts as finished.
+                var expiredKeys = v.Asked.Where(a => a.Expired == true && a.Answer == null).SelectMany(a => new[] { a.Key, a.Id }).Where(x => x != null).ToHashSet(StringComparer.Ordinal)!;
+                done = want.All(k => have.Contains(k) || expiredKeys.Contains(k));
+                if (done && want.Any(k => !have.Contains(k))) note = "Some keyed question(s) expired unanswered (25 s default lifetime; pass durationSec for longer).";
                 v.Verdicts = v.Verdicts.Where(x => want.Contains(x.Id) || (x.Key != null && want.Contains(x.Key))).ToList();
             }
             else if (v.Asked.Count == 0) { done = true; note = "Nothing is asked right now: the highlight has no ask targets (cleared, replaced or never set)."; }
