@@ -27,7 +27,10 @@ public static partial class HudDevTools
                  "errors/warnings it logged, and its Errors.txt - flagged stale when older than the last successful " +
                  "compile (the HUD never deletes it). Reads HUD folders on disk: works with the game and HUD closed. " +
                  "Use after a HUD restart (or the plugin's Reload button) to confirm an edit compiled: the HUD " +
-                 "compiles source plugins at startup, not on save.")]
+                 "compiles source plugins at startup, not on save. Each plugin's source says which folder the HUD " +
+                 "compiles (the junction target: always the scaffolding's MAIN checkout, never a worktree), its git " +
+                 "commit and branch, uncommitted files, a deploy_plugin deploy if one is active, and changedSinceCompile " +
+                 "when the folder changed after the HUD compiled it.")]
     public static CallToolResult HudPlugins(BridgeRegistry bridges,
         [Description("Plugin folder or project name (substring, case-insensitive); omit for all")] string? plugin = null,
         [Description(GameOpt)] string? game = null)
@@ -37,10 +40,19 @@ public static partial class HudDevTools
         {
             var run = hud.LatestRun();
             var plugins = new JArray();
-            foreach (var p in hud.SourcePlugins())
+            var selected = hud.SourcePlugins().Where(p => plugin == null || Matches(p, plugin)).ToList();
+            // git per folder costs two short processes: run them side by side.
+            var sources = selected.AsParallel().WithDegreeOfParallelism(8).Select(p => (p.Folder, Source: SourceInfo(p))).ToDictionary(x => x.Folder, x => x.Source);
+            foreach (var p in selected)
             {
-                if (plugin != null && !Matches(p, plugin)) continue;
-                plugins.Add(PluginStatus(hud, run, p));
+                var o = PluginStatus(hud, run, p);
+                if (sources[p.Folder] is { } src)
+                {
+                    if (o["at"]?.Value<DateTime>() is DateTime at && src["newestEdit"]?.Value<DateTime>() is DateTime edit && edit > at.ToUniversalTime())
+                        src["changedSinceCompile"] = $"{p.Folder} has edits newer than the HUD's compile ({edit:u} > {at.ToUniversalTime():u}): reload_plugin to run them.";
+                    o["source"] = src;
+                }
+                plugins.Add(o);
             }
             result.Add(new JObject
             {
@@ -327,6 +339,26 @@ public static partial class HudDevTools
             else info["text"] = Clip(hud.ForAgent(HudInstall.ReadShared(errorsTxt)));
             o["errorsTxt"] = info;
         }
+        return o;
+    }
+
+    /// <summary>The folder the HUD compiles (junction target) and its git state; null when the folder is no git checkout.</summary>
+    private static JObject? SourceInfo(HudInstall.SourcePlugin p)
+    {
+        var target = PluginGit.Resolve(p.Path);
+        if (!PluginGit.IsRepo(target)) return null;
+        var o = new JObject { ["path"] = target };
+        if (PluginGit.ReadHead(target, out var why) is not { } h) { o["error"] = why; return o; }
+        o["commit"] = h.Sha.Length >= 7 ? h.Sha[..7] : h.Sha;
+        o["branch"] = h.Branch;
+        o["subject"] = h.Subject;
+        if (h.CommittedAt != null) o["committedAt"] = h.CommittedAt.Value.ToString("O");
+        if (h.Changed.Count > 0) o["uncommitted"] = new JArray(h.Changed.Take(20));
+        if (PluginGit.NewestSource(target) is { } edit) o["newestEdit"] = edit.ToString("O");
+        if (target.Contains(@"\.claude\worktrees\", StringComparison.OrdinalIgnoreCase))
+            o["note"] = "This junction points into a worktree, not the main checkout.";
+        if (PluginGit.ReadState(target) is { } d)
+            o["deployed"] = $"deploy_plugin by {d.By} from {d.From} at {d.At:u}: {(d.DeployedSha.Length >= 7 ? d.DeployedSha[..7] : d.DeployedSha)} {d.Subject} (restore returns to {d.BeforeBranch ?? d.BeforeSha[..Math.Min(7, d.BeforeSha.Length)]})";
         return o;
     }
 
