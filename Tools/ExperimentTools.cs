@@ -96,7 +96,7 @@ public static class ExperimentTools
         {
             o = await RunStepAsync(bridges, watch, label, experiment, limit, settleMs, instruction, step, steps, game,
                 async s => { state["status"] = s; await WriteInFlight(experiment, state); }, ct, highlight);
-            state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : "failed";
+            state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : o["interrupted"]?.Value<bool>() == true ? "interrupted" : "failed";
             state["result"] = o;
         }
         catch (OperationCanceledException) { state["status"] = "cancelled"; throw; }
@@ -129,7 +129,20 @@ public static class ExperimentTools
             lease = l["id"]?.ToString();
         }
         catch (McpException ex) when (!ex.Message.Contains("about to restart", StringComparison.Ordinal)) { /* older bridge: no leases */ }
-        try { return await RunStepCoreAsync(bridges, watch, label, experiment, timeoutMs, settleMs, instruction, step, steps, game, onStatus, ct, highlight); }
+        var t0 = DateTime.UtcNow;
+        try { return await RunStepCoreAsync(bridges, watch, label, experiment, timeoutMs, settleMs, instruction, step, steps, game, onStatus, ct, highlight, t0); }
+        catch (McpException ex) when (((ex as HudRestartedException)?.Restart ?? HudRestartState.Since(bridges, game, t0)) is { } cut)
+        {
+            // The user pressed Restart now over this step (or a restart skipped the coordination): the step is lost, and
+            // the caller is told by whom and why instead of seeing a connection error.
+            var what = $"The guided step '{label}' of {experiment}";
+            return new JObject
+            {
+                ["experiment"] = experiment, ["label"] = label, ["changed"] = false, ["error"] = "hud_restarted", ["interrupted"] = true,
+                ["restart"] = cut.Json(), ["message"] = cut.Text(what) + ".",
+                ["note"] = cut.Text(what) + ". Nothing was recorded; run the step again once the HUD is back (bridge_status).",
+            };
+        }
         finally
         {
             if (lease != null)
@@ -138,7 +151,7 @@ public static class ExperimentTools
     }
 
     private static async Task<JObject> RunStepCoreAsync(BridgeRegistry bridges, string[] watch, string label, string experiment,
-        int timeoutMs, int settleMs, string? instruction, int? step, int? steps, string? game, Func<string, Task>? onStatus, CancellationToken ct, string? highlight)
+        int timeoutMs, int settleMs, string? instruction, int? step, int? steps, string? game, Func<string, Task>? onStatus, CancellationToken ct, string? highlight, DateTime t0)
     {
         onStatus ??= _ => Task.CompletedTask;
         if (watch.Length == 0) throw new McpException("Pass at least one watch spec (see experiment_presets).");
@@ -168,6 +181,8 @@ public static class ExperimentTools
         while (sw.ElapsedMilliseconds < timeoutMs)
         {
             await Task.Delay(120, ct);
+            // A HUD that restarted and came back would hand us values from a new process: a "change" that isn't the user's.
+            if (HudRestartState.Since(bridges, game, t0) is { } cut) throw new HudRestartedException(cut, $"The guided step '{label}' of {experiment}");
             current = await CaptureAll(specs, bridges, game, ct);
             if (changedAt < 0)
             {
@@ -283,8 +298,9 @@ public static class ExperimentTools
                 // RunStepAsync clamps to 120 s for blocking callers; the non-blocking path passes its own cap.
                 var o = await RunStepAsync(bridges, watch, label, experiment, timeoutMs, settleMs, instruction, step, steps, game,
                     async s => { state["status"] = s; await WriteInFlight(experiment, state); }, cts.Token, highlight);
-                state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : "failed";
+                state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : o["interrupted"]?.Value<bool>() == true ? "interrupted" : "failed";
                 state["result"] = o;
+                if (o["message"] != null && o["interrupted"] != null) state["error"] = o["message"];
             }
             catch (OperationCanceledException) { state["status"] = "cancelled"; }
             catch (Exception ex) { state["status"] = "error"; state["error"] = ex.Message; }

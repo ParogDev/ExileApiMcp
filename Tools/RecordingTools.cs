@@ -27,17 +27,46 @@ public static class RecordingTools
 
     [McpServerTool(Name = "record_stop", Title = "Stop recording", Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(RecordingStatusResult))]
-    [Description("Stop the current recording; returns frames, duration, file name and size.")]
+    [Description("Stop the current recording; returns frames, duration, file name and size. When a HUD restart cut the " +
+                 "recording, says so: whose recording, how many frames the file kept, and who restarted the HUD and why.")]
     public static async Task<CallToolResult> RecordStop(BridgeRegistry bridges, [Description(G)] string? game = null,
-        CancellationToken ct = default) =>
-        TypedReply.Of<RecordingStatusResult>((await bridges.QueryAsync(game, "record:stop", ct)).Result);
+        CancellationToken ct = default)
+    {
+        var (bridge, r) = await bridges.QueryAsync(game, "record:stop", ct);
+        return CutByRestart(bridges, bridge, r) ?? TypedReply.Of<RecordingStatusResult>(r);
+    }
+
+    /// <summary>
+    /// Not recording, and the bridge kept a note of a recording the last HUD closed on (recordings\interrupted.json): the
+    /// interrupted result, with the restart that closed it when restart-state.json matches (within a minute), else
+    /// "cut when the HUD closed". Null when nothing was cut.
+    /// </summary>
+    private static CallToolResult? CutByRestart(BridgeRegistry bridges, BridgeClient bridge, JToken r)
+    {
+        if (r["interrupted"] is not JObject cut || r["isRecording"]?.Value<bool>() == true) return null;
+        var ended = cut["endedAt"]?.Value<DateTime>().ToUniversalTime() ?? DateTime.MinValue;
+        var what = $"The recording {cut["file"]} ({cut["frames"]} frames kept{(cut["who"] != null ? $", started by {cut["who"]}" : "")})";
+        if (HudRestartState.Read(bridge) is { } rs && Math.Abs((rs.StartedAt - ended).TotalSeconds) < 60)
+            return HudRestartState.Interrupted(rs, what, cut);
+        var text = $"{what} was cut when the HUD closed at {ended:HH:mm:ss} UTC ({cut["why"]}); no restart request matches it (the HUD was quit or crashed?). The file keeps the frames up to then.";
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = text }],
+            StructuredContent = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+                new JObject { ["error"] = "hud_closed", ["interrupted"] = true, ["message"] = text, ["partial"] = cut }.ToString(Newtonsoft.Json.Formatting.None)),
+            IsError = true,
+        };
+    }
 
     [McpServerTool(Name = "record_status", Title = "Recording status", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(RecordingStatusResult))]
     [Description("Whether a recording is in progress, its frame count, elapsed time and file.")]
     public static async Task<CallToolResult> RecordStatus(BridgeRegistry bridges, [Description(G)] string? game = null,
-        CancellationToken ct = default) =>
-        TypedReply.Of<RecordingStatusResult>((await bridges.QueryAsync(game, "record:status", ct)).Result);
+        CancellationToken ct = default)
+    {
+        var (bridge, r) = await bridges.QueryAsync(game, "record:status", ct);
+        return CutByRestart(bridges, bridge, r) ?? TypedReply.Of<RecordingStatusResult>(r);
+    }
 
     [McpServerTool(Name = "snapshot", Title = "Capture snapshot", Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(SnapshotResult))]
