@@ -36,4 +36,7 @@ for /d %%D in ("%LAUNCH%\run-*") do (
 
 set "RUN=%LAUNCH%\run-%RANDOM%%RANDOM%"
 robocopy "%BUILD%" "%RUN%" /e /njh /njs /nfl /ndl /np >nul
+rem The scaffolding repo root (tools\restart-hud.ps1 for hud_restart): the private copy runs from bin\launch, so it can't
+rem find it by its own location. The cwd is usually the repo (or a worktree of it) too; this is the fallback.
+if not defined HEXILE_REPO set "HEXILE_REPO=%PROJ%..\.."
 dotnet "%RUN%\ExileApiMcp.dll" %*

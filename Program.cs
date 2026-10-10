@@ -35,6 +35,7 @@ static async Task RunHttpAsync(string[] args)
     var port = PortFromArgs(args)
                ?? (int.TryParse(Environment.GetEnvironmentVariable("MCP_HTTP_PORT"), out var envPort) ? envPort : 50910);
 
+    SessionIdentity.Kind = "mcp-http";   // shared by every client of this instance (tools\mcp-call.ps1, the control center)
     var builder = WebApplication.CreateBuilder(args);
     builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, port)); // never 0.0.0.0
     builder.Logging.SetMinimumLevel(LogLevel.Warning);

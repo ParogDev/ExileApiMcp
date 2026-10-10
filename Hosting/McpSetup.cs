@@ -9,7 +9,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.58.1";
+    public const string Version = "3.59.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -52,7 +52,14 @@ internal static class McpSetup
         Don't wait for the user to say they are done: run experiment_queue_wait in the background and continue when it returns.
         Passive learning while the user plays: observe action=start (tell them; read-only), then observe_wait in the
         background wakes you when an unmapped panel opens or the area or level changes - map it, record findings,
-        repeat. Knowledge pack shared/passive-learning. Ask once before restarting the HUD mid-play (bridge changes need it).
+        repeat. Knowledge pack shared/passive-learning.
+        Several agents may share one HUD (Claude Code sessions in worktrees, Claude Desktop, scripts). This server identifies
+        itself to the HUD by its working directory's git branch (or HEXILE_AGENT), so the guide card and log say who asked.
+        hud_sessions shows who else is connected and what they are doing. Restart the HUD only through hud_restart: it waits
+        while another agent's measurement, recording, piloted step or compile runs, shows the request on the in-game card
+        (Restart now / Not now), and merges with a restart already under way. Never run the restart script directly. Before
+        a long measurement or a piloted test that spans several tool calls, hud_lease acquire keeps other agents' restarts
+        away until you release it; the tools' own activity is covered without one.
         experiment_presets has ready-made stash experiments. Knowledge pack shared/working-with-users says how to word
         an instruction and what goes on the card, in detail and in chat. The Memory View's Experiments tab
         (show_memory_view) lets the user run a preset themselves or follow your run step by step.
@@ -131,9 +138,9 @@ internal static class McpSetup
                 // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
                 // Polls and the experiment tools stay out of it: await_change writes its own lines, and the Memory View's
                 // experiment runner re-reads the record and presets while it follows along.
-                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "experiment_status" or "experiment_step_start" or "experiment_step_cancel" or "experiment_queue_status" or "guide_state" or "bridge_status" or "observe_wait" or "observe_events")
+                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "experiment_status" or "experiment_step_start" or "experiment_step_cancel" or "experiment_queue_status" or "guide_state" or "bridge_status" or "observe_wait" or "observe_events" or "hud_sessions")
                     && request.Services?.GetService(typeof(BridgeRegistry)) is BridgeRegistry bridges)
-                    _ = ExileApiMcp.Tools.GuideTools.LogAsync(bridges, null, $"Claude: {name}{CallHint(request.Params?.Arguments)}", "agent", CancellationToken.None);
+                    _ = ExileApiMcp.Tools.GuideTools.LogAsync(bridges, null, $"{SessionIdentity.Label}: {name}{CallHint(request.Params?.Arguments)}", "agent", CancellationToken.None);
                 try
                 {
                     var result = await next(request, ct);

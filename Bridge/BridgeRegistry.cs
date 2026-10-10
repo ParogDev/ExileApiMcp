@@ -108,10 +108,33 @@ public sealed class BridgeRegistry : IDisposable
                 return (bridge, await bridge.SendRequestAsync(method, parameters, ct));
             }
         }
+        catch (BridgeUnavailableException ex)
+        {
+            throw new McpException(ex.Message + RestartHint(bridge));
+        }
         catch (BridgeException ex)
         {
             throw new McpException(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// A bridge that doesn't answer may be a HUD mid-restart: tools\restart-hud.ps1 writes restart-state.json in the bridge
+    /// folder before stopping the HUD. If it is recent, say who is restarting and why, so the agent waits instead of debugging.
+    /// </summary>
+    private static string RestartHint(BridgeClient bridge)
+    {
+        try
+        {
+            var path = Path.Combine(bridge.BridgeDir, "restart-state.json");
+            if (!File.Exists(path) || DateTime.UtcNow - File.GetLastWriteTimeUtc(path) > TimeSpan.FromMinutes(3)) return "";
+            var o = JObject.Parse(File.ReadAllText(path));
+            var age = (int)(DateTime.UtcNow - File.GetLastWriteTimeUtc(path)).TotalSeconds;
+            if (o["phase"]?.ToString() == "done")
+                return $" The HUD was just restarted by {o["who"]} ({age} s ago{(o["reason"] != null ? $", {o["reason"]}" : "")}): its bridge comes up a few seconds after launch, retry.";
+            return $" The HUD is being restarted by {o["who"]} ({(o["reason"] != null ? o["reason"] + ", " : "")}started {age} s ago): wait ~20 s and retry; don't restart it again.";
+        }
+        catch { return ""; }
     }
 
     /// <summary>Classic bridge query: method "query" with params.type.</summary>

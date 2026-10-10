@@ -107,6 +107,15 @@ public sealed class BridgeClient : IDisposable
                 if (pong.ToString() == "pong")
                 {
                     Console.Error.WriteLine($"[Bridge:{Game}] connected on 127.0.0.1:{Port}");
+                    // Say who we are (Hosting/SessionIdentity.cs): the bridge tags this connection, so guide lines, leases
+                    // and restart requests carry the session. Best effort: an older bridge answers with a plain query reply.
+                    try
+                    {
+                        var hello = await SendRequestAsync("session.hello", Hosting.SessionIdentity.HelloParams(), budget.Token);
+                        if (hello["others"]?.Value<int>() is > 0 and var others)
+                            Console.Error.WriteLine($"[Bridge:{Game}] identified as {Hosting.SessionIdentity.Label}; {others} other agent(s) connected");
+                    }
+                    catch (BridgeException ex) { Console.Error.WriteLine($"[Bridge:{Game}] session.hello not accepted: {ex.Message}"); }
                     return;
                 }
                 last = new InvalidOperationException($"unexpected ping reply: {pong}");
