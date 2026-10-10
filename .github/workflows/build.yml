@@ -28,6 +28,9 @@ jobs:
       - name: Build
         run: dotnet build ExileApiMcp.csproj -c Release -nologo
 
+      - name: Build the supervisor
+        run: dotnet build Supervisor/ExileApiMcp.Supervisor.csproj -c Release -nologo
+
       # The MCP App UIs are built locally in a container (ui-src/build.ps1) and the single-file
       # outputs are committed as ui/*.html. Rebuild them here with the same Node version and
       # lockfile, and fail if a committed bundle doesn't match its source.

@@ -25,12 +25,16 @@ public static class PluginGit
             var psi = new ProcessStartInfo("git")
             {
                 UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+                // Its own stdin, closed at once: git status waits for as long as an inherited stdin pipe stays open, and
+                // ours always is (the client's protocol pipe in stdio, the supervisor's control pipe in http).
+                RedirectStandardInput = true,
                 WorkingDirectory = dir,
             };
             psi.ArgumentList.Add("-c"); psi.ArgumentList.Add("core.quotepath=off");
             foreach (var a in args) psi.ArgumentList.Add(a);
             psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
             using var p = Process.Start(psi)!;
+            p.StandardInput.Close();
             var stdout = p.StandardOutput.ReadToEndAsync();
             var stderr = p.StandardError.ReadToEndAsync();
             if (!p.WaitForExit(30_000)) { try { p.Kill(true); } catch { } return new(-1, "", $"git {string.Join(' ', args)} timed out"); }

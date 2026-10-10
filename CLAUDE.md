@@ -19,7 +19,9 @@ MCP server (C# SDK 2.2, spec 2026-07-28) exposing live PoE1/PoE2 HUD state throu
 | `Knowledge/{shared,poe1,poe2}/*.md`, `Tools/KnowledgeTools.cs` | Knowledge packs, embedded and served by the `knowledge` tool and `exile://knowledge/{game}/{topic}`. Add a pack when you verify something agents would otherwise rediscover. Keep it short, factual, and free of paths to private source trees |
 | `Apps/PlayerStatsApp.cs` | `ui://exile/player-stats` resource; HTML embedded from `ui/player-stats.html` |
 | `ui-src/` | The app's TypeScript/React source, dev harness and basic-host container. Built in Docker by `ui-src/build.ps1`. **Read `ui-src/README.md` before touching the UI** |
-| `run.cmd` | Launcher used by `.mcp.json` and Claude Desktop: builds, then runs a private copy so `bin\` is never locked |
+| `run.cmd` | Launcher used by `.mcp.json` and Claude Desktop: builds, then runs a private copy so `bin\` is never locked; starts the supervisor |
+| `Supervisor/` | Its own small project: the process clients launch. Runs the server as a worker and swaps it for a newly deployed build without restarting the session or cutting a call. **Read `Supervisor/README.md`** |
+| `deploy.ps1`, `Tools/ServerTools.cs`, `Hosting/ServerBuild.cs` | Deploying a build (`%LOCALAPPDATA%\ExileApiMcp\current.json`), `mcp_deploy` / `mcp_status`, and the build info each server sends the HUD |
 
 ## Rules
 
@@ -28,6 +30,7 @@ MCP server (C# SDK 2.2, spec 2026-07-28) exposing live PoE1/PoE2 HUD state throu
 - **stdio:** never write to stdout. Logs go to stderr only.
 - **Stateless:** no per-connection or per-session state in the server. Shared state lives in the HUD plugin (`stats.*`); recordings are addressed by file name.
 - **Client capabilities in stateless HTTP:** `server.ClientCapabilities` is null. Read `context.JsonRpcRequest.Context?.ClientCapabilities ?? server.ClientCapabilities`.
+- **After an MCP change is merged and bumped in the scaffolding repo, deploy it (`mcp_deploy`).** Every supervised session switches within seconds; running calls finish on the old build. Develop against your own build with `HEXILE_MCP_LOCAL=1` or `dotnet build -o <temp>` plus `--http --port <spare>`, never by deploying an unmerged commit (unless testing it on purpose: say so in the reason).
 - **Build:** `dotnet build`. Clients launched through `run.cmd` run from `bin\launch\run-*` copies and never lock `bin\Debug`. A server started with `dotnet run` does lock it; then verify with `dotnet build -o <temp dir>`.
 - **Text from the user's machine (logs, Errors.txt, stack traces) goes through `HudInstall.ForAgent`.** It shortens paths outside the HUD folder; the HUD's build tree must never reach tool output, since agents copy it into commits.
 - **UI changes:** edit `ui-src/`, run `ui-src/build.ps1`, and commit `ui/player-stats.html` with the source. CI fails on a stale bundle.

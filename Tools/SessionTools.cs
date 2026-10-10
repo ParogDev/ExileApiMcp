@@ -42,8 +42,18 @@ public static class SessionTools
         foreach (var s in o["sessions"] as JArray ?? [])
         {
             var doing = string.Join("; ", (s["doing"] as JArray ?? []).Select(d => d.ToString()));
+            // The server build it runs (bridge session.hello mcp; absent from older servers and bridges).
+            var mcp = s["mcp"] is JObject m ? $" (mcp {m["version"]}{(m["mode"]?.ToString() is { } mode && mode != "supervised" ? $", {mode}" : "")})" : "";
             lines.Add($"{(s["connected"]?.Value<bool>() == true ? "*" : "-")} {s["label"]}{(s["id"]?.ToString() == o["you"]?.ToString() ? " (you)" : "")}" +
-                      $"{(s["branch"] != null && s["branch"]?.ToString() != s["label"]?.ToString() ? $" [{s["branch"]}]" : "")}: {(doing.Length > 0 ? doing : s["connected"]?.Value<bool>() == true ? "idle" : "disconnected")}");
+                      $"{(s["branch"] != null && s["branch"]?.ToString() != s["label"]?.ToString() ? $" [{s["branch"]}]" : "")}{mcp}: {(doing.Length > 0 ? doing : s["connected"]?.Value<bool>() == true ? "idle" : "disconnected")}");
+        }
+        if (o["mcpRollout"] is JObject ro)
+        {
+            static string Names(JToken? t) => string.Join(", ", (t as JArray ?? []).Select(x => x.ToString()));
+            var behind = Names(ro["behind"]); var unsup = Names(ro["unsupervised"]);
+            lines.Add($"MCP {ro["deployedVersion"]} ({ro["deployedSha"]}) deployed: {ro["onDeployed"]} of {ro["total"]} on it" +
+                      (behind.Length > 0 ? $"; swapping: {behind}" : "") + (Names(ro["local"]) is { Length: > 0 } loc ? $"; pinned local: {loc}" : "") +
+                      (unsup.Length > 0 ? $"; need a session restart to follow deploys: {unsup}" : ""));
         }
         var blockers = (o["blockers"] as JArray ?? []).OfType<JObject>().ToList();
         if (blockers.Count > 0)
@@ -124,6 +134,7 @@ public static class SessionTools
         {
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
             WorkingDirectory = repo,
+            RedirectStandardInput = true,   // closed below: the script's children must not inherit our (always open) stdin
         };
         foreach (var arg in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Game", g, "-Who", SessionIdentity.Label, "-Reason", reason, "-WaitSec", waitSec.ToString() })
             psi.ArgumentList.Add(arg);
@@ -133,6 +144,7 @@ public static class SessionTools
         var output = new List<string>();
         var sw = Stopwatch.StartNew();
         using var proc = Process.Start(psi) ?? throw new McpException("Could not start powershell.exe.");
+        proc.StandardInput.Close();
         var stdout = proc.StandardOutput.ReadToEndAsync(ct);
         var stderr = proc.StandardError.ReadToEndAsync(ct);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);

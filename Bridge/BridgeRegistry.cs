@@ -110,12 +110,56 @@ public sealed class BridgeRegistry : IDisposable
         }
         catch (BridgeUnavailableException ex)
         {
+            // A coordinated HUD restart is under way (restart-state.json): wait for the HUD to come back and send the request
+            // then, instead of failing every agent's call with "retry". The request never left, so sending it later is safe.
+            if (RestartComesBackBy(bridge) is DateTime until)
+            {
+                Console.Error.WriteLine($"[Bridge:{bridge.Game}] HUD restart under way: holding {method} until it is back (up to {(int)(until - DateTime.UtcNow).TotalSeconds} s)");
+                while (DateTime.UtcNow < until)
+                {
+                    await Task.Delay(1000, ct);
+                    try
+                    {
+                        await bridge.EnsureConnectedAsync(ct);
+                        return (bridge, await bridge.SendRequestAsync(method, parameters, ct));
+                    }
+                    catch (BridgeUnavailableException) { }   // not back yet (BridgeNotSentException included)
+                    catch (BridgeException again) { throw new McpException(again.Message); }
+                }
+            }
             throw new McpException(ex.Message + RestartHint(bridge));
         }
         catch (BridgeException ex)
         {
             throw new McpException(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Until when a call should wait for the HUD to come back: a restart that is stopping or relaunching it (phase stopping,
+    /// written in the last 3 minutes) gets 150 s from its start; one that just finished (phase done) gets 45 s for the bridge
+    /// to come up. Null when no restart is under way (a HUD that is simply not running fails at once, as before).
+    /// </summary>
+    private static DateTime? RestartComesBackBy(BridgeClient bridge)
+    {
+        try
+        {
+            var path = Path.Combine(bridge.BridgeDir, "restart-state.json");
+            if (!File.Exists(path)) return null;
+            var written = File.GetLastWriteTimeUtc(path);
+            var o = JObject.Parse(File.ReadAllText(path));
+            var phase = o["phase"]?.ToString();
+            if (o["stopOnly"]?.Value<bool>() == true) return null;   // stopped on purpose: it isn't coming back
+            var started = o["startedAt"]?.Value<DateTime>().ToUniversalTime() ?? written;
+            DateTime? until = phase switch
+            {
+                "stopping" when DateTime.UtcNow - written < TimeSpan.FromMinutes(3) => started.AddSeconds(150),
+                "done" when DateTime.UtcNow - written < TimeSpan.FromSeconds(45) => written.AddSeconds(45),
+                _ => null,
+            };
+            return until > DateTime.UtcNow ? until : null;
+        }
+        catch (Exception ex) when (ex is IOException or Newtonsoft.Json.JsonException or FormatException or InvalidCastException) { return null; }
     }
 
     /// <summary>
