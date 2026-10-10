@@ -25,6 +25,7 @@ How an agent asks a developer for help with a guided experiment: when to ask, ho
   - Example: 1 `text: DUMP` (`action: rightclick`), 2 the Ritual checkbox (`until: checked`), 3 the Confirm button.
 - **Sequences:** give targets an `order` for "1 then 2 then 3". `highlight advance=true` moves to the next step. Clear highlights when the step is done; steps clear their own.
 - Never use a highlight to make the user act faster than they want, and keep it short-lived.
+- **Unsure what a UI element is? Ask in game, not in chat.** Give the target `ask: "Is this the Keth stop?"` (and a `key` you can correlate, e.g. `worldmap.stop.10=G2_4_1`): Yes / No / Not sure controls appear next to it, the user clicks while playing, and `await_verdicts` returns the answers (`keys=` for specific ones, `since=` the highlight result's `verdictSeq`). Ask one question per target, worded so Yes confirms your guess; several uncertain targets can be asked at once. A `skip` means the user can't tell: find another way, don't ask again. Verdicts persist (`verdicts`), so record what you learnt in findings.
 
 ## Multi-step tasks: guided flows, not fixed sequences
 For anything with more than one action (open a dialog, tick something, confirm), use a **flow** (`guide_flow`, or `recipe` / `flow` on `experiment_queue`). Don't use a fixed highlight sequence.

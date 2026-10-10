@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json;
 using ExileApiMcp.Bridge;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
@@ -71,9 +72,11 @@ public static class GuideTools
                  "(by name, all matches), any UI element (walker path) or a screen area. Each target has a tier - primary " +
                  "(click/look here, animated), secondary (related) or context (an area to orient the eye) - and optionally an " +
                  "order for a sequence (numbered; the current step is emphasised, advance=true moves on). Targets follow the UI. " +
-                 "Use it with the guide card whenever you ask the user to click something. clear=true removes it.")]
+                 "Use it with the guide card whenever you ask the user to click something. clear=true removes it. " +
+                 "Unsure what a UI element is? Give the target ask='Is this the Keth stop?' (+ key for correlation): the user " +
+                 "gets Yes / No / Not sure next to it in game, and await_verdicts collects the answers - no chat round trip.")]
     public static async Task<CallToolResult> Highlight(BridgeRegistry bridges,
-        [Description("Targets: [{item:'Chaos Orb' | panel:'Stash Tab Settings', child:[0,1,7,1,11,1] | path:'GameController.IngameState.IngameUi.StashElement' | rect:[x,y,w,h], label?, tier?: primary|secondary|context, order?}]. For unmapped panels prefer panel (text inside it) + child (indexes inside it): top-level IngameUi.Children indexes shift. text:'DUMP' (+ within:'panel text') targets elements by their exact label (stash tabs, buttons). action: click|rightclick draws a mouse cue. until: checked|unchecked|gone ends a step; sequences advance by themselves as the user acts (a later step appearing, a met until, the current target leaving)")] System.Text.Json.JsonElement? targets = null,
+        [Description("Targets: [{item:'Chaos Orb' | panel:'Stash Tab Settings', child:[0,1,7,1,11,1] | path:'GameController.IngameState.IngameUi.StashElement' | rect:[x,y,w,h], label?, tier?: primary|secondary|context, order?, ask?, key?}]. For unmapped panels prefer panel (text inside it) + child (indexes inside it): top-level IngameUi.Children indexes shift. text:'DUMP' (+ within:'panel text') targets elements by their exact label (stash tabs, buttons). action: click|rightclick draws a mouse cue. until: checked|unchecked|gone ends a step; sequences advance by themselves as the user acts (a later step appearing, a met until, the current target leaving). ask: a yes/no question about your guess, shown with Yes / No / Not sure controls (the user validates your mapping on the spot); key: your id for the answer, e.g. 'worldmap.stop.10=G2_4_1'")] System.Text.Json.JsonElement? targets = null,
         [Description("Shortcut: item names to highlight as primary targets")] string[]? items = null,
         [Description("Optional heading, e.g. 'Move these to the stash'")] string? title = null,
         [Description("Sequence step to show as current (default: the lowest order)")] int? current = null,
@@ -105,6 +108,85 @@ public static class GuideTools
         if (r is not JObject o || (o["ok"] == null && o["error"] == null))
             throw new McpException("This HUD's bridge plugin has no highlights yet: update What's an AI Bridge and restart the HUD.");
         return r["cleared"] != null ? TypedReply.Of<HighlightCleared>(r) : TypedReply.Of<HighlightState>(r);
+    }
+
+    [McpServerTool(Name = "verdicts", Title = "The user's answers to asked highlights", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(VerdictsResult), IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
+    [Description("Read the verdicts the user gave in game (Yes / No / Not sure on highlight targets that had ask), newest seq, " +
+                 "and what the current highlight is still asking (asked, pending). since = the seq already handled. " +
+                 "Verdicts persist in the HUD's verdicts.jsonl. Non-blocking; await_verdicts waits for them.")]
+    public static async Task<CallToolResult> Verdicts(BridgeRegistry bridges,
+        [Description("Return verdicts with seq greater than this (default 0: the last 100 kept)")] long since = 0,
+        [Description("At most this many (1-300, default 100)")] int limit = 100,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var (_, r) = await bridges.CallAsync(game, "guide.verdicts", new JObject { ["since"] = since, ["limit"] = limit }, ct);
+        NeedVerdicts(r);
+        var v = Dto.From<VerdictsResult>(r);
+        return Dto.Result(v, VerdictsText(v));
+    }
+
+    [McpServerTool(Name = "await_verdicts", Title = "Wait for the user's Yes / No in game", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(VerdictsResult), IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
+    [Description("Block until the user has answered the asked highlight targets (highlight targets with ask), then return the " +
+                 "verdicts. Without keys: until every asked target of the current highlight is answered (returns at once, with a " +
+                 "note, when nothing is asked, e.g. the highlight was cleared or replaced). With keys: until each key (or id) has a " +
+                 "verdict after since (pass the highlight result's verdictSeq as since so earlier sessions' answers to the same " +
+                 "key don't count). Timeout: returns what there is with extra.waiting = true. Never sends input.")]
+    public static async Task<CallToolResult> AwaitVerdicts(BridgeRegistry bridges,
+        [Description("Keys (or ids) that must all be answered; default: every asked target of the current highlight")] string[]? keys = null,
+        [Description("Only verdicts with seq greater than this count (default: those given under the current highlight)")] long? since = null,
+        [Description("Max wait, seconds (5-3600, default 600)")] int timeoutSec = 600,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSec, 5, 3600));
+        var want = keys is { Length: > 0 } ? keys.ToHashSet(StringComparer.Ordinal) : null;
+        while (true)
+        {
+            JToken r;
+            try { (_, r) = await bridges.CallAsync(game, "guide.verdicts", new JObject { ["since"] = since ?? 0, ["limit"] = 300 }, ct); }
+            catch (McpException) when (DateTime.UtcNow < until) { await Task.Delay(3000, ct); continue; }   // HUD restarting
+            NeedVerdicts(r);
+            var v = Dto.From<VerdictsResult>(r);
+            // Without since: only answers given under the current highlight count (a reused key answered last week does not).
+            if (since == null) v.Verdicts = v.Verdicts.Where(x => x.HighlightRev == v.HighlightRev).ToList();
+            bool done;
+            string? note = null;
+            if (want != null)
+            {
+                var have = v.Verdicts.Select(x => x.Key).Concat(v.Verdicts.Select(x => x.Id)).Where(x => x != null).ToHashSet(StringComparer.Ordinal)!;
+                done = want.All(k => have.Contains(k));
+                v.Verdicts = v.Verdicts.Where(x => want.Contains(x.Id) || (x.Key != null && want.Contains(x.Key))).ToList();
+            }
+            else if (v.Asked.Count == 0) { done = true; note = "Nothing is asked right now: the highlight has no ask targets (cleared, replaced or never set)."; }
+            else done = v.Pending == 0;
+            if (done) return Dto.Result(v, note != null ? note + "\n" + VerdictsText(v) : VerdictsText(v));
+            if (DateTime.UtcNow >= until)
+            {
+                v.Extra = new() { ["waiting"] = JsonSerializer.SerializeToElement(true) };
+                return Dto.Result(v, $"Still waiting: {v.Pending} asked target(s) unanswered.\n" + VerdictsText(v));
+            }
+            await Task.Delay(500, ct);
+        }
+    }
+
+    private static void NeedVerdicts(JToken? r)
+    {
+        if (r is not JObject o || (o["ok"] == null && o["error"] == null))
+            throw new McpException("This HUD's bridge plugin has no verdicts yet: update What's an AI Bridge and restart the HUD.");
+    }
+
+    private static string VerdictsText(VerdictsResult v)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"{v.Verdicts.Count} verdict(s), seq {v.Seq}; current highlight rev {v.HighlightRev}: {v.Asked.Count} asked, {v.Pending} pending.");
+        foreach (var x in v.Verdicts)
+            sb.Append($"\n  #{x.Seq} {x.Answer.ToUpperInvariant()}  {x.Ask}{(x.Key != null ? $"  [{x.Key}]" : "")}{(x.Label != null ? $"  ({x.Label})" : "")}");
+        foreach (var a in v.Asked.Where(a => a.Answer == null))
+            sb.Append($"\n  ? {a.Ask}{(a.Key != null ? $"  [{a.Key}]" : "")}{(a.OnScreen ? "" : "  (not on screen now)")}");
+        return sb.ToString();
     }
 
     /// <summary>Best-effort highlight from other tools (never throws); null/empty clears.</summary>
