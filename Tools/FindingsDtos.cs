@@ -75,7 +75,7 @@ public sealed class VerifyFindingResult
     public string? Kind { get; set; }
     /// <summary>What findings.json records for this game (null when nothing).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public FindingGame? Recorded { get; set; }
-    /// <summary>pass | moved | differs | fail.</summary>
+    /// <summary>pass | moved | differs | fail, or "not now" (script checks: the measured state isn't on screen).</summary>
     public string? Verdict { get; set; }
     public string? Where { get; set; }
     public string? Evidence { get; set; }

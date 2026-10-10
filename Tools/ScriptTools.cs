@@ -36,10 +36,17 @@ public static class ScriptTools
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
+        var r = await RunAsync(bridges, code, thread, timeoutMs, game, ct);
+        return r["status"]?.Value<string>() is "done" or "unknown" ? Result(r) : TypedReply.Of<ScriptResult>(r);
+    }
+
+    /// <summary>script.run, then script.result until done: the bridge's raw reply (also used by verify_finding's script checks).</summary>
+    internal static async Task<JToken> RunAsync(BridgeRegistry bridges, string code, string thread, int timeoutMs, string? game, CancellationToken ct)
+    {
         var (bridge, started) = await bridges.CallAsync(game, "script.run",
             new JObject { ["code"] = code, ["thread"] = thread, ["timeoutMs"] = timeoutMs }, ct);
         var id = started["id"]?.Value<string>();
-        if (id == null || started["status"]?.Value<string>() == "rejected") return TypedReply.Of<ScriptResult>(started);
+        if (id == null || started["status"]?.Value<string>() == "rejected") return started;
 
         var g = bridge.Game == "auto" ? game : bridge.Game;
         // Compiling takes ~0.5-3 s (the first script of a HUD run is the slowest), then the run itself.
@@ -52,13 +59,13 @@ public static class ScriptTools
             JToken r;
             try { (_, r) = await bridges.CallAsync(g, "script.result", new JObject { ["id"] = id }, ct); }
             catch (McpException) { continue; } // the main thread can be busy with the script itself
-            if (r["status"]?.Value<string>() is "done" or "unknown") return Result(r);
+            if (r["status"]?.Value<string>() is "done" or "unknown") return r;
         }
-        return TypedReply.Of<ScriptResult>(new JObject
+        return new JObject
         {
             ["id"] = id, ["status"] = "timeout",
             ["message"] = "No result yet. If the script loops forever on the main thread, the HUD is frozen and needs a restart.",
-        });
+        };
     }
 
     private static CallToolResult Result(JToken r)

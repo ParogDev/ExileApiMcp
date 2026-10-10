@@ -75,7 +75,8 @@ public static class FindingsTools
     [McpServerTool(Name = "verify_finding", Title = "Re-run a finding's check on a game", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(VerifyFindingResult))]
     [Description("Run a finding's check against the live game (or the observer journal, for series checks) and report pass / moved / fail with the evidence, plus the " +
-                 "status entry to record in Knowledge/findings.json. Automatic for correlate/stored/eval/data/code/series checks; for manual " +
+                 "status entry to record in Knowledge/findings.json. Automatic for correlate/stored/eval/data/code/series/script checks (script " +
+                 "checks need 'Allow C# Scripts' and can answer 'not now' when the state they measure isn't on screen); for manual " +
                  "ones it returns the experiment to run (with the user).")]
     public static async Task<CallToolResult> VerifyFinding(BridgeRegistry bridges,
         [Description("Finding id (see findings)")] string id,
@@ -187,6 +188,29 @@ public static class FindingsTools
                 verdict = r["error"] != null ? "fail" : needle == null || type.Contains(needle, StringComparison.Ordinal) ? "pass" : "differs";
                 where = $"{expr}: {type}";
                 evidence = r["error"] != null ? $"eval failed: {r["error"]}" : $"eval_path {expr} -> {type}";
+                break;
+            }
+            case "script":
+            {
+                // code (string or array of lines): C# run in the HUD (run_csharp; needs 'Allow C# Scripts') that measures the
+                // fact itself and returns { verdict: pass|differs|fail|not now, where, evidence }. 'not now' = the state it
+                // needs isn't on screen (a panel closed), which is not a failure of the finding.
+                var code = check["codeByGame"]?[g] ?? check["code"] ?? throw new McpException($"Finding '{id}' has no code for {g}.");
+                var text = code is JArray lines ? string.Join("\n", lines.Select(l => l.ToString())) : code.ToString();
+                var r = await ScriptTools.RunAsync(bridges, text, check["thread"]?.ToString() ?? "main", 10_000, g, ct);
+                var v = r["value"] as JObject;
+                var said = v?["verdict"]?.ToString();
+                if (said == "not now")
+                    return Typed(new JObject
+                    {
+                        ["id"] = id, ["game"] = g, ["kind"] = "script", ["recorded"] = recorded, ["verdict"] = "not now",
+                        ["evidence"] = v!["evidence"], ["howToVerify"] = check["how"],
+                        ["next"] = $"Not testable right now: {v["evidence"]}. Set that up (with the user: guide card) and run verify_finding again.",
+                    });
+                verdict = said is "pass" or "differs" or "fail" ? said : "fail";
+                where = v?["where"]?.ToString() ?? "";
+                evidence = v != null ? v["evidence"]?.ToString() ?? v.ToString(Formatting.None)
+                    : $"script did not return a verdict: {r["status"]} {r["error"] ?? r["message"]} {(r["diagnostics"] as JArray)?.ToString(Formatting.None)}".Trim();
                 break;
             }
             case "series":
