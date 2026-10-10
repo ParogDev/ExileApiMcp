@@ -23,7 +23,8 @@ public static class SessionTools
         UseStructuredContent = true, OutputSchemaType = typeof(SessionsView))]
     [Description("The other agents on this HUD (Claude Code sessions in worktrees, Claude Desktop, scripts): their labels, what " +
                  "each is doing right now (measuring, recording, piloting the user through a step, compiling), explicit leases, " +
-                 "and pending HUD restart requests with what blocks them. Check it before a HUD restart or a long measurement " +
+                 "pending HUD restart requests with what blocks them, who holds the in-game card and what each session waits to show " +
+                 "the player (its attention-queue items with their place in line; exile://attention/{game}/queue is the live view). Check it before a HUD restart or a long measurement " +
                  "when you share the HUD; 'you' is your own session id.")]
     public static async Task<CallToolResult> HudSessions(BridgeRegistry bridges,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
@@ -44,7 +45,11 @@ public static class SessionTools
             var doing = string.Join("; ", (s["doing"] as JArray ?? []).Select(d => d.ToString()));
             lines.Add($"{(s["connected"]?.Value<bool>() == true ? "*" : "-")} {s["label"]}{(s["id"]?.ToString() == o["you"]?.ToString() ? " (you)" : "")}" +
                       $"{(s["branch"] != null && s["branch"]?.ToString() != s["label"]?.ToString() ? $" [{s["branch"]}]" : "")}: {(doing.Length > 0 ? doing : s["connected"]?.Value<bool>() == true ? "idle" : "disconnected")}");
+            // Its attention items: what it waits to show the player (position 0 = on the card now).
+            foreach (var q in (s["queued"] as JArray ?? []).OfType<JObject>())
+                lines.Add($"    {(q["position"]?.Value<int>() == 0 ? "on the card" : $"#{q["position"]} in line")}: {q["kind"]} {q["title"]} ({q["id"]}{(q["mergedInto"] != null ? $", shares {q["mergedInto"]}" : "")})");
         }
+        if (o["floor"] is JObject floor) lines.Add($"The card (floor): {floor["who"]}'s {floor["kind"]}: {floor["title"]}");
         var blockers = (o["blockers"] as JArray ?? []).OfType<JObject>().ToList();
         if (blockers.Count > 0)
             lines.Add("A restart would interrupt: " + string.Join("; ", blockers.Select(b => $"{(b["who"] != null ? b["who"] + "'s " : "")}{b["label"]}" + (b["secondsLeft"] != null ? $" ({b["secondsLeft"]} s left)" : ""))));

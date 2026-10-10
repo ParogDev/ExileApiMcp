@@ -13,7 +13,7 @@ namespace ExileApiMcp.Hosting;
 /// subscriptions/listen (2026-07-28, SEP-2575), owned by us: in stateless HTTP there is no session channel, so pushes
 /// travel on the listen request's own response stream for as long as the client keeps it open. We honour resource
 /// subscriptions to the URI spaces of every registered IResourceHub
-/// (exile://observe/..., exile://perf/...) and nothing else (no list changes: our tool, resource and prompt lists
+/// (exile://observe/..., exile://perf/..., exile://attention/...) and nothing else (no list changes: our tool, resource and prompt lists
 /// are static). Contract: one acknowledgement first, listing only what we honour; every notification
 /// tagged with the listen request id under _meta; clean up when the request is cancelled.
 /// </summary>

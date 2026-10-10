@@ -11,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.60.0";
+    public const string Version = "3.61.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -62,6 +62,11 @@ internal static class McpSetup
         (Restart now / Not now), and merges with a restart already under way. Never run the restart script directly. Before
         a long measurement or a piloted test that spans several tool calls, hud_lease acquire keeps other agents' restarts
         away until you release it; the tools' own activity is covered without one.
+        The in-game card is shared: one agent holds it at a time (the bridge's attention queue: restarts first, turns in
+        rotation, nothing new in combat). To ask the user while they play, use ask_user (a question with 2-4 choices on the
+        card; it waits its turn and returns the answer, or pending with an id for ask_user_result) instead of chat;
+        await_change, experiment_step_start and guide_flow wait their turn by themselves. exile://attention/{game}/queue
+        shows who holds the card and where you stand.
         experiment_presets has ready-made stash experiments. Knowledge pack shared/working-with-users says how to word
         an instruction and what goes on the card, in detail and in chat. The Memory View's Experiments tab
         (show_memory_view) lets the user run a preset themselves or follow your run step by step.
@@ -173,9 +178,11 @@ internal static class McpSetup
         services.AddSingleton<BridgeRegistry>();
         services.AddSingleton<ObserveHub>();
         services.AddSingleton<PerfHub>();
+        services.AddSingleton<AttentionHub>();
         // Every hub serves its URI space to subscriptions/listen (Hosting/Subscriptions.cs).
         services.AddSingleton<IResourceHub>(sp => sp.GetRequiredService<ObserveHub>());
         services.AddSingleton<IResourceHub>(sp => sp.GetRequiredService<PerfHub>());
+        services.AddSingleton<IResourceHub>(sp => sp.GetRequiredService<AttentionHub>());
         // Light/dark icon pairs for everything registered with an IconSet icon (Hosting/IconThemes.cs).
         services.PostConfigure<McpServerOptions>(IconThemes.Apply);
         return services
@@ -201,7 +208,7 @@ internal static class McpSetup
                 // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
                 // Polls and the experiment tools stay out of it: await_change writes its own lines, and the Memory View's
                 // experiment runner re-reads the record and presets while it follows along.
-                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "experiment_status" or "experiment_step_start" or "experiment_step_cancel" or "experiment_queue_status" or "guide_state" or "bridge_status" or "observe_wait" or "observe_events" or "hud_sessions")
+                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "experiment_status" or "experiment_step_start" or "experiment_step_cancel" or "experiment_queue_status" or "guide_state" or "bridge_status" or "observe_wait" or "observe_events" or "hud_sessions" or "ask_user" or "ask_user_result")
                     && request.Services?.GetService(typeof(BridgeRegistry)) is BridgeRegistry bridges)
                     _ = ExileApiMcp.Tools.GuideTools.LogAsync(bridges, null, $"{SessionIdentity.Label}: {name}{CallHint(request.Params?.Arguments)}", "agent", CancellationToken.None);
                 try

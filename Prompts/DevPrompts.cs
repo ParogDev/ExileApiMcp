@@ -147,6 +147,8 @@ public static class DevPrompts
            If the user isn't at the game right now, experiment_queue the steps instead (note = why, repeats = 2-3):
            they press Start on the in-game card when ready. Then run experiment_queue_wait in the background (it returns
            and collects the recordings when they finish) so you continue without them telling you they are done.
+           The card is shared with other agents: await_change waits its turn first (not_your_turn if it never comes).
+           A question with choices goes through ask_user (on the card, answered with a click), not chat.
         4. Repeat each action 2-3 times. experiment_summary shows what changed EVERY time (the evidence) vs sometimes
            (side effects, or watches you added later). Item-dependent effects (stacks, slots) show up as "sometimes":
            ask what the user did when a result is surprising. Stop when the evidence is clear.
