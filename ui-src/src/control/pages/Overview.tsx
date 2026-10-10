@@ -104,7 +104,9 @@ export function OverviewPage({ store, snap }: { store: ControlStore; snap: Snaps
           </div>
         </Card>
 
-        <div className="md:col-span-2 lg:col-span-1" data-tour={T.observerCard}>
+        {/* Two columns (md): the feed goes last, so Quick actions and Server share a row instead of each sitting
+            beside an empty half. Three-fifths/two-fifths (lg) keeps the source order. */}
+        <div className="md:order-last md:col-span-2 lg:order-none lg:col-span-1" data-tour={T.observerCard}>
           <EventsFeed store={store} snap={snap} compact />
           <div className="mt-1.5 flex items-center justify-between px-1 text-[11px] text-fg-3">
             <span>{o.status ? (o.status.enabled ? "observing" : "observation off") : "observer status unknown"}{o.status?.layers?.length ? ` · ${o.status.layers.length} layers` : ""}</span>
@@ -115,9 +117,10 @@ export function OverviewPage({ store, snap }: { store: ControlStore; snap: Snaps
           </div>
         </div>
 
+        {/* The value column is minmax(0,1fr): a plain 1fr grows to its longest value (the HUD build hash) and pushed the card past its cell. */}
         <Card title="Server" icon="radio">
           {snap.catalog ? (
-            <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-[12px]">
+            <dl className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-[12px]">
               <dt className="text-fg-3">Name</dt><dd className="truncate">{snap.catalog.server.title ?? snap.catalog.server.name} <span className="tnum text-fg-3">{snap.catalog.server.version}</span></dd>
               <dt className="text-fg-3">Offers</dt><dd className="tnum">{snap.catalog.tools.length} tools in {new Set(snap.catalog.tools.map((t) => t.family)).size} families, {snap.catalog.resources.length} resources ({snap.catalog.resources.filter((r) => r.subscribable).length} subscribable), {snap.catalog.prompts.length} prompts</dd>
               <dt className="text-fg-3">Mode</dt><dd>{store.host.mode === "standalone" ? "standalone (HTTP, subscriptions)" : "MCP App inside the host (held calls, polling)"}</dd>
@@ -125,10 +128,10 @@ export function OverviewPage({ store, snap }: { store: ControlStore; snap: Snaps
               <dd className="flex flex-col gap-0.5">
                 {snap.games.length === 0 && <span className="text-fg-3">checking…</span>}
                 {snap.games.map((g) => (
-                  <span key={g.game} className="flex items-center gap-1.5">
+                  <span key={g.game} className="flex min-w-0 flex-wrap items-center gap-x-1.5">
                     <span className={`size-1.5 rounded-full ${g.status === "connected" ? "bg-success" : g.status === "unreachable" ? "bg-danger" : "bg-fg-3"}`} />
                     <b className="font-semibold">{g.game}</b><span className="text-fg-2">{g.status}{g.port ? ` · :${g.port}` : ""}</span>
-                    {typeof g.hello?.hudBuild === "string" && <span className="truncate text-fg-3">build {g.hello.hudBuild}</span>}
+                    {typeof g.hello?.hudBuild === "string" && <span className="min-w-0 truncate text-fg-3" title={g.hello.hudBuild}>build {g.hello.hudBuild}</span>}
                   </span>
                 ))}
                 {snap.games.some((g) => g.findingsToCheck) && <span className="text-[11px] text-warning">{snap.games.find((g) => g.findingsToCheck)!.findingsToCheck}</span>}
