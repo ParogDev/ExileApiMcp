@@ -71,8 +71,10 @@ public static class ExperimentTools
                  "The card offers the user Done: a seen change is captured at once; userMarkedDone with changed=false means none of " +
                  "the watched specs moved, so the watch is wrong: pick another (see watched), don't wait or ask again. " +
                  "cancelledByUser: they closed the card. " +
+                 "The card is shared by every agent on the HUD: the step first waits its turn (attention queue; inside timeoutMs, " +
+                 "with progress notifications) and fails with not_your_turn, showing nothing, if the turn never comes. " +
                  "Writes only to %LOCALAPPDATA%\\ExileApiMcp\\experiments.")]
-    public static async Task<CallToolResult> AwaitChange(BridgeRegistry bridges,
+    public static async Task<CallToolResult> AwaitChange(BridgeRegistry bridges, IProgress<ProgressNotificationValue> progress,
         [Description("Watch specs: value:<path> | memory:<path>[:size] | collection:<path>[:Label1,Label2]")] string[] watch,
         [Description("Step label, e.g. 'next-tab' (repeats of the same label are compared)")] string label,
         [Description("Experiment record name, e.g. 'stash-tab-switch' (letters, digits, - _ .)")] string experiment,
@@ -98,7 +100,7 @@ public static class ExperimentTools
         try
         {
             o = await RunStepAsync(bridges, watch, label, experiment, limit, settleMs, instruction, step, steps, game,
-                async s => { state["status"] = s; await WriteInFlight(experiment, state); }, ct, highlight);
+                async s => { state["status"] = s; await WriteInFlight(experiment, state); }, ct, highlight, progress);
             state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : o["interrupted"]?.Value<bool>() == true ? "interrupted" : "failed";
             state["result"] = o;
         }
@@ -118,7 +120,30 @@ public static class ExperimentTools
     /// reports progress through <paramref name="onStatus"/> (waiting / detected / settling) for the non-blocking API.
     /// </summary>
     internal static async Task<JObject> RunStepAsync(BridgeRegistry bridges, string[] watch, string label, string experiment,
-        int timeoutMs, int settleMs, string? instruction, int? step, int? steps, string? game, Func<string, Task>? onStatus, CancellationToken ct, string? highlight = null)
+        int timeoutMs, int settleMs, string? instruction, int? step, int? steps, string? game, Func<string, Task>? onStatus, CancellationToken ct, string? highlight = null,
+        IProgress<ProgressNotificationValue>? progress = null)
+    {
+        // The card is shared by every agent on this HUD (the bridge's attention queue): take the floor first, waiting our
+        // turn inside the step's own time limit, and give it back when the step ends, whatever happens.
+        var title = instruction ?? $"Do the '{label}' action ({experiment})";
+        var turn = await AttentionTurn.TakeAsync(bridges, game, "step", title.Length > 80 ? title[..78] + ".." : title, TimeSpan.FromMilliseconds(timeoutMs), onStatus, progress, ct);
+        if (!turn.Granted)
+            return new JObject
+            {
+                ["experiment"] = experiment, ["label"] = label, ["changed"] = false, ["error"] = "not_your_turn", ["queued"] = turn.Item?.Status == "queued",
+                ["attention"] = turn.Id, ["position"] = turn.Item?.Position, ["ahead"] = turn.Item?.Ahead == null ? null : new JArray(turn.Item.Ahead),
+                ["message"] = turn.Note, ["note"] = turn.Note,
+            };
+        try
+        {
+            var left = timeoutMs - (int)turn.Waited.TotalMilliseconds;
+            return await RunStepLeasedAsync(bridges, watch, label, experiment, Math.Max(1000, left), settleMs, instruction, step, steps, game, onStatus, ct, highlight);
+        }
+        finally { await turn.ReleaseAsync(bridges, game); }
+    }
+
+    private static async Task<JObject> RunStepLeasedAsync(BridgeRegistry bridges, string[] watch, string label, string experiment,
+        int timeoutMs, int settleMs, string? instruction, int? step, int? steps, string? game, Func<string, Task>? onStatus, CancellationToken ct, string? highlight)
     {
         // A piloted step must not be cut by another agent's HUD restart (Sessions.cs in the bridge): hold a pilot lease for
         // the whole step, baseline to capture. The card's waiting status blocks too, but not between the baseline and the card.
@@ -391,7 +416,7 @@ public static class ExperimentTools
     [McpServerTool(Name = "experiment_step_start", Title = "Start a guided step (non-blocking)", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ExperimentStepStartedResult))]
     [Description("Like await_change, but returns at once: the step runs in the server (up to 10 minutes) and experiment_status " +
-                 "reports its progress (waiting -> detected -> captured | failed | cancelled) and result. Use it when the wait may " +
+                 "reports its progress (queued -> waiting -> detected -> captured | failed | cancelled; queued = waiting its turn on the shared card) and result. Use it when the wait may " +
                  "outlast a tool call (MCP Apps, long pauses), or to keep working while the user acts. One step per experiment " +
                  "at a time; experiment_step_cancel stops it. The in-game guide card follows the step as with await_change.")]
     public static async Task<CallToolResult> ExperimentStepStart(BridgeRegistry bridges,

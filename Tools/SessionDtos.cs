@@ -19,6 +19,9 @@ public sealed class SessionsView
     /// <summary>Everything a restart would interrupt right now (implicit activity plus explicit leases).</summary>
     public List<BlockerInfo>? Blockers { get; set; }
     public List<RestartInfo>? Restarts { get; set; }
+    /// <summary>Who holds the in-game card (the attention queue's floor), when someone does.</summary>
+    public AttentionFloorInfo? Floor { get; set; }
+    public long? AttentionSeq { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -39,6 +42,10 @@ public sealed class SessionInfo
     public int? Leases { get; set; }
     /// <summary>What this session is doing right now, in words.</summary>
     public List<string>? Doing { get; set; }
+    /// <summary>The who-dot colour, 0-5 (violet, rose, sky, orange, sand, slate).</summary>
+    public int? Hue { get; set; }
+    /// <summary>Its attention items: what it waits to show the player, and where each stands (0 = on the card).</summary>
+    public List<AttentionQueueEntry>? Queued { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 

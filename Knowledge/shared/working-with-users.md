@@ -76,6 +76,13 @@ One action, imperative, about 70 characters, with the key and the mouse target. 
 
 Labels are short kebab-case verbs the summary groups by: `next-tab`, `to-inventory`, `hover`. Reuse the exact label on every repeat, or `experiment_summary` cannot count them.
 
+## Several agents, one player: the attention queue
+- **One card, one agent at a time.** The HUD's bridge queues everything that would put something in front of the player: your question, step or flow shows when it is your turn (restarts first, then round-robin by session, never in combat). `exile://attention/{game}/queue` (or `hud_sessions`) says who holds the card and where you stand.
+- **Ask in game, not in chat:** `ask_user` with 2-4 short choices (the card adds Later). Batch what you need into one question; ask when you are blocked, not early; keep working on what doesn't depend on the answer (`timeoutSec` short, then `ask_user_result` later).
+- **Later is an answer too:** the question comes back at a calm moment; after the third Later it is dismissed (`later_x3`): decide yourself or ask in chat. `urgency=calm` for anything that can wait until town or hideout.
+- `await_change`, `experiment_step_start` and `guide_flow` wait their turn by themselves (inside their timeout) and fail with `not_your_turn` if it never comes: nothing was shown, so retry later or queue it (`experiment_queue` waits without blocking you).
+- A plain `guide` instruction while another agent holds the card is queued, not shown: the reply says `queued` with your position. Don't clear or re-status another agent's card (`not_your_card`).
+
 ## What goes where
 - **The card (`instruction`)**: only the action. It is read in a glance, in game.
 - **`detail`**: one line of context the user may want while acting: what is being watched (`Watching 3 values for up to 45 s`), what was captured (`ItemCount 11 -> 12`), what to fix (`Nothing lasting changed - is the stash open?`). `await_change` fills it; override it only to say something more useful.

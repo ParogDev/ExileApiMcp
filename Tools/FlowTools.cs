@@ -32,8 +32,10 @@ public static class FlowTools
                  "the game state every 100 ms (current step = first step not done; it goes back if the user navigates away; for " +
                  "each step the first option that's possible right now is shown, e.g. right-click the tab if it's in view, else " +
                  "click it in the tab list, else open the tab list). Use a recipe (list them with action=recipes) or pass a flow " +
-                 "JSON. action=state reads progress, action=stop ends it. Never clicks anything itself.")]
-    public static async Task<CallToolResult> GuideFlow(BridgeRegistry bridges,
+                 "JSON. action=state reads progress, action=stop ends it (your own flow only). Never clicks anything itself. The card is shared by " +
+                 "every agent on the HUD: start waits for your turn (attention queue, inside timeoutSec, with progress notifications) " +
+                 "and the turn is the flow's until it ends.")]
+    public static async Task<CallToolResult> GuideFlow(BridgeRegistry bridges, IProgress<ProgressNotificationValue> progress,
         [Description("start | state | stop | recipes | expand (returns the flow without starting it)")] string action = "start",
         [Description("Recipe id from Knowledge/flows.json, e.g. stash-tab-affinity")] string? recipe = null,
         [Description("Recipe params as JSON object or 'k=v;k=v', e.g. tab=DUMP;affinity=Ritual;set=false")] JsonElement? args = null,
@@ -61,9 +63,21 @@ public static class FlowTools
         else throw new McpException("Pass recipe (+ args) or flow. action=recipes lists the recipes.");
         // The flow itself: its shape is the recipe's (FlowStateResult only describes the keys it shares, e.g. title and steps[].label).
         if (action == "expand") return Dto.Result(TypedReply.Parse<JsonElement>(f), f.ToString(Formatting.None));
-        f["timeoutSec"] = timeoutSec;
-        var r = Need((await bridges.CallAsync(game, "guide.flow", f, ct)).Result);
-        if (r["error"] == null) r["next"] = "The HUD guides the user step by step. Read progress with guide_flow action=state; it ends by itself when the goal holds.";
+        // The card is shared by every agent on the HUD: wait for our turn (attention queue) inside the flow's own time limit.
+        // The turn is the flow's from then on: the bridge ends it when the flow ends (goal, timeout or stop).
+        var turn = await AttentionTurn.TakeAsync(bridges, game, "flow", f["title"]?.ToString() ?? recipe ?? "Guided task", TimeSpan.FromSeconds(Math.Clamp(timeoutSec, 10, 3600)), null, progress, ct);
+        if (!turn.Granted) throw new McpException($"guide_flow: {turn.Note}");
+        f["timeoutSec"] = Math.Max(10, timeoutSec - (int)turn.Waited.TotalSeconds);
+        JToken r;
+        try { r = Need((await bridges.CallAsync(game, "guide.flow", f, ct)).Result); }
+        catch { await turn.ReleaseAsync(bridges, game); throw; }
+        if (r["error"] != null) await turn.ReleaseAsync(bridges, game);
+        else
+        {
+            r["next"] = "The HUD guides the user step by step. Read progress with guide_flow action=state; it ends by itself when the goal holds.";
+            if (turn.Id != null) r["attention"] = turn.Id;
+            if (turn.Waited.TotalSeconds >= 1) r["waitedSec"] = (int)turn.Waited.TotalSeconds;
+        }
         return TypedReply.Of<FlowStateResult>(r);
     }
 
