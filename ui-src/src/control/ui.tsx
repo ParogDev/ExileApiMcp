@@ -35,7 +35,8 @@ export function Switch({ checked, onChange, label, disabled, size = "md", tour, 
     <button type="button" role="switch" aria-checked={checked} aria-label={label} title={label} disabled={disabled} data-tour={tour}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex shrink-0 items-center rounded-full border border-transparent p-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${w} ${checked ? on : "bg-line-2"}`}>
-      <span className={`knob block rounded-full bg-surface shadow-sm ${k}`} style={{ transform: checked ? `translateX(${size === "sm" ? 12 : 16}px)` : "translateX(0)" }} />
+      {/* Travel = track - 2 px border - padding (0.25rem) - knob, in rem since the root size varies by host: md 2.25-0.25-1 = 1rem - 2px, sm 1.75-0.25-0.75 = 0.75rem - 2px. A fixed 16px overshot the track. */}
+      <span className={`knob block rounded-full bg-surface shadow-sm ${k}`} style={{ transform: checked ? `translateX(calc(${size === "sm" ? "0.75rem" : "1rem"} - 2px))` : "translateX(0)" }} />
     </button>
   );
 }
