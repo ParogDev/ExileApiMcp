@@ -19,7 +19,11 @@ public static class ObserveResources
     [Description("The latest observer events (ObserveEventsResult: up to 100, newest last; layer, ui, area, level, entity). Subscribable: updated when new events arrive.")]
     public static async Task<string> Events(BridgeRegistry bridges, string game, CancellationToken ct)
     {
-        var (_, r) = await bridges.CallAsync(game, "observe.events", new JObject { ["since"] = 0, ["limit"] = 500 }, ct);
+        // The bridge returns the oldest events after since (up to limit), so since=0 gave the oldest of its ring of 1000,
+        // minutes old: ask for its newest sequence first, then for the 100 before it.
+        var (_, head) = await bridges.CallAsync(game, "observe.events", new JObject { ["since"] = long.MaxValue, ["limit"] = 1 }, ct);
+        var newest = head["seq"]?.Value<long>() ?? 0;
+        var (_, r) = await bridges.CallAsync(game, "observe.events", new JObject { ["since"] = Math.Max(0, newest - 100), ["limit"] = 500 }, ct);
         var result = Dto.From<ObserveEventsResult>(r);
         result.Events = result.Events.Select(e => e.Normalized()).TakeLast(100).ToList();
         return JsonSerializer.Serialize(result, Dto.Options);

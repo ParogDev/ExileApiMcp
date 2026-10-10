@@ -279,7 +279,12 @@ export class ControlStore {
         // The resource carries the newest 100; the first time, fill the ring from the tool (up to 1000, the bridge's own).
         if (this.snap.observer.seq === 0) await this.catchUpEvents();
         const { json } = await this.host.readResource(uri);
-        this.applyEvents(json as ObserveEventsResult);
+        const r = json as ObserveEventsResult;
+        // More than 100 events since the last read (a burst of stat changes does that): the resource skipped some, so
+        // page through them with the tool first.
+        const oldest = r?.events?.[0]?.seq;
+        if (oldest !== undefined && oldest > this.snap.observer.seq + 1) await this.catchUpEvents();
+        this.applyEvents(r);
       } else if (uri.endsWith("/layers")) {
         const { json } = await this.host.readResource(uri);
         const r = json as LayersResult;
@@ -377,10 +382,10 @@ export class ControlStore {
     }
   }
 
-  /** Everything the bridge still holds: observe_events {since, limit: 500}, at most two rounds (the ring is 1000). */
+  /** Everything the bridge still holds after our seq: observe_events {since, limit: 500}, oldest first, page by page. */
   private async catchUpEvents() {
     const gen = this.gen;
-    for (let round = 0; round < 2 && this.snap.game; round++) {
+    for (let round = 0; round < 4 && this.snap.game; round++) {
       try {
         const r = await this.call("observe_events", this.gameArgs({ since: this.snap.observer.seq, limit: EVENTS_POLL_LIMIT }), { quiet: true });
         if (gen !== this.gen || r.isError) return;
@@ -412,7 +417,11 @@ export class ControlStore {
     const fresh = r.events.filter((e) => e.seq > o.seq);
     const events = fresh.length ? [...o.events, ...fresh].slice(-MAX_EVENTS) : o.events;
     const status = o.status && o.status.enabled !== r.enabled ? { ...o.status, enabled: r.enabled } : o.status;
-    this.set({ observer: { ...o, events, seq: Math.max(o.seq, r.seq ?? 0), status, lastEventAt: fresh.length ? Date.now() : o.lastEventAt } });
+    // r.seq is the bridge's newest, but a full page stops short of it: continue from the last event received, or the
+    // next page would skip everything in between (the timeline then showed a stale batch and nothing after it).
+    const lastSeen = r.events.length ? r.events[r.events.length - 1].seq : o.seq;
+    const seq = r.events.length >= EVENTS_POLL_LIMIT ? Math.max(o.seq, lastSeen) : Math.max(o.seq, lastSeen, r.seq ?? 0);
+    this.set({ observer: { ...o, events, seq, status, lastEventAt: fresh.length ? Date.now() : o.lastEventAt } });
   }
 
   async setLayer(spec: { id: string; path: string; mode: string; hz: number; enabled: boolean; key?: string }): Promise<{ ok: boolean; preflight?: string | null; error?: string }> {
