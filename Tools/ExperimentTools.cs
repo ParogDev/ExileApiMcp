@@ -165,82 +165,204 @@ public static class ExperimentTools
 
         var sw = Stopwatch.StartNew();
         var before = await CaptureAll(specs, bridges, game, ct);
-        // The in-game guide shows the user what to do now (they may not be looking at the chat).
+        // The in-game guide shows the user what to do now (they may not be looking at the chat). The card offers Done
+        // (stepId + offerDone, read back with guide.user below) and says "I can't see that change yet" by itself once it
+        // has waited unseenAfterSec; expiresSec clears it should this server go quiet without cleaning up.
+        var stepId = $"ac-{Guid.NewGuid():N}";
         var guideTitle = $"Experiment: {experiment}";
         await GuideTools.SetAsync(bridges, game, new JObject
         {
             ["title"] = guideTitle, ["instruction"] = instruction ?? $"Do the '{label}' action now", ["status"] = "waiting",
             ["step"] = step, ["steps"] = steps, ["detail"] = $"Watching {watch.Length} value(s) for up to {timeoutMs / 1000} s",
+            ["stepId"] = stepId, ["offerDone"] = true, ["unseenAfterSec"] = Math.Clamp(timeoutMs / 4000, 8, 20),
+            ["expiresSec"] = timeoutMs / 1000 + DoneGraceMs / 1000 + settleMs / 1000 + 30,
         }, ct);
-        await GuideTools.LogAsync(bridges, game, $"{ExileApiMcp.Hosting.SessionIdentity.Label}: waiting for '{label}'", "step", ct);
-        if (highlight != null) await GuideTools.HighlightAsync(bridges, game, highlight, ct);
-        await onStatus("waiting");
-        Dictionary<string, string>? current = before, last = before;
-        long changedAt = -1, stableSince = -1;
-        int transients = 0;
-        while (sw.ElapsedMilliseconds < timeoutMs)
+        var finished = false;
+        try
         {
-            await Task.Delay(120, ct);
-            // A HUD that restarted and came back would hand us values from a new process: a "change" that isn't the user's.
-            if (HudRestartState.Since(bridges, game, t0) is { } cut) throw new HudRestartedException(cut, $"The guided step '{label}' of {experiment}");
-            current = await CaptureAll(specs, bridges, game, ct);
+            await GuideTools.LogAsync(bridges, game, $"{ExileApiMcp.Hosting.SessionIdentity.Label}: waiting for '{label}'", "step", ct);
+            if (highlight != null) await GuideTools.HighlightAsync(bridges, game, highlight, ct);
+            await onStatus("waiting");
+            Dictionary<string, string>? current = before, last = before;
+            long changedAt = -1, stableSince = -1, doneAt = -1;
+            int transients = 0;
+            var askUser = true;           // false once the bridge turns out to have no guide.user (older bridge: no Done button)
+            bool userDone = false, cancelled = false;
+            while (true)
+            {
+                var elapsed = sw.ElapsedMilliseconds;
+                if (doneAt < 0 && elapsed >= timeoutMs) break;
+                // Done with nothing seen yet: a change still gets DoneGraceMs (the click races the game's update), then the step ends.
+                if (doneAt >= 0 && changedAt < 0 && elapsed - doneAt >= DoneGraceMs) break;
+                await Task.Delay(120, ct);
+                // A HUD that restarted and came back would hand us values from a new process: a "change" that isn't the user's.
+                if (HudRestartState.Since(bridges, game, t0) is { } cut) throw new HudRestartedException(cut, $"The guided step '{label}' of {experiment}");
+                current = await CaptureAll(specs, bridges, game, ct);
+                if (askUser)
+                {
+                    var (supported, mark) = await UserMarkAsync(bridges, game, stepId, ct);
+                    askUser = supported;
+                    if (mark == "cancelled") { cancelled = true; break; }
+                    if (mark == "done" && doneAt < 0) { doneAt = sw.ElapsedMilliseconds; userDone = true; await onStatus("checking"); }
+                    else if (mark == null && doneAt >= 0) { doneAt = -1; userDone = false; await onStatus("waiting"); }   // "Not done yet"
+                }
+                if (changedAt < 0)
+                {
+                    if (!Same(current, before))
+                    {
+                        changedAt = sw.ElapsedMilliseconds; stableSince = changedAt; last = current;
+                        await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "detected", ["detail"] = "Change seen - hold still" }, ct);
+                        await onStatus("detected");
+                    }
+                    continue;
+                }
+                // After Done a seen change is taken as it is now: the user said the action is over, so no settle wait.
+                if (!Same(current, last)) { stableSince = sw.ElapsedMilliseconds; last = current; if (doneAt < 0) continue; }
+                if (doneAt < 0 && sw.ElapsedMilliseconds - stableSince < settleMs) continue;
+                // Settled. A change that went back to the baseline (hover/animation flicker) isn't the action: keep waiting.
+                if (Same(last, before))
+                {
+                    transients++; changedAt = -1;
+                    await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "waiting", ["detail"] = "That changed back - still waiting for the action" }, ct);
+                    await onStatus("waiting");
+                    continue;
+                }
+                break;
+            }
+            if (highlight != null) await GuideTools.HighlightAsync(bridges, game, null, CancellationToken.None);
+            if (cancelled)
+            {
+                // The user closed the card (its x is Cancel while a step offers Done): the card is gone already.
+                finished = true;
+                await GuideTools.LogAsync(bridges, game, $"Stopped '{label}': you closed the card", "warn", ct);
+                return new JObject
+                {
+                    ["experiment"] = experiment, ["label"] = label, ["changed"] = false, ["cancelledByUser"] = true,
+                    ["watched"] = Watched(specs, before, current ?? before),
+                    ["note"] = "The user closed the card: they cancelled this step. Nothing was recorded. Ask in chat what was wrong " +
+                               "(wrong instruction, not possible right now) before you run it again.",
+                };
+            }
+            if (changedAt >= 0 && Same(last!, before)) changedAt = -1;
             if (changedAt < 0)
             {
-                if (!Same(current, before))
+                var watched = Watched(specs, before, current ?? before);
+                var broken = watched.OfType<JObject>().Where(w => w["error"] != null).Select(w => $"{w["watch"]}: {w["error"]}").ToList();
+                var brokenText = broken.Count > 0 ? $" {broken.Count} of them did not read at all: {string.Join("; ", broken)}." : "";
+                finished = true;
+                if (userDone)
                 {
-                    changedAt = sw.ElapsedMilliseconds; stableSince = changedAt; last = current;
-                    await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "detected", ["detail"] = "Change seen - hold still" }, ct);
-                    await onStatus("detected");
+                    // The user did it and none of what we watch moved: the watch is in the wrong place. Say so on the card
+                    // (they must not think they failed) and to the agent, naming the specs, so it watches something else.
+                    await GuideTools.SetAsync(bridges, game, new JObject
+                    {
+                        ["status"] = "unseen",
+                        ["detail"] = $"None of the {watch.Length} watched value(s) changed - {ExileApiMcp.Hosting.SessionIdentity.Label} will look for another way to see it",
+                    }, ct);
+                    await GuideTools.LogAsync(bridges, game, $"You said done, but nothing watched changed for '{label}'", "warn", ct);
+                    return new JObject
+                    {
+                        ["experiment"] = experiment, ["label"] = label, ["changed"] = false, ["userMarkedDone"] = true,
+                        ["transientChanges"] = transients, ["watched"] = watched,
+                        ["note"] = $"User says done but nothing watched changed: the watch spec is probably wrong ({string.Join("; ", watch)}).{brokenText} " +
+                                   "Find where the state really lives (explore_object, find_in_object, watch_object while the user repeats it, " +
+                                   "observe_layer_map) and run the step again watching that, instead of waiting out a timeout.",
+                    };
                 }
-                continue;
+                await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "failed", ["detail"] = "Nothing lasting changed - Claude will ask again" }, ct);
+                await GuideTools.LogAsync(bridges, game, $"No lasting change for '{label}'", "warn", ct);
+                return new JObject
+                {
+                    ["experiment"] = experiment, ["label"] = label, ["changed"] = false, ["transientChanges"] = transients, ["watched"] = watched,
+                    ["note"] = $"No lasting change within {timeoutMs} ms" + (transients > 0 ? $" ({transients} brief change(s) that reverted were ignored)" : "") +
+                               "." + brokenText + " Did the action happen in game (window focused, panel open), and do the watched values follow it? Run the step again.",
+                };
             }
-            if (!Same(current, last)) { stableSince = sw.ElapsedMilliseconds; last = current; continue; }
-            if (sw.ElapsedMilliseconds - stableSince < settleMs) continue;
-            // Settled. A change that went back to the baseline (hover/animation flicker) isn't the action: keep waiting.
-            if (Same(last, before))
-            {
-                transients++; changedAt = -1;
-                await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "waiting", ["detail"] = "That changed back - still waiting for the action" }, ct);
-                await onStatus("waiting");
-                continue;
-            }
-            break;
-        }
-        if (highlight != null) await GuideTools.HighlightAsync(bridges, game, null, CancellationToken.None);
-        if (changedAt >= 0 && Same(last!, before)) changedAt = -1;
-        if (changedAt < 0)
-        {
-            await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "failed", ["detail"] = "Nothing lasting changed - Claude will ask again" }, ct);
-            await GuideTools.LogAsync(bridges, game, $"No lasting change for '{label}'", "warn", ct);
-        }
-        if (changedAt < 0)
-            return new JObject { ["experiment"] = experiment, ["label"] = label, ["changed"] = false,
-                ["transientChanges"] = transients,
-                ["note"] = $"No lasting change within {timeoutMs} ms" + (transients > 0 ? $" ({transients} brief change(s) that reverted were ignored)" : "") +
-                           ". Did the action happen in game (window focused, panel open), and do the watched values follow it? Run the step again." };
 
-        var after = last!;
-        var changes = Diff(specs, before, after);
-        var stepRecord = new JObject
+            var after = last!;
+            var changes = Diff(specs, before, after);
+            var stepRecord = new JObject
+            {
+                ["label"] = label, ["instruction"] = instruction, ["at"] = DateTimeOffset.Now.ToString("O"), ["game"] = game,
+                ["changedAfterMs"] = changedAt, ["watch"] = new JArray(watch), ["changes"] = changes,
+            };
+            if (userDone) stepRecord["userMarkedDone"] = true;
+            var record = await AppendStep(experiment, stepRecord, ct);
+            finished = true;
+            var repeats = record["steps"]!.Count(s => s["label"]?.ToString() == label);
+            var o = new JObject
+            {
+                ["experiment"] = experiment, ["label"] = label, ["changed"] = true, ["step"] = record["steps"]!.Count(),
+                ["repeatsOfThisLabel"] = repeats, ["changedAfterMs"] = changedAt, ["changes"] = changes, ["watched"] = Watched(specs, before, after),
+            };
+            if (userDone) o["userMarkedDone"] = true;
+            if (transients > 0) o["transientChangesIgnored"] = transients;
+            var headline = changes.OfType<JObject>().FirstOrDefault(c => c["kind"]?.ToString() == "value") ?? changes.OfType<JObject>().FirstOrDefault();
+            var summary = headline == null ? "captured" : $"{ShortKey(headline["key"]!.ToString())}: {headline["from"]} -> {headline["to"]}" +
+                                                           (changes.Count > 1 ? $" (+{changes.Count - 1} more)" : "");
+            await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "captured", ["detail"] = summary }, ct);
+            await GuideTools.LogAsync(bridges, game, $"Captured '{label}': {summary}", "result", ct);
+            if (repeats >= 2) o["consistent"] = Consistent(record, label);
+            return o;
+        }
+        finally
         {
-            ["label"] = label, ["instruction"] = instruction, ["at"] = DateTimeOffset.Now.ToString("O"), ["game"] = game,
-            ["changedAfterMs"] = changedAt, ["watch"] = new JArray(watch), ["changes"] = changes,
-        };
-        var record = await AppendStep(experiment, stepRecord, ct);
-        var repeats = record["steps"]!.Count(s => s["label"]?.ToString() == label);
-        var o = new JObject
+            // Cancelled (the MCP request was cancelled, the client went away, experiment_step_cancel) or failed: take our
+            // card and highlight down, only if the card still shows our step, so nothing waits on the user for nobody.
+            if (!finished)
+            {
+                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                await GuideTools.SetAsync(bridges, game, new JObject { ["clear"] = true, ["ifStep"] = stepId }, cleanup.Token);
+                if (highlight != null) await GuideTools.HighlightAsync(bridges, game, null, cleanup.Token);
+                await GuideTools.LogAsync(bridges, game, $"{ExileApiMcp.Hosting.SessionIdentity.Label} stopped waiting for '{label}'", "warn", cleanup.Token);
+            }
+        }
+    }
+
+    /// <summary>After the user presses Done, a change still gets this long to show up before the step ends unseen.</summary>
+    private const int DoneGraceMs = 2000;
+
+    /// <summary>
+    /// The user's answer to our step on the card (bridge guide.user): done, cancelled or null. supported false: the
+    /// bridge has no guide.user (older plugin, no Done button), so the step just waits as before.
+    /// </summary>
+    private static async Task<(bool supported, string? mark)> UserMarkAsync(BridgeRegistry bridges, string game, string stepId, CancellationToken ct)
+    {
+        try
         {
-            ["experiment"] = experiment, ["label"] = label, ["changed"] = true, ["step"] = record["steps"]!.Count(),
-            ["repeatsOfThisLabel"] = repeats, ["changedAfterMs"] = changedAt, ["changes"] = changes,
-        };
-        if (transients > 0) o["transientChangesIgnored"] = transients;
-        var headline = changes.OfType<JObject>().FirstOrDefault(c => c["kind"]?.ToString() == "value") ?? changes.OfType<JObject>().FirstOrDefault();
-        var summary = headline == null ? "captured" : $"{ShortKey(headline["key"]!.ToString())}: {headline["from"]} -> {headline["to"]}" +
-                                                       (changes.Count > 1 ? $" (+{changes.Count - 1} more)" : "");
-        await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "captured", ["detail"] = summary }, ct);
-        await GuideTools.LogAsync(bridges, game, $"Captured '{label}': {summary}", "result", ct);
-        if (repeats >= 2) o["consistent"] = Consistent(record, label);
-        return o;
+            var (_, r) = await bridges.CallAsync(game, "guide.user", new JObject { ["stepId"] = stepId }, ct);
+            if (r is not JObject o || o["ok"]?.Value<bool>() != true) return (false, null);
+            return (true, o["current"]?.Value<bool>() == true ? o["mark"]?.Type == JTokenType.String ? o["mark"]!.ToString() : null : null);
+        }
+        catch (McpException) { return (false, null); }
+    }
+
+    /// <summary>
+    /// Per watch spec: whether anything under it changed, a short view of its value now (value specs) and the read error
+    /// if it did not read at all (a broken path, named, instead of "nothing changed").
+    /// </summary>
+    private static JArray Watched(List<Spec> specs, Dictionary<string, string> before, Dictionary<string, string> now)
+    {
+        var list = new JArray();
+        foreach (var s in specs)
+        {
+            var prefix = s.Raw + "|";
+            var keys = before.Keys.Concat(now.Keys).Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).Distinct().ToList();
+            var changed = keys.Any(k => before.GetValueOrDefault(k) != now.GetValueOrDefault(k));
+            var o = new JObject { ["watch"] = s.Raw, ["changed"] = changed };
+            string? error = now.GetValueOrDefault(prefix + "error")
+                            ?? (now.GetValueOrDefault(prefix + "@") is { } m && m.StartsWith("error:", StringComparison.Ordinal) ? m["error:".Length..] : null);
+            if (error != null) o["error"] = error;
+            else if (s.Kind == "value")
+            {
+                var leaves = keys.Where(now.ContainsKey).Take(4).Select(k => (k.Length > prefix.Length && k[prefix.Length..] != "value" ? k[prefix.Length..] + "=" : "") + now[k]).ToList();
+                var text = string.Join(", ", leaves) + (keys.Count > 4 ? $", +{keys.Count - 4} more" : "");
+                o["now"] = text.Length > 160 ? text[..158] + ".." : text;
+            }
+            else if (s.Kind == "collection") o["now"] = $"{now.GetValueOrDefault(prefix + "count") ?? "?"} item(s)";
+            list.Add(o);
+        }
+        return list;
     }
 
     // ── Non-blocking steps ───────────────────────────────────────────
@@ -308,8 +430,7 @@ public static class ExperimentTools
             {
                 state["finishedAt"] = DateTimeOffset.Now.ToString("O");
                 try { await WriteInFlight(experiment, state); } catch { }
-                if (state["status"]?.ToString() == "cancelled")
-                    await GuideTools.SetAsync(bridges, game, new JObject { ["status"] = "info", ["detail"] = "Step cancelled" }, CancellationToken.None);
+                // A cancelled step took its own card down (RunStepCoreAsync): no "cancelled" card is left for the user to clear.
                 InFlight.TryRemove(experiment, out _);
                 cts.Dispose();
             }
@@ -427,6 +548,8 @@ public static class ExperimentTools
         {
             var status = s["status"]?.ToString();
             sb.AppendLine($"[{status}] {s["id"]} {s["experiment"]}/{s["label"]} x{s["repeats"]} ({s["captured"]} recorded): {s["instruction"]}");
+            // A failure says why (a user's Done with nothing watched changing names the watch specs to rethink).
+            if (s["error"]?.Type == JTokenType.String) sb.AppendLine($"    {(s["userMarkedDone"]?.Value<bool>() == true ? "user said done: " : "")}{s["error"]}");
             if (status is "queued" or "running" || s["collected"]?.Value<bool>() == true) continue;
             if ((s["captured"]?.Value<int>() ?? 0) == 0)
             {

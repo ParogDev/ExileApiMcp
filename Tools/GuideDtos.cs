@@ -18,9 +18,19 @@ public sealed class GuideState
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Instruction { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public int? Step { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public int? Steps { get; set; }
-    /// <summary>waiting | detected | settling | captured | failed | info | done.</summary>
+    /// <summary>waiting | detected | settling | captured | failed | unseen (the user said done, nothing watched changed) | info | done.</summary>
     public string? Status { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Detail { get; set; }
+    /// <summary>The session label that set the card.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Who { get; set; }
+    /// <summary>The step the card shows, when its asker reads the user's answer (await_change, a queued step).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? StepId { get; set; }
+    /// <summary>The card has a Done button.</summary>
+    public bool? OfferDone { get; set; }
+    /// <summary>The user's answer to the step: null | done (the asker is checking) | cancelled (closed the card).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Mark { get; set; }
+    /// <summary>The card says "I can't see that change yet": waiting longer than the step's unseenAfterSec with no Done.</summary>
+    public bool? Unseen { get; set; }
     /// <summary>The last log lines, oldest first.</summary>
     public List<GuideLogLine>? Log { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
