@@ -228,6 +228,31 @@ public sealed class HudSourcePluginStatus
     public int? RuntimeErrors { get; set; }
     public int? Warnings { get; set; }
     public HudErrorsTxtInfo? ErrorsTxt { get; set; }
+    /// <summary>The folder the HUD compiles and its git state (null when it is no git checkout).</summary>
+    public HudPluginSource? Source { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>What a source plugin folder holds: the junction's target (the scaffolding main checkout) and its git HEAD.</summary>
+public sealed class HudPluginSource
+{
+    public string Path { get; set; } = "";
+    /// <summary>Short commit of HEAD.</summary>
+    public string? Commit { get; set; }
+    /// <summary>null: detached (e.g. a deploy_plugin deploy).</summary>
+    public string? Branch { get; set; }
+    public string? Subject { get; set; }
+    public string? CommittedAt { get; set; }
+    /// <summary>Tracked files with uncommitted changes (the HUD compiles them too).</summary>
+    public List<string>? Uncommitted { get; set; }
+    /// <summary>The newest *.cs write time in the folder.</summary>
+    public string? NewestEdit { get; set; }
+    /// <summary>Set when the folder has edits newer than the HUD's last compile of it.</summary>
+    public string? ChangedSinceCompile { get; set; }
+    /// <summary>An active deploy_plugin deploy: who, from where, what, and what restore returns to.</summary>
+    public string? Deployed { get; set; }
+    public string? Note { get; set; }
+    public string? Error { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
