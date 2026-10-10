@@ -22,6 +22,7 @@ public sealed class BridgeClient : IDisposable
     private readonly SemaphoreSlim _connectLock = new(1, 1);
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private TcpClient? _client;
+    private int _helloRev = -1;   // SessionIdentity.Revision this connection last said hello with
     private StreamReader? _reader;
     private StreamWriter? _writer;
     private CancellationTokenSource? _readCts;
@@ -55,7 +56,7 @@ public sealed class BridgeClient : IDisposable
 
     public async Task EnsureConnectedAsync(CancellationToken ct = default)
     {
-        if (IsConnected) return;
+        if (IsConnected) { await EnsureIdentifiedAsync(ct); return; }
         await _connectLock.WaitAsync(ct);
         try
         {
@@ -66,6 +67,20 @@ public sealed class BridgeClient : IDisposable
         {
             _connectLock.Release();
         }
+    }
+
+    /// <summary>
+    /// The session's identity changed since this connection said hello (SessionIdentity learned its project from the
+    /// client's roots): say hello again, so the HUD names this session by its project instead of the folder it was
+    /// started in. Same id, so the bridge updates the entry it has. Best effort.
+    /// </summary>
+    private async Task EnsureIdentifiedAsync(CancellationToken ct)
+    {
+        var rev = Hosting.SessionIdentity.Revision;
+        if (_helloRev == rev || _helloRev < 0) return;
+        _helloRev = rev;
+        try { await SendRequestAsync("session.hello", Hosting.SessionIdentity.HelloParams(), ct); }
+        catch (BridgeException ex) { Console.Error.WriteLine($"[Bridge:{Game}] session.hello (renamed) not accepted: {ex.Message}"); }
     }
 
     private async Task ConnectAsync(CancellationToken ct)
@@ -111,6 +126,7 @@ public sealed class BridgeClient : IDisposable
                     // and restart requests carry the session. Best effort: an older bridge answers with a plain query reply.
                     try
                     {
+                        _helloRev = Hosting.SessionIdentity.Revision;
                         var hello = await SendRequestAsync("session.hello", Hosting.SessionIdentity.HelloParams(), budget.Token);
                         if (hello["others"]?.Value<int>() is > 0 and var others)
                             Console.Error.WriteLine($"[Bridge:{Game}] identified as {Hosting.SessionIdentity.Label}; {others} other agent(s) connected");

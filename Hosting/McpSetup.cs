@@ -11,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.59.1";
+    public const string Version = "3.60.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -96,6 +96,24 @@ internal static class McpSetup
         """;
 
     /// <summary>The most telling argument of a call (path / expression / key...), shortened, for the guide log.</summary>
+    /// <summary>Ask the client for its roots once (2 s budget); a client without roots, or stateless HTTP, is not asked again.</summary>
+    private static async Task AdoptClientRootsAsync(McpServer server)
+    {
+        try
+        {
+            if (SessionIdentity.Kind != "mcp" || server.ClientCapabilities?.Roots == null) { SessionIdentity.RootsUnavailable(); return; }
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var r = await server.RequestRootsAsync(new ListRootsRequestParams(), cts.Token);
+            if (!SessionIdentity.AdoptRoots(r.Roots.Select(x => x.Uri)))
+                Console.Error.WriteLine($"[Session] none of the client's {r.Roots.Count} root(s) is a git checkout; keeping '{SessionIdentity.Label}'");
+        }
+        catch (Exception ex)
+        {
+            SessionIdentity.RootsUnavailable();
+            Console.Error.WriteLine($"[Session] roots/list failed ({ex.Message}); keeping '{SessionIdentity.Label}'");
+        }
+    }
+
     private static string CallHint(IDictionary<string, System.Text.Json.JsonElement>? args)
     {
         if (args == null) return "";
@@ -177,6 +195,9 @@ internal static class McpSetup
                 // the only record of what an MCP App actually called. Successful polls are skipped (1/s).
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var name = request.Params?.Name ?? "?";
+                // Started outside any repo (the desktop app starts user-scope servers in System32): learn the session's
+                // project from the client's roots once, before anything tells the HUD who we are (SessionIdentity).
+                if (SessionIdentity.NeedsRoots) await AdoptClientRootsAsync(request.Server);
                 // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
                 // Polls and the experiment tools stay out of it: await_change writes its own lines, and the Memory View's
                 // experiment runner re-reads the record and presets while it follows along.

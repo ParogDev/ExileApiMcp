@@ -26,6 +26,8 @@ public sealed class SessionInfo
 {
     public string Id { get; set; } = "";
     public string Label { get; set; } = "";
+    /// <summary>What the in-game UI calls it: never a system folder, no worktree hash tail, unique among the connected.</summary>
+    public string? Name { get; set; }
     public string? Branch { get; set; }
     public string? Cwd { get; set; }
     public int? Pid { get; set; }

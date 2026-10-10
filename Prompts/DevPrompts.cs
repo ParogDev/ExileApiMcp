@@ -142,6 +142,8 @@ public static class DevPrompts
            with the key and the mouse target>" step=n steps=m watch=[...] timeoutMs=45000-60000. Count repeats as steps.
            The card shows DO THIS NOW, then CAPTURED with what changed, or TRY AGAIN. In chat, one line per capture;
            never narrate the waiting or repeat the instruction. Call the next await_change right after a capture.
+           The card offers Done: userMarkedDone with changed=false means the watch is wrong (see watched and the note),
+           so watch something else instead of asking again; cancelledByUser means they closed it: ask in chat.
            If the user isn't at the game right now, experiment_queue the steps instead (note = why, repeats = 2-3):
            they press Start on the in-game card when ready. Then run experiment_queue_wait in the background (it returns
            and collects the recordings when they finish) so you continue without them telling you they are done.

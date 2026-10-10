@@ -79,15 +79,34 @@ public sealed class ExperimentConsistency
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
+/// <summary>One watch spec at the end of a step: whether anything under it changed, its value now, or why it didn't read.</summary>
+public sealed class ExperimentWatched
+{
+    public string Watch { get; set; } = "";
+    public bool Changed { get; set; }
+    /// <summary>value specs: up to 4 leaves as they read now ("k=v, ..."); collection specs: the item count.</summary>
+    public string? Now { get; set; }
+    /// <summary>The spec did not read at all (a broken path: the walker names the link), so it could never change.</summary>
+    public string? Error { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
 /// <summary>
 /// await_change: changed true with the diff (step, repeatsOfThisLabel, changedAfterMs, changes, consistent), or changed
-/// false after the timeout (transientChanges, note).
+/// false after the timeout (transientChanges, note), after the user's Done with nothing changed (userMarkedDone, note
+/// naming the watch specs), or after the user closed the card (cancelledByUser). watched: each spec's state at the end.
 /// </summary>
 public sealed class AwaitChangeResult
 {
     public string Experiment { get; set; } = "";
     public string Label { get; set; } = "";
     public bool Changed { get; set; }
+    /// <summary>The user pressed Done on the card. With changed false: nothing watched changed, the watch spec is probably wrong.</summary>
+    public bool? UserMarkedDone { get; set; }
+    /// <summary>The user closed the card (its x cancels a waiting step): nothing was recorded.</summary>
+    public bool? CancelledByUser { get; set; }
+    /// <summary>Each watch spec at the end of the step: changed or not, its value now, or its read error.</summary>
+    public List<ExperimentWatched>? Watched { get; set; }
     /// <summary>Steps in the record now.</summary>
     public int? Step { get; set; }
     public int? RepeatsOfThisLabel { get; set; }
@@ -125,7 +144,7 @@ public sealed class ExperimentStepState
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public JsonElement Steps { get; set; }
     public string? StartedAt { get; set; }
     public long? TimeoutMs { get; set; }
-    /// <summary>starting | waiting | detected | captured | failed | cancelled | error | stale.</summary>
+    /// <summary>starting | waiting | checking (the user pressed Done) | detected | captured | failed | interrupted | cancelled | error | stale.</summary>
     public string Status { get; set; } = "";
     public List<string>? Watch { get; set; }
     /// <summary>A blocking await_change (not experiment_step_start).</summary>
