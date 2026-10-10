@@ -99,21 +99,36 @@ public static class AttentionTools
         var sw = Stopwatch.StartNew();
         var said = "";
         var lastBeat = TimeSpan.Zero;
-        while (!Final.Contains(item.Status) && sw.Elapsed < wait)
+        try
         {
-            var line = Line(item);
-            if (line != said || sw.Elapsed - lastBeat > TimeSpan.FromSeconds(20))
+            while (!Final.Contains(item.Status) && sw.Elapsed < wait)
             {
-                said = line; lastBeat = sw.Elapsed;
-                progress?.Report(new ProgressNotificationValue { Progress = (float)sw.Elapsed.TotalSeconds, Total = (float)wait.TotalSeconds, Message = line });
+                var line = Line(item);
+                if (line != said || sw.Elapsed - lastBeat > TimeSpan.FromSeconds(20))
+                {
+                    said = line; lastBeat = sw.Elapsed;
+                    progress?.Report(new ProgressNotificationValue { Progress = (float)sw.Elapsed.TotalSeconds, Total = (float)wait.TotalSeconds, Message = line });
+                }
+                await Task.Delay(1000, ct);
+                try { item = Need<AttentionItemInfo>((await bridges.CallAsync(game, "attention.result", new JObject { ["id"] = item.Id }, ct)).Result, "attention.result"); }
+                catch (McpException ex) when (IsUnknownItem(ex))
+                {
+                    // The bridge no longer knows the ask (not restored after a restart, or cleaned up): it will never be answered.
+                    item.Status = "cancelled"; item.Reason = "lost"; item.Why = $"The HUD lost this question ({ex.Message}). Ask again if you still need the answer.";
+                }
+                catch (McpException) when (!ct.IsCancellationRequested)
+                {
+                    // The HUD restarting (restarts go first) or the bridge briefly down: the ask is persisted, keep waiting.
+                    await Task.Delay(2000, ct);
+                }
             }
-            await Task.Delay(1000, ct);
-            try { item = Need<AttentionItemInfo>((await bridges.CallAsync(game, "attention.result", new JObject { ["id"] = item.Id }, ct)).Result, "attention.result"); }
-            catch (McpException) when (!ct.IsCancellationRequested)
-            {
-                // The HUD restarting (restarts go first) or the bridge briefly down: the ask is persisted, keep waiting.
-                await Task.Delay(2000, ct);
-            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The call was cancelled (the agent stopped or moved on): take the question off the card's line, so it never
+            // reaches the player with nobody left to read the answer.
+            await AttentionTurn.ReleaseAsync(bridges, game, item.Id, cancel: true);
+            throw;
         }
         var final = Final.Contains(item.Status);
         var result = new AskUserResult
@@ -144,8 +159,7 @@ public static class AttentionTools
     {
         if (i.Status == "showing") return i.VisibleSince != null ? "on the card now" : "next on the card";
         if (i.Status != "queued") return i.Status;
-        var pos = i.Position ?? 0;
-        var text = $"{Ordinal(pos)} in line" + (i.Ahead is { Count: > 0 } a ? $", after {string.Join(", ", a)}" : "");
+        var text = (i.Position is int pos and > 0 ? $"{Ordinal(pos)} in line" : "in line") +(i.Ahead is { Count: > 0 } a ? $", after {string.Join(", ", a)}" : "");
         if (i.LaterCount is > 0) text += $", Later x{i.LaterCount}";
         if (i.WaitingFor != null) text += $" (waiting for {i.WaitingFor})";
         return text;
@@ -157,6 +171,8 @@ public static class AttentionTools
     /// A reply from a bridge without the attention queue: its unknown-method fallback answers with a bare error or another
     /// query's data, never an item (status), a state (seq) or one of the queue's own errors (which carry a message).
     /// </summary>
+    internal static bool IsUnknownItem(McpException ex) => ex.Message.Contains("unknown_item", StringComparison.Ordinal);
+
     internal static bool IsLegacy(JToken r) => r is not JObject o || (o["status"] == null && o["seq"] == null && o["message"] == null);
 
     /// <summary>A bridge reply as T; a bridge without the attention queue, or a bridge error, says what broke.</summary>
@@ -208,7 +224,18 @@ internal sealed class AttentionTurn
                     if (onWait != null) await onWait("queued");
                 }
                 await Task.Delay(700, ct);
-                item = Dto.From<AttentionItemInfo>((await bridges.CallAsync(game, "attention.result", new JObject { ["id"] = item.Id }, ct)).Result);
+                try { item = Dto.From<AttentionItemInfo>((await bridges.CallAsync(game, "attention.result", new JObject { ["id"] = item.Id }, ct)).Result); }
+                catch (McpException ex) when (AttentionTools.IsUnknownItem(ex))
+                {
+                    // Steps and flows don't survive a HUD restart (a restart goes first, so this is the usual case): get back in line.
+                    var (_, again) = await bridges.CallAsync(game, "attention.request", new JObject
+                        { ["kind"] = kind, ["title"] = title, ["ttlSec"] = Math.Clamp((int)(limit - sw.Elapsed).TotalSeconds + 30, 10, 3600) }, ct);
+                    item = Dto.From<AttentionItemInfo>(again);
+                }
+                catch (McpException) when (!ct.IsCancellationRequested)
+                {
+                    await Task.Delay(2000, ct);   // the HUD restarting or the bridge briefly down: keep our place and wait
+                }
             }
         }
         catch
