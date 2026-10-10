@@ -176,6 +176,12 @@ public static class GuideTools
         var (_, r) = await bridges.CallAsync(game, "guide.highlight", p, ct);
         if (r is not JObject o || (o["ok"] == null && o["error"] == null))
             throw new McpException("This HUD's bridge plugin has no highlights yet: update What's an AI Bridge and restart the HUD.");
+        // Bridges before clearedLayers sent clear-all's names as layers, which the declared schema types as layer objects.
+        if (o["cleared"] != null && o["layers"] is JArray names && names.Any(n => n.Type == JTokenType.String))
+        {
+            o.Remove("layers");
+            o["clearedLayers"] = names;
+        }
         return r["cleared"] != null ? TypedReply.Of<HighlightCleared>(r) : TypedReply.Of<HighlightState>(r);
     }
 
