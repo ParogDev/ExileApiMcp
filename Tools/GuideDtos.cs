@@ -68,7 +68,7 @@ public sealed class GuideLogLine
 
 /// <summary>
 /// What highlight shows: the targets as resolved (found = boxes on screen now) and their boxes. After clear=true the
-/// result is only {ok, cleared:true}.
+/// result is a HighlightCleared; this is the tool's declared output schema, so it carries those fields too.
 /// </summary>
 public sealed class HighlightState
 {
@@ -92,6 +92,10 @@ public sealed class HighlightState
     public long? VerdictSeq { get; set; }
     /// <summary>Every agent's layer on screen, oldest first (the combined view).</summary>
     public List<HighlightLayerInfo>? Layers { get; set; }
+    /// <summary>clear + force: every layer was cleared.</summary>
+    public bool? All { get; set; }
+    /// <summary>clear + force: whose layers were cleared.</summary>
+    public List<string>? ClearedLayers { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -116,14 +120,14 @@ public sealed class HighlightLayerInfo
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
-/// <summary>highlight clear=true's reply: only your layer, or every layer with force (all, layers = whose were cleared).</summary>
+/// <summary>highlight clear=true's reply: only your layer, or every layer with force (all, clearedLayers = whose were cleared).</summary>
 public sealed class HighlightCleared
 {
     public bool Ok { get; set; }
     public bool Cleared { get; set; }
     public string? Layer { get; set; }
     public bool? All { get; set; }
-    public List<string>? Layers { get; set; }
+    public List<string>? ClearedLayers { get; set; }
     /// <summary>Other agents' layers that stay on screen, or the questions a clear-all removed.</summary>
     public string? Note { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
