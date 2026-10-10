@@ -21,7 +21,11 @@ public static class GuideTools
     [Description("Show an instruction in the in-game agent guide panel (sticky 'do this now' card) and/or add a line to its " +
                  "log. Use it before asking the user to do anything in game - they may not be looking at the chat. " +
                  "await_change sets the instruction and status by itself when you pass instruction. Statuses: waiting (user " +
-                 "must act) | detected | settling | captured | failed | info | done. clear=true removes the card.")]
+                 "must act) | detected | settling | captured | failed | info | done. clear=true removes the card. " +
+                 "A waiting card with an instruction gets a Done button (offerDone, default on): the result's stepId goes to " +
+                 "await_done, which waits for the user's Done (or x) - run it in the background through tools\\mcp-call.ps1 " +
+                 "for long waits. Use it for anything the user must do outside your reach (an elevated command, a restart " +
+                 "of Claude Desktop): give the exact command in chat too.")]
     public static async Task<CallToolResult> Guide(BridgeRegistry bridges,
         [Description("What the user should do, short and concrete, e.g. 'Ctrl+scroll DOWN once over the stash'")] string? instruction = null,
         [Description("waiting | detected | settling | captured | failed | info | done")] string? status = null,
@@ -33,11 +37,20 @@ public static class GuideTools
         [Description("The log line's kind, which sets its toast's colour and icon: agent (default) | step | result | warn | error")] string? logKind = null,
         [Description("A 2-3 word toast title, e.g. 'Low life' (shown in caps); default: from the kind")] string? logTitle = null,
         [Description("Remove the instruction card")] bool clear = false,
+        [Description("Show a Done button the user presses when finished (default: on for status=waiting with an instruction); await_done reads it")] bool? offerDone = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         var set = new JObject();
         if (clear) set["clear"] = true;
+        string? stepId = null;
+        if (!clear && (offerDone ?? (status == "waiting" && instruction != null)))
+        {
+            // A step id makes the bridge draw Done beside the x; the user's mark is read with guide.user (await_done).
+            // unseenAfterSec at its maximum: there is nothing to watch, so "I can't see that change yet" would be wrong.
+            stepId = $"g-{Guid.NewGuid():N}";
+            set["stepId"] = stepId; set["offerDone"] = true; set["unseenAfterSec"] = 600;
+        }
         if (instruction != null) set["instruction"] = instruction;
         if (status != null) set["status"] = status;
         if (title != null) set["title"] = title;
@@ -53,8 +66,60 @@ public static class GuideTools
             await bridges.CallAsync(game, "guide.log", line, ct);
         }
         state ??= (await bridges.CallAsync(game, "guide.state", null, ct)).Result;
+        if (stepId != null && state is JObject so && so["error"] == null)
+        {
+            so["stepId"] = stepId;
+            so["next"] = $"The card has a Done button: await_done stepId={stepId} waits for it (in the background for long waits).";
+        }
         // After a change the bridge only acknowledges it ({ok, rev}); otherwise this is the full state.
         return set.Count > 0 ? TypedReply.Of<GuideAck>(state) : TypedReply.Of<GuideState>(state);
+    }
+
+    [McpServerTool(Name = "await_done", Title = "Wait for the user's Done on the guide card", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(GuideDoneResult), IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
+    [Description("Block until the user presses Done (or x) on a guide card posted with a Done button (guide's stepId), then " +
+                 "close the card: Done becomes a short DONE toast. Returns mark done | cancelled (the x) | replaced (another " +
+                 "card took its place) | null on timeout (extra.waiting). For long waits run it in the background: " +
+                 "tools\\mcp-call.ps1 await_done stepId=<id> timeoutSec=3600 -TimeoutSec 3700.")]
+    public static async Task<CallToolResult> AwaitDone(BridgeRegistry bridges,
+        [Description("The stepId the guide call returned")] string stepId,
+        [Description("Max wait, seconds (5-3600, default 900)")] int timeoutSec = 900,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSec, 5, 3600));
+        var started = DateTime.UtcNow;
+        while (true)
+        {
+            JToken r;
+            try { (_, r) = await bridges.CallAsync(game, "guide.user", new JObject { ["stepId"] = stepId }, ct); }
+            catch (McpException) when (DateTime.UtcNow < until) { await Task.Delay(3000, ct); continue; }   // HUD restarting
+            if (r is not JObject o || o["ok"]?.Value<bool>() != true)
+                throw new McpException("This HUD's bridge has no Done button (guide.user): update What's an AI Bridge and restart the HUD.");
+            var mark = o["mark"]?.Type == JTokenType.String ? o["mark"]!.ToString() : null;
+            if (o["current"]?.Value<bool>() != true) mark ??= "replaced";
+            var res = new GuideDoneResult { StepId = stepId, Mark = mark, WaitedSec = Math.Round((DateTime.UtcNow - started).TotalSeconds, 1) };
+            if (mark is "done" or "cancelled" or "replaced")
+            {
+                if (mark == "done")
+                    await SetAsync(bridges, game, new JObject { ["status"] = "done", ["ifStep"] = stepId }, CancellationToken.None);
+                else if (mark == "cancelled")
+                    await SetAsync(bridges, game, new JObject { ["clear"] = true, ["ifStep"] = stepId }, CancellationToken.None);
+                var text = mark switch
+                {
+                    "done" => "The user pressed Done.",
+                    "cancelled" => "The user closed the card (x) without Done: ask in chat whether they still mean to do it.",
+                    _ => "Another card replaced this one before the user answered (another agent, or a clear).",
+                };
+                return Dto.Result(res, text);
+            }
+            if (DateTime.UtcNow >= until)
+            {
+                res.Extra = new() { ["waiting"] = JsonSerializer.SerializeToElement(true) };
+                return Dto.Result(res, $"No answer after {res.WaitedSec} s; the card still waits (call await_done again).");
+            }
+            await Task.Delay(1000, ct);
+        }
     }
 
     [McpServerTool(Name = "guide_state", Title = "What the in-game guide shows", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
