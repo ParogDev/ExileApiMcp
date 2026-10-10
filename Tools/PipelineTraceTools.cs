@@ -125,18 +125,22 @@ public static class PipelineTraceTools
         }
     }
 
-    [McpServerTool(Name = "render_lab", Title = "Experimental world renderers (walls, path)", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [McpServerTool(Name = "render_lab", Title = "Experimental world renderers (walls, path, bars)", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("""
         Turn the bridge's Render Lab on or off: renderers to compare with Radar and HealthBars during movement.
         walls: raycast wall contours around the player (rays over the walkability grid, re-cast per grid cell).
         path: a smoothed, glowing path to a target ('waypoint', 'transition', or an entity metadata path substring),
         planned with A* when the player changes cell and always starting at the player's live position.
-        Both draw from fresh camera/position reads, time-aligned by delayMs (default 5, the game image's own latency
-        measured with tools/fidelity). Omit everything to read the state. Draws on screen; nothing is sent to the game.
+        bars: a gold bracket at HealthBars' own anchor for each nearby hostile monster and player (needs the bridge with
+        lab bars), to see whether HealthBars' bar stays centred on the entity while moving.
+        All draw from fresh camera/position reads, time-aligned by delayMs (default 5, the game image's own latency
+        measured with tools/fidelity), and draw nothing while a fullscreen or large panel is open. Omit everything to
+        read the state. Draws on screen; nothing is sent to the game.
         """)]
     public static async Task<CallToolResult> RenderLab(BridgeRegistry bridges,
         [Description("Raycast wall highlight on/off")] bool? walls = null,
         [Description("Path to target on/off")] bool? path = null,
+        [Description("HealthBars comparison markers on/off: a gold bracket at HealthBars' own anchor per nearby monster/player, from fresh time-aligned data")] bool? bars = null,
         [Description("'waypoint', 'transition', or an entity path substring")] string? target = null,
         [Description("Time alignment in ms (0-100)")] double? delayMs = null,
         [Description("Instead of toggling: compare Radar-style and lab path drawing offline on this area's grid (simulated walk to target): backwards starts, jaggedness, line jumps")] bool compare = false,
@@ -149,7 +153,7 @@ public static class PipelineTraceTools
             return ToolResults.Json(c);
         }
         var p = new JObject();
-        if (walls != null) p["walls"] = walls; if (path != null) p["path"] = path;
+        if (walls != null) p["walls"] = walls; if (path != null) p["path"] = path; if (bars != null) p["bars"] = bars;
         if (target != null) p["target"] = target; if (delayMs != null) p["delayMs"] = delayMs;
         var (_, r) = await bridges.CallAsync(game, p.Count == 0 ? "lab.state" : "lab.set", p, ct);
         return ToolResults.Json(r);
