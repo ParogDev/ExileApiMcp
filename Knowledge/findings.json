@@ -1,5 +1,5 @@
 {
-  "about": "Verified facts about game data and memory, with their status PER GAME and a check that re-runs them. A finding verified on one game is a hypothesis on the other: run verify_finding there and record the result here (status, date, where, evidence). Statuses: verified | differs | unverified | n/a. Check kinds: data (game_data: row n of a game data table contains the expected text - the cheapest cross-game check), correlate (memory_correlate finds a bit equal to `expect` with 0 counterexamples), stored (the label's value is stored in the range), eval (eval_path value matches `expect`), code (find_field_access: a decompiled excerpt of the struct's code contains every `expectAll` string - needs Ghidra and a snapshot of that game's exe), series (observe_series over the observer journal: `unit` holds `expect.relation` - same value, same step or step xK - with `expect.unit`; needs observation on long enough), manual (an experiment: follow `how`).",
+  "about": "Verified facts about game data and memory, with their status PER GAME and a check that re-runs them. A finding verified on one game is a hypothesis on the other: run verify_finding there and record the result here (status, date, where, evidence). Statuses: verified | differs | unverified | n/a. Check kinds: data (game_data: row n of a game data table contains the expected text - the cheapest cross-game check), correlate (memory_correlate finds a bit equal to `expect` with 0 counterexamples), stored (the label's value is stored in the range), eval (eval_path value matches `expect`), code (find_field_access: a decompiled excerpt of the struct's code contains every `expectAll` string - needs Ghidra and a snapshot of that game's exe), series (observe_series over the observer journal: `unit` holds `expect.relation` - same value, same step or step xK - with `expect.unit`; needs observation on long enough), script (`code`, C# run in the HUD through run_csharp, returns {verdict: pass|differs|fail|not now, where, evidence}; needs Allow C# Scripts), manual (an experiment: follow `how`).",
   "findings": [
     {
       "id": "server.mirror-0xC00",
@@ -250,6 +250,42 @@
         "poe2": { "status": "verified", "date": "2026-10-09", "where": "Stats +0x160 (SubStatsPtr) -> +0xF8 begin / +0x100 end: main, 46 pairs; Stats +0x1C8 (SubStats2Ptr) -> +0xF8 / +0x100: secondary, 292 pairs", "evidence": "run_csharp: StatDictionary 317 stats = union of both; 21 ids are in both and the dictionary holds the main value (e.g. id 100: secondary 9, main 13, dictionary 13). The bridge (StatsRaw.cs) finds the vectors by matching the dictionary and re-validates every 2 s: on, 318 of 364 dictionary reads skipped" }
       },
       "check": { "kind": "manual", "how": "bridge.self_perf: statsRawCheck.on = true with vectors = 2 (the bridge calibrates and validates this every 2 s; broken names the failing link). By hand: run_csharp, read Stats.Address + 0x160 and + 0x1C8, then (begin, end) at +0xF8 of each, and compare the int pairs with Stats.StatDictionary." }
+    },
+    {
+      "id": "ui.worldmap.pan-x-underscaled",
+      "title": "HUD bug: GetClientRect() of elements inside IngameUi.WorldMap[0] (the pan container) is off horizontally by pan.X x (W/2560 - H/1600): the HUD scales the pan by H/1600, the game by W/2560",
+      "subject": "Element.GetClientRect under IngameUi.WorldMap (waypoint Teleport and caravan Travel maps)",
+      "games": {
+        "poe1": { "status": "unverified", "note": "PoE1's HUD uses the same x scale (Camera.Width / 2560 / (aspect / 1.6) = Height / 1600); whether the PoE1 game pans its world map by W/2560 is unmeasured. The bridge's highlight correction is off on PoE1 (WorldMapPanCorrected) until it is" },
+        "poe2": { "status": "verified", "date": "2026-10-10", "where": "1920x1080: 0.075 px per layout unit of WorldMap[0].Position.X (pan clamps at +-422.4 on the Act 2 map: +-31.7 px)", "evidence": "Whats A Route: pan.X -2.9 -> HUD x 883.7 vs orb ~881; pan.X -340.8 -> HUD 766.9 vs orb ~740 (27 px = 340.8 x 0.079). Bridge highlights (guided drags with the user, Teleport view): at pan -422.4 the raw box was 32-35 px right of the icon, corrected ~2 px; at +422.4 raw 31.7 px left, corrected ~1-2 px. Vertical is exact. Node offsets inside the container are right; only the pan is under-scaled. Read the pan from the node's live rect (rect.X / sy - its offsets below WorldMap[0]), not WorldMap[0].Position: that read trails a drag (15 px avg, 31 px max during drags)" }
+      },
+      "check": {
+        "kind": "script",
+        "how": "Open the waypoint (Teleport) or caravan Travel map and drag it far sideways. The script checks the HUD side (rect.X = (pan + node offsets) x H/1600); the game side (it pans by W/2560) needs a screenshot: tools\\screenshot.ps1 next to a highlighted node, box vs icon ~ pan.X x (W/2560 - H/1600) apart.",
+        "code": [
+          "var wm = GameController.IngameState.IngameUi.WorldMap;",
+          "var cam = GameController.IngameState.Camera;",
+          "float sy = cam.Height / 1600f, sx = cam.Width / 2560f;",
+          "var c0 = wm != null && wm.Address != 0 && wm.IsVisible && wm.ChildCount > 0 ? wm.GetChildAtIndex(0) : null;",
+          "Element node = null;",
+          "if (c0 != null) { var q = new Queue<Element>(); q.Enqueue(c0); var n = 0;",
+          "  while (q.Count > 0 && n++ < 400 && node == null) { var e = q.Dequeue();",
+          "    for (var i = 0; i < e.ChildCount && node == null; i++) { var c = e.GetChildAtIndex(i); if (c == null || !c.IsVisible) continue;",
+          "      var cr = c.GetClientRect(); if (cr.Width > 10 && cr.Width < 120) node = c; else q.Enqueue(c); } } }",
+          "float pan = c0?.Position.X ?? 0, below = 0;",
+          "for (var p = node; p != null && p.Address != c0.Address; p = p.Parent) below += p.Position.X;",
+          "var r = node?.GetClientRect();",
+          "var wmX = wm?.GetClientRect().X ?? 0;",
+          "var byHeight = wmX + (pan + below) * sy; var byWidth = wmX + pan * sx + below * sy;",
+          "var drift = pan * (sx - sy);",
+          "c0 == null ? (object)new { verdict = \"not now\", evidence = \"the world map is closed: open a waypoint (Teleport) or the caravan's Travel map\" }",
+          ": node == null ? new { verdict = \"fail\", evidence = $\"world map open but no node-sized visible element under WorldMap[0] ({c0.ChildCount} children): its layout changed\" }",
+          ": Math.Abs(drift) < 5 ? new { verdict = \"not now\", evidence = $\"pan.X {pan:F1} gives only {drift:F1} px drift at {cam.Width}x{cam.Height}: drag the map far sideways (or the screen is 16:10)\" }",
+          ": Math.Abs(r.Value.X - byHeight) < 1 ? new { verdict = \"pass\", where = $\"{cam.Width}x{cam.Height}, pan.X {pan:F1}\", evidence = $\"HUD rect.X {r.Value.X:F1} = (pan + node offsets) x H/1600 ({byHeight:F1}); the game pans by W/2560, so the box is {drift:F1} px off (correct by pan.X x (W/2560 - H/1600))\" }",
+          ": Math.Abs(r.Value.X - byWidth) < 1 ? new { verdict = \"differs\", where = $\"{cam.Width}x{cam.Height}, pan.X {pan:F1}\", evidence = $\"HUD rect.X {r.Value.X:F1} already scales the pan by W/2560 ({byWidth:F1}): the HUD fixed it, drop the correction\" }",
+          ": new { verdict = \"fail\", where = $\"{cam.Width}x{cam.Height}, pan.X {pan:F1}\", evidence = $\"HUD rect.X {r.Value.X:F1} matches neither H/1600 ({byHeight:F1}) nor W/2560 ({byWidth:F1}) pan scaling: the rect formula changed\" }"
+        ]
+      }
     }
   ]
 }

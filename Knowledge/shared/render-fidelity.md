@@ -11,6 +11,9 @@ How to find out why an overlay drawing (health bar, path, circle) doesn't sit on
 - **Plugins add their own effects.**
   - HealthBars: the player's bar has a 40 px deadzone at `PlayerSmoothingFactor` 1.0, and ImGui floors text to whole pixels.
   - Radar: the path is drawn from the live feet position to a plan made from the integer grid cell, so it starts **backwards in 63-80% of steps**, and it's jagged (74-92° of turning per 100 units, against 14-20 for a smoothed, trimmed path).
+- **UI rects on the world map drift sideways as it pans** (PoE2 verified 2026-10-10, PoE1 unverified; finding `ui.worldmap.pan-x-underscaled`). For elements under `IngameUi.WorldMap[0]` (the pan container of the waypoint Teleport and caravan Travel maps), `GetClientRect().X` is off by `pan * (W/2560 - H/1600)`: the HUD scales x by H/1600, the game pans by W/2560. 31.7 px at the Act 2 map's pan limit (+-422.4) on 1920x1080; 0 on 16:10; vertical exact.
+  - Fix: add that to x. Take `pan` from the element's **own live rect**, `(rect.X - WorldMap.rect.X) / (H/1600) - sum of Position.X from the element up to (not including) WorldMap[0]`. `WorldMap[0].Position.X` is cached and trails a drag (15 px avg, 31 px max while dragging).
+  - Done in the bridge's highlights (`Shared/GuideHighlight.cs` `WorldMapPan`, per-game switch `WorldMapPanCorrected`) and Whats A Route (`WorldMapReader.PanCorrectionX`). Any plugin drawing on that map needs it.
 - **Per-frame plugin work scales with HUD fps.** Classify at a low fixed rate, and project positions per frame (Azmeri Wisp: 33x less CPU).
 
 ## Tools (most need the bridge setting "Allow HUD Instrumentation")
