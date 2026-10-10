@@ -87,8 +87,77 @@ public sealed class HighlightTargetInfo
     /// <summary>primary | secondary | context.</summary>
     public string Tier { get; set; } = "primary";
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public int? Order { get; set; }
+    /// <summary>The yes/no question shown next to the target (Yes / No / Not sure controls in game), null when none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Ask { get; set; }
+    /// <summary>The caller's correlation key for the verdict.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Key { get; set; }
+    /// <summary>yes | no | skip once the user clicked; null while still asked (or not asked).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Answer { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? AnsweredAt { get; set; }
     /// <summary>How many boxes on screen match this target now.</summary>
     public int Found { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>
+/// The user's answers to asked highlight targets (verdicts, await_verdicts): the verdicts after since, the newest seq,
+/// and what the current highlight is still asking.
+/// </summary>
+public sealed class VerdictsResult
+{
+    public bool Ok { get; set; }
+    /// <summary>The newest verdict's seq (pass it as since next time).</summary>
+    public long Seq { get; set; }
+    /// <summary>The current highlight's rev; verdicts carry the rev they were given under.</summary>
+    public long HighlightRev { get; set; }
+    public List<VerdictInfo> Verdicts { get; set; } = [];
+    /// <summary>The current highlight's asked targets, answered or not.</summary>
+    public List<VerdictAsked> Asked { get; set; } = [];
+    /// <summary>Asked targets of the current highlight without an answer yet.</summary>
+    public int Pending { get; set; }
+    /// <summary>Where the HUD appends every verdict (verdicts.jsonl).</summary>
+    public string? File { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>One answer: which target was asked what, what the user clicked, and where the target was.</summary>
+public sealed class VerdictInfo
+{
+    public long Seq { get; set; }
+    /// <summary>The target's key, else hl&lt;rev&gt;.&lt;index&gt;.</summary>
+    public string Id { get; set; } = "";
+    public string? Key { get; set; }
+    public string Ask { get; set; } = "";
+    public string? Label { get; set; }
+    /// <summary>yes | no | skip.</summary>
+    public string Answer { get; set; } = "";
+    /// <summary>UTC, ISO 8601.</summary>
+    public string At { get; set; } = "";
+    /// <summary>The target's first box when answered: x, y, w, h.</summary>
+    public List<double>? Rect { get; set; }
+    public string? Item { get; set; }
+    public string? Path { get; set; }
+    public string? Text { get; set; }
+    public string? Panel { get; set; }
+    public List<int>? Child { get; set; }
+    public string? HighlightTitle { get; set; }
+    public long HighlightRev { get; set; }
+    /// <summary>The target's index in that highlight.</summary>
+    public int Target { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+public sealed class VerdictAsked
+{
+    public int Index { get; set; }
+    public string Id { get; set; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Key { get; set; }
+    public string Ask { get; set; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Label { get; set; }
+    /// <summary>yes | no | skip, null while unanswered.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Answer { get; set; }
+    /// <summary>The target resolves to a box on screen right now (the controls are visible).</summary>
+    public bool OnScreen { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
