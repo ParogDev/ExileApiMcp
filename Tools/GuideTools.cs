@@ -73,6 +73,9 @@ public static class GuideTools
                  "(click/look here, animated), secondary (related) or context (an area to orient the eye) - and optionally an " +
                  "order for a sequence (numbered; the current step is emphasised, advance=true moves on). Targets follow the UI. " +
                  "Use it with the guide card whenever you ask the user to click something. clear=true removes it. " +
+                 "Every agent draws in its own layer: a call replaces or clears only your own targets, never another " +
+                 "agent's (their questions stay on screen), and the overlay shows all layers together; the result's layers " +
+                 "lists whose targets are on screen. " +
                  "Unsure what a UI element is? Give the target ask='Is this the Keth stop?' (+ key for correlation): the user " +
                  "gets Yes / No / Not sure next to it in game, and await_verdicts collects the answers - no chat round trip.")]
     public static async Task<CallToolResult> Highlight(BridgeRegistry bridges,
@@ -82,15 +85,14 @@ public static class GuideTools
         [Description("Sequence step to show as current (default: the lowest order)")] int? current = null,
         [Description("Remove after this many seconds (default: until cleared or replaced)")] double? durationSec = null,
         [Description("Move a sequence to its next step")] bool advance = false,
-        [Description("Remove all highlights")] bool clear = false,
-        [Description("Replace or clear even while another agent's question (ask) is still unanswered on the current highlight; without it the call is refused with asked_by_other so their question isn't lost")] bool force = false,
+        [Description("Remove your highlight (other agents' layers stay)")] bool clear = false,
+        [Description("With clear=true: clear every agent's layer, unanswered questions included. Only when the user asked for a clean screen")] bool force = false,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         if (advance) return TypedReply.Of<HighlightState>((await bridges.CallAsync(game, "guide.highlight_advance", new JObject(), ct)).Result);
         var p = new JObject();
-        if (force) p["force"] = true;
-        if (clear) p["clear"] = true;
+        if (clear) { p["clear"] = true; if (force) p["force"] = true; }
         else
         {
             var list = targets switch
@@ -115,7 +117,9 @@ public static class GuideTools
     [McpServerTool(Name = "verdicts", Title = "The user's answers to asked highlights", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(VerdictsResult), IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("Read the verdicts the user gave in game (Yes / No / Not sure on highlight targets that had ask), newest seq, " +
-                 "and what the current highlight is still asking (asked, pending). since = the seq already handled. " +
+                 "and what your highlight is still asking (asked, pending; your own layer plus a flow or queued step you " +
+                 "started). Each verdict says whose question it was (who, layer); layers is every agent's highlight with its " +
+                 "pending count. since = the seq already handled. " +
                  "Verdicts persist in the HUD's verdicts.jsonl. Non-blocking; await_verdicts waits for them.")]
     public static async Task<CallToolResult> Verdicts(BridgeRegistry bridges,
         [Description("Return verdicts with seq greater than this (default 0: the last 100 kept)")] long since = 0,
@@ -132,7 +136,8 @@ public static class GuideTools
     [McpServerTool(Name = "await_verdicts", Title = "Wait for the user's Yes / No in game", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(VerdictsResult), IconSource = ExileApiMcp.Hosting.IconSet.GuideLight)]
     [Description("Block until the user has answered the asked highlight targets (highlight targets with ask), then return the " +
-                 "verdicts. Without keys: until every asked target of the current highlight is answered (returns at once, with a " +
+                 "verdicts. Without keys: until every asked target of your highlight is answered (other agents' questions don't " +
+                 "count; returns at once, with a " +
                  "note, when nothing is asked, e.g. the highlight was cleared or replaced). With keys: until each key (or id) has a " +
                  "verdict after since (pass the highlight result's verdictSeq as since so earlier sessions' answers to the same " +
                  "key don't count). Timeout: returns what there is with extra.waiting = true. Never sends input.")]
@@ -152,8 +157,13 @@ public static class GuideTools
             catch (McpException) when (DateTime.UtcNow < until) { await Task.Delay(3000, ct); continue; }   // HUD restarting
             NeedVerdicts(r);
             var v = Dto.From<VerdictsResult>(r);
-            // Without since: only answers given under the current highlight count (a reused key answered last week does not).
-            if (since == null) v.Verdicts = v.Verdicts.Where(x => x.HighlightRev == v.HighlightRev).ToList();
+            // Without since: only answers given under your current highlight(s) count (a reused key answered last week does
+            // not, nor another agent's answer). Each asked target carries the rev of its layer.
+            if (since == null)
+            {
+                var revs = v.Asked.Select(a => a.HighlightRev ?? v.HighlightRev).Append(v.HighlightRev).ToHashSet();
+                v.Verdicts = v.Verdicts.Where(x => revs.Contains(x.HighlightRev)).ToList();
+            }
             bool done;
             string? note = null;
             if (want != null)
@@ -183,9 +193,12 @@ public static class GuideTools
     private static string VerdictsText(VerdictsResult v)
     {
         var sb = new System.Text.StringBuilder();
-        sb.Append($"{v.Verdicts.Count} verdict(s), seq {v.Seq}; current highlight rev {v.HighlightRev}: {v.Asked.Count} asked, {v.Pending} pending.");
+        sb.Append($"{v.Verdicts.Count} verdict(s), seq {v.Seq}; your highlight rev {v.HighlightRev}: {v.Asked.Count} asked, {v.Pending} pending.");
+        var others = (v.Layers ?? []).Where(l => l.Mine != true).ToList();
+        if (others.Count > 0)
+            sb.Append($"\n  Other agents' layers: {string.Join(", ", others.Select(l => $"{l.Who ?? l.Layer} ({l.Targets} target(s){(l.Pending > 0 ? $", {l.Pending} pending" : "")})"))}");
         foreach (var x in v.Verdicts)
-            sb.Append($"\n  #{x.Seq} {x.Answer.ToUpperInvariant()}  {x.Ask}{(x.Key != null ? $"  [{x.Key}]" : "")}{(x.Label != null ? $"  ({x.Label})" : "")}");
+            sb.Append($"\n  #{x.Seq} {x.Answer.ToUpperInvariant()}  {x.Ask}{(x.Key != null ? $"  [{x.Key}]" : "")}{(x.Label != null ? $"  ({x.Label})" : "")}{(x.Who != null && others.Any(l => l.Layer == x.Layer) ? $"  - {x.Who}'s" : "")}");
         foreach (var a in v.Asked.Where(a => a.Answer == null))
             sb.Append($"\n  ? {a.Ask}{(a.Key != null ? $"  [{a.Key}]" : "")}{(a.OnScreen ? "" : "  (not on screen now)")}");
         return sb.ToString();
