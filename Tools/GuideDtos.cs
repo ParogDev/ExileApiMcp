@@ -41,6 +41,19 @@ public sealed class GuideAck
 {
     public bool Ok { get; set; }
     public long Rev { get; set; }
+    /// <summary>Set when the card has a Done button: pass it to await_done.</summary>
+    public string? StepId { get; set; }
+    public string? Next { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>await_done: what the user did with a card that offered Done.</summary>
+public sealed class GuideDoneResult
+{
+    public string StepId { get; set; } = "";
+    /// <summary>done | cancelled (the x) | replaced (another card) | null (timeout, still waiting).</summary>
+    public string? Mark { get; set; }
+    public double WaitedSec { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
