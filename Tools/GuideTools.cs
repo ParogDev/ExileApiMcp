@@ -83,11 +83,13 @@ public static class GuideTools
         [Description("Remove after this many seconds (default: until cleared or replaced)")] double? durationSec = null,
         [Description("Move a sequence to its next step")] bool advance = false,
         [Description("Remove all highlights")] bool clear = false,
+        [Description("Replace or clear even while another agent's question (ask) is still unanswered on the current highlight; without it the call is refused with asked_by_other so their question isn't lost")] bool force = false,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         if (advance) return TypedReply.Of<HighlightState>((await bridges.CallAsync(game, "guide.highlight_advance", new JObject(), ct)).Result);
         var p = new JObject();
+        if (force) p["force"] = true;
         if (clear) p["clear"] = true;
         else
         {
