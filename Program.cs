@@ -27,8 +27,30 @@ static async Task RunStdioAsync(string[] args)
     var host = builder.Build();
     // Exit when the launcher exits, even if stdin never reaches end-of-file (Hosting/ParentWatch.cs).
     ParentWatch.Start(() => host.Services.GetRequiredService<IHostApplicationLifetime>().StopApplication());
+    AnnounceToBridges(host.Services);
     await host.RunAsync();
 }
+
+// Say hello to the running HUDs at start instead of at the first game call: the HUD then counts this session (and, after
+// a swap to a newly deployed build, sees which build it runs) even before it asks anything. Quiet when no HUD runs.
+static void AnnounceToBridges(IServiceProvider services) => _ = Task.Run(async () =>
+{
+    var registry = services.GetRequiredService<ExileApiMcp.Bridge.BridgeRegistry>();
+    foreach (var b in registry.Bridges.Where(b => b.LooksAvailable))
+        try { await b.EnsureConnectedAsync(); }
+        catch (Exception ex) { Console.Error.WriteLine($"[Bridge:{b.Game}] not reachable at start ({ex.Message}); connecting on the first call"); }
+});
+
+// Supervised (Supervisor/HttpSupervisor.cs): the supervisor owns the public port and writes "drain" (or closes our stdin)
+// when a newer build takes over. Stop accepting, let running requests finish (a blocking observe_wait may take an hour),
+// then exit.
+static void DrainOnSupervisorSignal(WebApplication app) => _ = Task.Run(async () =>
+{
+    string? line;
+    while ((line = await Console.In.ReadLineAsync()) != null && line.Trim() != "drain") { }
+    Console.Error.WriteLine("[ExileApiMcp] a newer build took over: finishing running requests, then exiting");
+    app.Lifetime.StopApplication();
+});
 
 static async Task RunHttpAsync(string[] args)
 {
@@ -59,6 +81,10 @@ static async Task RunHttpAsync(string[] args)
         o.SessionMode = HttpServerSessionMode.StatefulForInitializeClients;
     });
 
+    var supervised = ServerBuild.Mode != "unsupervised";
+    // Draining after a swap waits for running requests: blocking tools run up to an hour.
+    if (supervised) builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromMinutes(65));
+
     var app = builder.Build();
     var token = LocalHttpSecurity.LoadOrCreateToken();
     app.UseLocalHttpSecurity(token);
@@ -66,7 +92,15 @@ static async Task RunHttpAsync(string[] args)
     app.MapMcp("/mcp");
     app.MapControlCenter();
 
-    Console.Error.WriteLine($"[ExileApiMcp] HTTP on http://127.0.0.1:{port}/mcp (bearer token: {LocalHttpSecurity.TokenFilePath})");
+    // Under the supervisor, clients connect to its public port; this one is private.
+    var publicPort = int.TryParse(Environment.GetEnvironmentVariable("HEXILE_PUBLIC_PORT"), out var pp) ? pp : port;
+    Console.Error.WriteLine($"[ExileApiMcp] {McpSetup.Version} HTTP on http://127.0.0.1:{publicPort}/mcp{(publicPort != port ? $" (worker port {port})" : "")} (bearer token: {LocalHttpSecurity.TokenFilePath})");
+    if (supervised)
+    {
+        DrainOnSupervisorSignal(app);
+        ParentWatch.Start(app.Lifetime.StopApplication);
+    }
+    AnnounceToBridges(app.Services);
     await app.RunAsync();
 }
 

@@ -18,8 +18,10 @@ public static class SessionIdentity
     public static string Cwd { get; private set; } = Environment.CurrentDirectory;
     public static string? Branch { get; private set; } = ReadBranch(Environment.CurrentDirectory);
     public static string Label { get; private set; } = MakeLabel(Branch, Environment.CurrentDirectory);
-    public static readonly int Pid = Environment.ProcessId;
-    /// <summary>Stable for the life of this process; a reconnect after a HUD restart re-identifies as the same session.</summary>
+    /// <summary>The session's process: the supervisor (Supervisor/README.md) when there is one, so a swap to a newly deployed
+    /// build stays the same session to the HUD; else this process.</summary>
+    public static readonly int Pid = int.TryParse(Environment.GetEnvironmentVariable("HEXILE_SESSION_PID"), out var sp) && sp > 0 ? sp : Environment.ProcessId;
+    /// <summary>Stable for the life of the session; a reconnect after a HUD restart or a server swap re-identifies as the same session.</summary>
     public static readonly string Id = $"{Label}#{Pid}";
     public static string Kind { get; set; } = "mcp";
     /// <summary>Bumped when the identity changes (AdoptRoots); bridge connections re-send session.hello.</summary>
@@ -76,7 +78,11 @@ public static class SessionIdentity
     public static Newtonsoft.Json.Linq.JObject HelloParams() => new()
     {
         ["id"] = Id, ["label"] = Label, ["branch"] = Branch, ["cwd"] = Cwd, ["pid"] = Pid, ["kind"] = Kind,
+        ["mcp"] = ServerBuild.HelloInfo(),
     };
+
+    /// <summary>The git branch of a folder (worktree-aware), for naming another session's checkout.</summary>
+    public static string? BranchOf(string dir) => ReadBranch(dir);
 
     private static string? ReadBranch(string start)
     {

@@ -34,7 +34,7 @@ MCP server that exposes live **Path of Exile 1 and 2** game state as [Model Cont
 
 ## Configure
 
-Start the server with **`run.cmd`**. It builds into `bin\launch\build`, then runs a private copy, so several clients (Claude Code sessions, Claude Desktop, an `--http` instance) can run it while you keep rebuilding. (`dotnet run` locks `bin\`, and a second client's build then fails.) It needs the .NET 10 SDK.
+Start the server with **`run.cmd`**. It builds into `bin\launch\build`, then runs a private copy, so several clients (Claude Code sessions, Claude Desktop, an `--http` instance) can run it while you keep rebuilding. (`dotnet run` locks `bin\`, and a second client's build then fails.) It needs the .NET 10 SDK. The process the client talks to is the supervisor (`Supervisor/README.md`): it runs the deployed build (`deploy.ps1` / the `mcp_deploy` tool) and swaps to a newer one without restarting the client or cutting a running call.
 
 ### Claude Code (stdio) - `.mcp.json`
 
