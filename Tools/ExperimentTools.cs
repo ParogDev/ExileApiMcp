@@ -68,6 +68,9 @@ public static class ExperimentTools
                  "the instructed thing in game and the state changes, waits until it settles, and returns what changed: leaf " +
                  "values, bytes and bits (with HUD field names), collection items. The step is appended to the experiment record " +
                  "so experiment_summary can show what changes every time. Never sends input: tell the user what to do first. " +
+                 "The card offers the user Done: a seen change is captured at once; userMarkedDone with changed=false means none of " +
+                 "the watched specs moved, so the watch is wrong: pick another (see watched), don't wait or ask again. " +
+                 "cancelledByUser: they closed the card. " +
                  "Writes only to %LOCALAPPDATA%\\ExileApiMcp\\experiments.")]
     public static async Task<CallToolResult> AwaitChange(BridgeRegistry bridges,
         [Description("Watch specs: value:<path> | memory:<path>[:size] | collection:<path>[:Label1,Label2]")] string[] watch,
