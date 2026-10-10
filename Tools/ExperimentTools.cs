@@ -335,7 +335,9 @@ public static class ExperimentTools
         {
             var (_, r) = await bridges.CallAsync(game, "guide.user", new JObject { ["stepId"] = stepId }, ct);
             if (r is not JObject o || o["ok"]?.Value<bool>() != true) return (false, null);
-            return (true, o["current"]?.Value<bool>() == true ? o["mark"]?.Type == JTokenType.String ? o["mark"]!.ToString() : null : null);
+            // Another step on the card now (replaced by another agent, cleared): "replaced", which neither ends nor un-does ours.
+            if (o["current"]?.Value<bool>() != true) return (true, "replaced");
+            return (true, o["mark"]?.Type == JTokenType.String ? o["mark"]!.ToString() : null);
         }
         catch (McpException) { return (false, null); }
     }
@@ -518,7 +520,7 @@ public static class ExperimentTools
         var p = new JObject
         {
             ["experiment"] = experiment, ["label"] = label, ["instruction"] = instruction, ["watch"] = new JArray(watch),
-            ["repeats"] = repeats, ["timeoutMs"] = timeoutMs, ["settleMs"] = settleMs, ["by"] = "Claude", ["chain"] = chain,
+            ["repeats"] = repeats, ["timeoutMs"] = timeoutMs, ["settleMs"] = settleMs, ["by"] = ExileApiMcp.Hosting.SessionIdentity.Label, ["chain"] = chain,
         };
         if (!string.IsNullOrWhiteSpace(highlight)) p["highlight"] = JArray.Parse(highlight);
         if (!string.IsNullOrWhiteSpace(flow)) p["flow"] = JObject.Parse(flow);
