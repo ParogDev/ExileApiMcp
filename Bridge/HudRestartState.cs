@@ -62,9 +62,9 @@ public static class HudRestartState
     }
 
     /// <summary>The tool result for work a restart cut: isError, structured {error: hud_restarted, interrupted, restart, message}.</summary>
-    public static CallToolResult Interrupted(HudRestartInfo r, string what, JObject? partial = null)
+    public static CallToolResult Interrupted(HudRestartInfo r, string what, JObject? partial = null, string? next = null)
     {
-        var message = r.Text(what) + ". Its results are lost; run it again once the HUD is back (bridge_status).";
+        var message = r.Text(what) + ". " + (next ?? "Its results are lost; run it again once the HUD is back (bridge_status).");
         var o = new JObject { ["error"] = "hud_restarted", ["interrupted"] = true, ["message"] = message, ["restart"] = r.Json() };
         if (partial != null) o["partial"] = partial;
         return new CallToolResult

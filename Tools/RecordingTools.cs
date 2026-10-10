@@ -47,7 +47,7 @@ public static class RecordingTools
         var ended = cut["endedAt"]?.Value<DateTime>().ToUniversalTime() ?? DateTime.MinValue;
         var what = $"The recording {cut["file"]} ({cut["frames"]} frames kept{(cut["who"] != null ? $", started by {cut["who"]}" : "")})";
         if (HudRestartState.Read(bridge) is { } rs && Math.Abs((rs.StartedAt - ended).TotalSeconds) < 60)
-            return HudRestartState.Interrupted(rs, what, cut);
+            return HudRestartState.Interrupted(rs, what, cut, "The file keeps the frames up to the restart; record_start again for more.");
         var text = $"{what} was cut when the HUD closed at {ended:HH:mm:ss} UTC ({cut["why"]}); no restart request matches it (the HUD was quit or crashed?). The file keeps the frames up to then.";
         return new CallToolResult
         {
