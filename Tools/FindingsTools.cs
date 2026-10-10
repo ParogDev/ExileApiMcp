@@ -74,8 +74,8 @@ public static class FindingsTools
 
     [McpServerTool(Name = "verify_finding", Title = "Re-run a finding's check on a game", ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(VerifyFindingResult))]
-    [Description("Run a finding's check against the live game and report pass / moved / fail with the evidence, plus the " +
-                 "status entry to record in Knowledge/findings.json. Automatic for correlate/stored/eval checks; for manual " +
+    [Description("Run a finding's check against the live game (or the observer journal, for series checks) and report pass / moved / fail with the evidence, plus the " +
+                 "status entry to record in Knowledge/findings.json. Automatic for correlate/stored/eval/data/code/series checks; for manual " +
                  "ones it returns the experiment to run (with the user).")]
     public static async Task<CallToolResult> VerifyFinding(BridgeRegistry bridges,
         [Description("Finding id (see findings)")] string id,
@@ -187,6 +187,32 @@ public static class FindingsTools
                 verdict = r["error"] != null ? "fail" : needle == null || type.Contains(needle, StringComparison.Ordinal) ? "pass" : "differs";
                 where = $"{expr}: {type}";
                 evidence = r["error"] != null ? $"eval failed: {r["error"]}" : $"eval_path {expr} -> {type}";
+                break;
+            }
+            case "series":
+            {
+                // expect: {unit, relation}: in the observer journal, the finding's unit holds that relation (same value,
+                // same step, step xK) with the other unit. Needs observation on long enough for both to change.
+                var layer = check["layer"]?.ToString() ?? "server";
+                var unit = check["unit"]!.ToString();
+                var wantUnit = check["expect"]?["unit"]?.ToString() ?? throw new McpException($"Finding '{id}': a series check needs expect.unit.");
+                var wantRel = check["expect"]?["relation"]?.ToString() ?? "same value";
+                SeriesResult s;
+                try
+                {
+                    var res = await ObserveTools.ObserveSeries(bridges, layer, unit, check["windowMs"]?.Value<int>() ?? 300, 200_000, g);
+                    s = res.StructuredContent is { } sc ? sc.Deserialize<SeriesResult>(Dto.Options)! : new SeriesResult();
+                }
+                catch (McpException ex) { s = new SeriesResult(); o["note"] = ex.Message; }
+                var rel = s.Relations.FirstOrDefault(r => string.Equals(r.Unit, wantUnit, StringComparison.OrdinalIgnoreCase) && r.Layer == (check["expect"]?["layer"]?.ToString() ?? layer));
+                verdict = s.Changes < 10 ? "fail" : rel?.Relation == wantRel ? "pass" : rel != null ? "differs" : "fail";
+                where = $"{layer} {unit} ~ {wantUnit}";
+                evidence = s.Changes < 10
+                    ? $"only {s.Changes} logged changes of {layer} {unit} in the journal: observe longer (observe action=start) and re-run"
+                    : rel == null ? $"{wantUnit} isn't among the units changing with {unit} ({s.Changes} changes)"
+                    : $"observe_series over {s.Changes} changes: {rel.Together} together with {wantUnit}, relation {rel.Relation ?? "none"} ({rel.Holds}/{rel.Numeric})";
+                s.Points = [];   // the verdict needs the relations, not the 200 points
+                o["series"] = JObject.Parse(System.Text.Json.JsonSerializer.Serialize(s, Dto.Options));
                 break;
             }
             default:
