@@ -43,6 +43,20 @@ export const T = {
   layerMapOpen: "layer-map-open",
   eventsFeed: "events-feed",
   eventsFilter: "events-filter",
+  observerView: "observer-view",
+  // timeline
+  tlOpen: "tl-open",
+  tlOpenOverview: "tl-open-overview",
+  tlView: "tl-view",
+  tlLanes: "tl-lanes",
+  tlControls: "tl-controls",
+  tlFilters: "tl-filters",
+  tlLegend: "tl-legend",
+  tlDetail: "tl-detail",
+  tlSelectLatest: "tl-select-latest",
+  tlAround: "tl-around",
+  tlCompanions: "tl-companions",
+  tlSeries: "tl-series",
   // perf page (the embedded app marks nothing; the page wraps it)
   perfPage: "perf-page",
 } as const;

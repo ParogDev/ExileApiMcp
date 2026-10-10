@@ -57,6 +57,19 @@ export const TOURS: Tour[] = [
     ],
   },
   {
+    id: "timeline",
+    title: "Read the observer timeline",
+    summary: "Every lane on one axis: follow, zoom, rule out HUD spikes, open an event.",
+    steps: [
+      { target: T.tlView, title: "One axis, every lane", body: <>Each row is a lane: the observer's layers first (server, stats, life, buffs, inventories and any you add), then panels (ui), area and level, entity kinds, the HUD's own hiccups and what agents asked. A mark is one event; a taller mark with a number is several in the same pixel.</>, before: async (c) => { c.go("observer", "timeline"); await c.wait(80); }, placement: "below" },
+      { target: T.tlLanes, title: "Lanes", body: <>Blue marks are units the HUD maps; hollow ones are unmapped struct offsets, the things worth naming. <b>▲</b> and <b>▼</b> are items added and removed, brackets are panels opening and closing (amber when the HUD has no property for the panel). Click a lane to collapse it.</> },
+      { target: T.tlControls, title: "Follow, pause, zoom", body: <>Follow slides the newest events in at the right edge; any drag or wheel pauses it. The wheel zooms around the cursor, shift+wheel pans, the presets pick a window, Fit shows everything in memory. <Kbd>Space</Kbd> pauses, <Kbd>+</Kbd> <Kbd>−</Kbd> zoom.</> },
+      { target: T.tlFilters, title: "Rule things out", body: <>Chips hide a kind. <b>Dim in spikes</b> fades layer, ui and entity events that were read inside a HUD frame that ran long (the amber bands): their timing is the HUD's, not the game's. <b>After agent</b> marks the ten seconds after an agent asked the user something: those are the user's actions, not the game's.</> },
+      { target: T.tlDetail, title: "Open an event", body: <>Click a mark (or step with <Kbd>←</Kbd> <Kbd>→</Kbd>) for its fields, the window it sits in, and what happened within a second of it, read from the journal on disk across sessions.</>, before: async (c) => { c.click(T.tlSelectLatest); await c.wait(400); }, placement: "above" },
+      { target: T.tlAround, title: "Around, companions, series", body: <>Widen the window to ±5 s or ±30 s. For a layer unit, <b>Companions</b> counts what consistently happens at the same moments as its changes (a panel opening 400 ms before, every time), and <b>Series</b> shows its values over time with their shape and relations to other units.</>, placement: "above" },
+    ],
+  },
+  {
     id: "read-timeline",
     title: "Read the performance timeline",
     summary: "Frames, spikes and GC pauses: what the health report shows.",

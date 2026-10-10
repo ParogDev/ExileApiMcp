@@ -108,7 +108,10 @@ export function OverviewPage({ store, snap }: { store: ControlStore; snap: Snaps
           <EventsFeed store={store} snap={snap} compact />
           <div className="mt-1.5 flex items-center justify-between px-1 text-[11px] text-fg-3">
             <span>{o.status ? (o.status.enabled ? "observing" : "observation off") : "observer status unknown"}{o.status?.layers?.length ? ` · ${o.status.layers.length} layers` : ""}</span>
-            <button type="button" onClick={() => store.go("observer")} className="hover:text-fg hover:underline">Open the observer →</button>
+            <span className="flex items-center gap-2">
+              <button type="button" onClick={() => store.go("observer", "timeline")} className="flex items-center gap-1 hover:text-fg hover:underline" data-tour={T.tlOpenOverview} title="Every lane on one time axis"><Icon name="activity" className="size-3" />Timeline</button>
+              <button type="button" onClick={() => store.go("observer")} className="hover:text-fg hover:underline">Open the observer →</button>
+            </span>
           </div>
         </div>
 

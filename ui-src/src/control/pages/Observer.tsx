@@ -1,43 +1,70 @@
-// Observer: observation on/off with its status, layers as specs (list, add with preflight, pause, remove), the map
-// of one layer (every unit that changed, mapped or not), and the live events feed.
+// Observer: two views. Layers: observation on/off with its status, layers as specs (list, add with preflight, pause,
+// remove), the map of one layer (every unit that changed, mapped or not), and the live events feed. Timeline: every
+// lane on one time axis (timeline/Timeline.tsx). The route's id picks the view (#/observer/timeline).
 
 import { useEffect, useMemo, useState } from "react";
 import { Banner, EmptyState, useNow } from "../../components";
 import { Icon } from "../../icons";
 import type { ControlStore, Snapshot } from "../store";
+import { KINDS, KIND_TONE, eventLine } from "../timeline/model";
+import { TimelineView } from "../timeline/Timeline";
 import { T } from "../tour/ids";
 import { useTours } from "../tour/engine";
 import type { LayerStatus, LayerUnit, ObserveEvent } from "../types";
-import { Badge, Button, Card, NumberBox, Select, ShowMe, Switch, TextInput, agoShort, fmtNum } from "../ui";
+import { Badge, Button, Card, NumberBox, Segmented, Select, ShowMe, Switch, TextInput, agoShort, fmtNum } from "../ui";
 
-const KIND_TONE: Record<string, "info" | "accent" | "warning" | "success" | "violet" | "neutral"> = { layer: "info", "layer.noisy": "neutral", ui: "accent", area: "success", level: "success", entity: "violet" };
-const KINDS = ["layer", "layer.noisy", "ui", "area", "level", "entity"];
+export { eventLine };
 
-/** One line per event, as Tools/ObserveDtos.cs Line() words it. */
-export function eventLine(e: ObserveEvent): string {
-  switch (e.kind) {
-    case "layer": case "server": return `${e.layer ?? "server"} ${e.unit ?? e.off ?? ""}${e.name ? ` ${e.name}` : e.mode === "struct" ? " (unmapped)" : ""} ${e.old ?? "-"} → ${e.new ?? "-"}${e.delta != null ? `  ${e.delta > 0 ? "+" : ""}${e.delta}` : ""}${e.change ? `  ${e.change}` : ""}`;
-    case "layer.noisy": case "server.noisy": return `${e.layer ?? "server"} ${e.group ?? e.unit ?? ""} is noisy: counted in its layer map, not logged`;
-    case "ui": return `ui [${e.index}] ${e.visible ? "opened" : "closed"} ${e.mapped ?? "UNMAPPED"}${e.firstSeen ? " (first time)" : ""}${e.texts?.length ? ` · ${e.texts.slice(0, 3).join(" | ")}` : ""}`;
-    case "area": return `area ${e.from} → ${e.to}`;
-    case "level": return `level ${e.from} → ${e.to}${e.area ? ` in ${e.area}` : ""}`;
-    case "entity": return `entity ${e.type}${e.entityType ? ` (${e.entityType})` : ""}`;
-    default: return e.kind;
-  }
-}
+export type ObserverView = "layers" | "timeline";
 
 export function ObserverPage({ store, snap }: { store: ControlStore; snap: Snapshot }) {
+  const view: ObserverView = snap.route.id === "timeline" ? "timeline" : "layers";
+  useEffect(() => { if (!snap.observer.status && !snap.observer.busy && snap.game) void store.refreshObserver(); }, [snap.game]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openLayerMap = (layer: string) => { store.go("observer"); void store.loadLayerMap(layer); };
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Segmented label="Observer view" value={view} onChange={(v) => store.go("observer", v === "timeline" ? "timeline" : undefined)} tour={T.observerView}
+          options={[{ value: "layers", label: <><Icon name="layers" className="size-3.5" />Layers</>, title: "Observation, layer specs, the layer map and the events feed" }, { value: "timeline", label: <><Icon name="activity" className="size-3.5" />Timeline</>, title: "Every lane on one time axis" }]} />
+        {view === "timeline" && <ObserveSwitch store={store} snap={snap} compact />}
+      </div>
+      {view === "timeline" ? <TimelineView store={store} snap={snap} onOpenLayerMap={openLayerMap} /> : <LayersView store={store} snap={snap} />}
+    </div>
+  );
+}
+
+/** Observation on/off with its counts; compact = the one-line form for the timeline's header row. */
+function ObserveSwitch({ store, snap, compact }: { store: ControlStore; snap: Snapshot; compact?: boolean }) {
+  const o = snap.observer;
+  const counts = o.status?.counts ?? {};
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  return (
+    <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 ${compact ? "ml-auto" : ""}`}>
+      <div className="flex items-center gap-2">
+        <Switch checked={!!o.status?.enabled} onChange={(v) => void store.setObserving(v)} label="Observation" disabled={o.busy || !snap.game} tour={compact ? undefined : T.observeSwitch} size={compact ? "sm" : "md"} />
+        <span className="text-[12.5px] font-medium">{o.status?.enabled ? "Observing" : "Off"}</span>
+        {o.status?.enabled && o.status.since && !compact && <span className="text-[11px] text-fg-3">since {new Date(o.status.since).toLocaleTimeString()}</span>}
+      </div>
+      {!compact && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {KINDS.filter((k) => counts[k]).map((k) => <Badge key={k} tone={KIND_TONE[k] ?? "neutral"}>{k} <span className="tnum">{counts[k]}</span></Badge>)}
+          {total === 0 && o.status && <span className="text-[11px] text-fg-3">no events yet</span>}
+          {o.status?.unmappedPanelsSeen ? <Badge tone="warning" icon="warning" title="UI panels the HUD has no property for">{o.status.unmappedPanelsSeen} unmapped panel{o.status.unmappedPanelsSeen > 1 ? "s" : ""}</Badge> : null}
+          {o.status?.entityTypesSeen ? <Badge tone="neutral">{o.status.entityTypesSeen} entity kinds</Badge> : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LayersView({ store, snap }: { store: ControlStore; snap: Snapshot }) {
   const o = snap.observer;
   const now = useNow(1000);
   const tours = useTours();
   const [adding, setAdding] = useState(false);
   const noHud = store.gamesUp.length === 0 && snap.gamesAt !== undefined;
 
-  useEffect(() => { if (!o.status && !o.busy && snap.game) void store.refreshObserver(); }, [snap.game]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const layers = o.layers?.layers ?? o.status?.layers ?? [];
-  const counts = o.status?.counts ?? {};
-  const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
     <div className="flex flex-col gap-3">
@@ -45,20 +72,8 @@ export function ObserverPage({ store, snap }: { store: ControlStore; snap: Snaps
       {o.error && <Banner tone="danger" icon="warning" title="The observer did not answer" action={<Button size="sm" onClick={() => void store.refreshObserver()}>Retry</Button>}>{o.error}</Banner>}
 
       <Card title="Passive observation" icon="eye" right={<><Button size="sm" icon="sync" tone="ghost" onClick={() => void store.refreshObserver()} busy={o.busy} ariaLabel="Refresh" /><ShowMe onClick={() => tours.start("add-layer")} done={tours.done.has("add-layer")}>Show me: add a layer</ShowMe></>}>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div className="flex items-center gap-2">
-            <Switch checked={!!o.status?.enabled} onChange={(v) => void store.setObserving(v)} label="Observation" disabled={o.busy || !snap.game} tour={T.observeSwitch} />
-            <span className="text-[12.5px] font-medium">{o.status?.enabled ? "Observing" : "Off"}</span>
-            {o.status?.enabled && o.status.since && <span className="text-[11px] text-fg-3">since {new Date(o.status.since).toLocaleTimeString()}</span>}
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {KINDS.filter((k) => counts[k]).map((k) => <Badge key={k} tone={KIND_TONE[k] ?? "neutral"}>{k} <span className="tnum">{counts[k]}</span></Badge>)}
-            {total === 0 && o.status && <span className="text-[11px] text-fg-3">no events yet</span>}
-            {o.status?.unmappedPanelsSeen ? <Badge tone="warning" icon="warning" title="UI panels the HUD has no property for">{o.status.unmappedPanelsSeen} unmapped panel{o.status.unmappedPanelsSeen > 1 ? "s" : ""}</Badge> : null}
-            {o.status?.entityTypesSeen ? <Badge tone="neutral">{o.status.entityTypesSeen} entity kinds</Badge> : null}
-          </div>
-        </div>
-        <p className="mt-2 text-[11px] leading-snug text-fg-3">While on, the HUD records its layers, top-level panels opening and closing (with the HUD property that maps them, or none), area and level changes, and new entity kinds. Read-only, never input; the state survives HUD restarts. Tell the person playing before turning it on.</p>
+        <ObserveSwitch store={store} snap={snap} />
+        <p className="mt-2 text-[11px] leading-snug text-fg-3">While on, the HUD records its layers, top-level panels opening and closing (with the HUD property that maps them, or none), area and level changes, new entity kinds, its own hiccups (hud) and what agents asked (agent). Read-only, never input; the state survives HUD restarts. Tell the person playing before turning it on.</p>
       </Card>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
@@ -225,6 +240,7 @@ export function EventsFeed({ store, snap, compact, limit = 100 }: { store: Contr
           <span className={`size-1.5 rounded-full ${o.status?.enabled === false ? "bg-fg-3" : live === "push" || live === "polling" ? "bg-success live-dot" : "bg-warning"}`} />{o.status?.enabled === false ? "off" : live}
         </span>
         {!compact && <Button size="sm" tone="ghost" icon={paused ? "play" : "pause"} onClick={() => { if (!paused) setFrozen(o.events); setPaused((p) => !p); }} title={paused ? "Resume the live feed" : "Pause the feed (events keep arriving)"} ariaLabel={paused ? "Resume" : "Pause"} />}
+        {!compact && <Button size="sm" icon="activity" onClick={() => store.go("observer", "timeline")} title="Every lane on one time axis" tour={T.tlOpen}>Timeline</Button>}
       </>}>
       {!compact && (
         <div className="flex flex-wrap gap-1 border-b border-line px-3 py-1.5" data-tour={T.eventsFilter}>
