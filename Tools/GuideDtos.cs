@@ -155,6 +155,10 @@ public sealed class HighlightTargetInfo
     /// <summary>yes | no | skip once the user clicked; null while still asked (or not asked).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Answer { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? AnsweredAt { get; set; }
+    /// <summary>When its default lifetime ends (an unanswered ask or a context target without durationSec), ISO 8601.</summary>
+    public string? EndsAt { get; set; }
+    /// <summary>Its lifetime ran out: no longer drawn or asked.</summary>
+    public bool? Expired { get; set; }
     /// <summary>How many boxes on screen match this target now.</summary>
     public int Found { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
@@ -229,6 +233,8 @@ public sealed class VerdictAsked
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Answer { get; set; }
     /// <summary>The target resolves to a box on screen right now (the controls are visible).</summary>
     public bool OnScreen { get; set; }
+    /// <summary>Unanswered and its lifetime ran out (default 25 s, or durationSec): the question is gone from the screen.</summary>
+    public bool? Expired { get; set; }
     /// <summary>The layer it is in and that layer's rev (verdicts given under it carry the same rev).</summary>
     public string? Layer { get; set; }
     public long? HighlightRev { get; set; }
@@ -241,5 +247,9 @@ public sealed class HighlightBoxInfo
     public int Target { get; set; }
     /// <summary>Screen rect x, y, w, h.</summary>
     public List<double> Rect { get; set; } = [];
+    /// <summary>Not drawn: a context / secondary box over an open NPC dialogue or big panel it is not part of.</summary>
+    public bool? Covered { get; set; }
+    /// <summary>Its question shows as a small pill at the screen edge while a big panel it is not part of is open.</summary>
+    public bool? Docked { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

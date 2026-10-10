@@ -138,6 +138,12 @@ public static class GuideTools
                  "(click/look here, animated), secondary (related) or context (an area to orient the eye) - and optionally an " +
                  "order for a sequence (numbered; the current step is emphasised, advance=true moves on). Targets follow the UI. " +
                  "Use it with the guide card whenever you ask the user to click something. clear=true removes it. " +
+                 "Highlights never linger (enforced by the HUD): an unanswered ask and a context target fade out after 25 s " +
+                 "unless durationSec says otherwise (await_verdicts then reports the ask expired); a highlight set while your " +
+                 "guide step is active goes away when that step ends (captured, done, replaced, cleared); and while an NPC " +
+                 "dialogue or a large / fullscreen panel is open, context / secondary boxes overlapping it are hidden and " +
+                 "questions about anything outside it shrink to a small pill at the screen edge (boxes inside the panel are " +
+                 "untouched). Prefer small precise targets over big context rects. " +
                  "Every agent draws in its own layer: a call replaces or clears only your own targets, never another " +
                  "agent's (their questions stay on screen), and the overlay shows all layers together; the result's layers " +
                  "lists whose targets are on screen. " +
@@ -148,7 +154,7 @@ public static class GuideTools
         [Description("Shortcut: item names to highlight as primary targets")] string[]? items = null,
         [Description("Optional heading, e.g. 'Move these to the stash'")] string? title = null,
         [Description("Sequence step to show as current (default: the lowest order)")] int? current = null,
-        [Description("Remove after this many seconds (default: until cleared or replaced)")] double? durationSec = null,
+        [Description("Remove after this many seconds. Default: unanswered asks and context targets fade after 25 s; primary / secondary stay until cleared, replaced or your guide step ends")] double? durationSec = null,
         [Description("Move a sequence to its next step")] bool advance = false,
         [Description("Remove your highlight (other agents' layers stay)")] bool clear = false,
         [Description("With clear=true: clear every agent's layer, unanswered questions included. Only when the user asked for a clean screen")] bool force = false,
@@ -240,11 +246,19 @@ public static class GuideTools
             if (want != null)
             {
                 var have = v.Verdicts.Select(x => x.Key).Concat(v.Verdicts.Select(x => x.Id)).Where(x => x != null).ToHashSet(StringComparer.Ordinal)!;
-                done = want.All(k => have.Contains(k));
+                // A key whose question expired unanswered can no longer be answered: it counts as finished.
+                var expiredKeys = v.Asked.Where(a => a.Expired == true && a.Answer == null).SelectMany(a => new[] { a.Key, a.Id }).Where(x => x != null).ToHashSet(StringComparer.Ordinal)!;
+                done = want.All(k => have.Contains(k) || expiredKeys.Contains(k));
+                if (done && want.Any(k => !have.Contains(k))) note = "Some keyed question(s) expired unanswered (25 s default lifetime; pass durationSec for longer).";
                 v.Verdicts = v.Verdicts.Where(x => want.Contains(x.Id) || (x.Key != null && want.Contains(x.Key))).ToList();
             }
             else if (v.Asked.Count == 0) { done = true; note = "Nothing is asked right now: the highlight has no ask targets (cleared, replaced or never set)."; }
-            else done = v.Pending == 0;
+            else
+            {
+                done = v.Pending == 0;
+                var expired = v.Asked.Count(a => a.Expired == true && a.Answer == null);
+                if (done && expired > 0) note = $"{expired} question(s) expired unanswered (25 s default lifetime; pass durationSec for longer). Ask again only if it still matters.";
+            }
             if (done) return Dto.Result(v, note != null ? note + "\n" + VerdictsText(v) : VerdictsText(v));
             if (DateTime.UtcNow >= until)
             {
@@ -271,7 +285,7 @@ public static class GuideTools
         foreach (var x in v.Verdicts)
             sb.Append($"\n  #{x.Seq} {x.Answer.ToUpperInvariant()}  {x.Ask}{(x.Key != null ? $"  [{x.Key}]" : "")}{(x.Label != null ? $"  ({x.Label})" : "")}{(x.Who != null && others.Any(l => l.Layer == x.Layer) ? $"  - {x.Who}'s" : "")}");
         foreach (var a in v.Asked.Where(a => a.Answer == null))
-            sb.Append($"\n  ? {a.Ask}{(a.Key != null ? $"  [{a.Key}]" : "")}{(a.OnScreen ? "" : "  (not on screen now)")}");
+            sb.Append($"\n  {(a.Expired == true ? "x" : "?")} {a.Ask}{(a.Key != null ? $"  [{a.Key}]" : "")}{(a.Expired == true ? "  (expired unanswered)" : a.OnScreen ? "" : "  (not on screen now)")}");
         return sb.ToString();
     }
 
