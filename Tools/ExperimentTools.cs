@@ -260,7 +260,7 @@ public static class ExperimentTools
                     await GuideTools.SetAsync(bridges, game, new JObject
                     {
                         ["status"] = "unseen",
-                        ["detail"] = $"None of the {watch.Length} watched value(s) changed - {ExileApiMcp.Hosting.SessionIdentity.Label} will look for another way to see it",
+                        ["detail"] = "Nothing I watch changed - I'll look for another way to see it",
                     }, ct);
                     await GuideTools.LogAsync(bridges, game, $"You said done, but nothing watched changed for '{label}'", "warn", ct);
                     return new JObject
