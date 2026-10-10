@@ -256,13 +256,25 @@ public static partial class ObserveTools
         return Task.FromResult(Typed(result, sb.ToString()));
     }
 
-    /// <summary>The last n journal lines as typed events (bad lines skipped), in order.</summary>
+    /// <summary>
+    /// The last n journal lines as typed events (bad lines skipped), in order. Reads from the end (at most ~1 KB per
+    /// wanted line) instead of the whole file, and takes the rest from journal.1.jsonl (the bridge rotates the journal
+    /// at 128 MB) when the current one is short.
+    /// </summary>
     private static List<ObserveEvent> ReadJournalTail(string path, int n)
     {
         var q = new Queue<string>(n);
-        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-        using (var rd = new StreamReader(fs))
+        var rotated = Path.Combine(Path.GetDirectoryName(path)!, "journal.1.jsonl");
+        foreach (var file in new[] { rotated, path })
+        {
+            if (!File.Exists(file)) continue;
+            using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var from = Math.Max(0, fs.Length - (long)n * 1024);
+            fs.Seek(from, SeekOrigin.Begin);
+            using var rd = new StreamReader(fs);
+            if (from > 0) rd.ReadLine();   // a partial line
             for (string? line; (line = rd.ReadLine()) != null;) { if (q.Count == n) q.Dequeue(); q.Enqueue(line); }
+        }
         var list = new List<ObserveEvent>(q.Count);
         foreach (var line in q)
             try { if (JsonSerializer.Deserialize<ObserveEvent>(line, Dto.Options) is { } e) list.Add(e.Normalized()); } catch (JsonException) { }
