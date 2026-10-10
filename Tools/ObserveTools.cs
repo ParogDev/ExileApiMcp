@@ -18,7 +18,7 @@ namespace ExileApiMcp.Tools;
 /// Method: knowledge pack shared/passive-learning.
 /// </summary>
 [McpServerToolType]
-public static class ObserveTools
+public static partial class ObserveTools
 {
     [McpServerTool(Name = "observe", Title = "Passive observation on/off", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, IconSource = IconSet.TimelineLight)]
     [Description("Turn the HUD's passive observation on or off, or read its status (action=status). While on, the bridge records " +
