@@ -61,14 +61,48 @@ public sealed class HighlightState
     public List<HighlightBoxInfo>? Boxes { get; set; }
     /// <summary>Targets not on screen right now, null when all are.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Note { get; set; }
+    /// <summary>Your layer's key (your session id; flow / queue / anon for the HUD's own).</summary>
+    public string? Layer { get; set; }
+    /// <summary>Who set this layer (session label).</summary>
+    public string? Who { get; set; }
+    /// <summary>Pass as since to await_verdicts: answers after this call.</summary>
+    public long? VerdictSeq { get; set; }
+    /// <summary>Every agent's layer on screen, oldest first (the combined view).</summary>
+    public List<HighlightLayerInfo>? Layers { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
-/// <summary>highlight clear=true's reply (a HighlightState with only ok and cleared).</summary>
+/// <summary>One agent's highlight layer, as the combined view lists it.</summary>
+public sealed class HighlightLayerInfo
+{
+    /// <summary>The owner key: a session id, or flow / queue / anon.</summary>
+    public string Layer { get; set; } = "";
+    public string? Session { get; set; }
+    public string? Who { get; set; }
+    /// <summary>Yours (or a flow / queued step you started).</summary>
+    public bool? Mine { get; set; }
+    public long Rev { get; set; }
+    public string? Title { get; set; }
+    public int? Current { get; set; }
+    public int Targets { get; set; }
+    /// <summary>Boxes on screen now.</summary>
+    public int Found { get; set; }
+    public int Asked { get; set; }
+    public int Pending { get; set; }
+    public string? Until { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>highlight clear=true's reply: only your layer, or every layer with force (all, layers = whose were cleared).</summary>
 public sealed class HighlightCleared
 {
     public bool Ok { get; set; }
     public bool Cleared { get; set; }
+    public string? Layer { get; set; }
+    public bool? All { get; set; }
+    public List<string>? Layers { get; set; }
+    /// <summary>Other agents' layers that stay on screen, or the questions a clear-all removed.</summary>
+    public string? Note { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -113,8 +147,14 @@ public sealed class VerdictsResult
     public List<VerdictInfo> Verdicts { get; set; } = [];
     /// <summary>The current highlight's asked targets, answered or not.</summary>
     public List<VerdictAsked> Asked { get; set; } = [];
-    /// <summary>Asked targets of the current highlight without an answer yet.</summary>
+    /// <summary>Asked targets of your highlight without an answer yet.</summary>
     public int Pending { get; set; }
+    /// <summary>Unanswered questions on screen, every agent's.</summary>
+    public int? PendingAll { get; set; }
+    /// <summary>Your layer's key.</summary>
+    public string? Layer { get; set; }
+    /// <summary>Every agent's layer (the combined view).</summary>
+    public List<HighlightLayerInfo>? Layers { get; set; }
     /// <summary>Where the HUD appends every verdict (verdicts.jsonl).</summary>
     public string? File { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
@@ -144,6 +184,10 @@ public sealed class VerdictInfo
     public long HighlightRev { get; set; }
     /// <summary>The target's index in that highlight.</summary>
     public int Target { get; set; }
+    /// <summary>The layer it was asked in, and the session that asked.</summary>
+    public string? Layer { get; set; }
+    public string? Session { get; set; }
+    public string? Who { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -158,6 +202,9 @@ public sealed class VerdictAsked
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Answer { get; set; }
     /// <summary>The target resolves to a box on screen right now (the controls are visible).</summary>
     public bool OnScreen { get; set; }
+    /// <summary>The layer it is in and that layer's rev (verdicts given under it carry the same rev).</summary>
+    public string? Layer { get; set; }
+    public long? HighlightRev { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
