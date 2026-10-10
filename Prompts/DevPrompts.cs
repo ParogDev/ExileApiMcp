@@ -25,7 +25,8 @@ public static class DevPrompts
            recompiles and reloads just this plugin in the running HUD (like its menu Reload button) and returns
            ok/error plus whatever the plugin logged on load. A local `dotnet build` of the plugin first catches
            compile errors without pausing the HUD. Only a brand-new plugin folder or a change to the bridge
-           plugin itself needs a full HUD restart (scaffolding repo: tools/restart-hud.ps1 -Game poe1|poe2).
+           plugin itself needs a full HUD restart: hud_restart reason="..." (it waits for other agents' tests and
+           shows the request on the in-game card; never run the restart script yourself).
         3. On error, fix what "error" says (compiler diagnostics with file and line) and reload again.
            hud_plugins shows the same status from disk if the bridge is down.
         4. Check runtime: reload_plugin's loggedSinceReload, then hud_log level="error" plugin="{plugin}" after

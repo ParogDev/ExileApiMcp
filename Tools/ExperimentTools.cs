@@ -117,6 +117,29 @@ public static class ExperimentTools
     internal static async Task<JObject> RunStepAsync(BridgeRegistry bridges, string[] watch, string label, string experiment,
         int timeoutMs, int settleMs, string? instruction, int? step, int? steps, string? game, Func<string, Task>? onStatus, CancellationToken ct, string? highlight = null)
     {
+        // A piloted step must not be cut by another agent's HUD restart (Sessions.cs in the bridge): hold a pilot lease for
+        // the whole step, baseline to capture. The card's waiting status blocks too, but not between the baseline and the card.
+        string? lease = null;
+        try
+        {
+            var (_, l) = await bridges.CallAsync(game, "lease.acquire", new JObject
+                { ["kind"] = "pilot", ["label"] = $"guided step '{label}' of {experiment}", ["ttlSec"] = Math.Clamp(timeoutMs / 1000 + 60, 60, 3600) }, ct);
+            if (l["error"]?.ToString() == "restart_pending")
+                throw new McpException($"The HUD is about to restart: {l["message"]} Wait for bridge_status to show it back, then run the step.");
+            lease = l["id"]?.ToString();
+        }
+        catch (McpException ex) when (!ex.Message.Contains("about to restart", StringComparison.Ordinal)) { /* older bridge: no leases */ }
+        try { return await RunStepCoreAsync(bridges, watch, label, experiment, timeoutMs, settleMs, instruction, step, steps, game, onStatus, ct, highlight); }
+        finally
+        {
+            if (lease != null)
+                try { await bridges.CallAsync(game, "lease.release", new JObject { ["id"] = lease }, CancellationToken.None); } catch (McpException) { }
+        }
+    }
+
+    private static async Task<JObject> RunStepCoreAsync(BridgeRegistry bridges, string[] watch, string label, string experiment,
+        int timeoutMs, int settleMs, string? instruction, int? step, int? steps, string? game, Func<string, Task>? onStatus, CancellationToken ct, string? highlight)
+    {
         onStatus ??= _ => Task.CompletedTask;
         if (watch.Length == 0) throw new McpException("Pass at least one watch spec (see experiment_presets).");
         if (!Regex.IsMatch(experiment, @"^[\w.-]{1,64}$")) throw new McpException("experiment: letters, digits, '-', '_' or '.', up to 64 characters.");
@@ -136,7 +159,7 @@ public static class ExperimentTools
             ["title"] = guideTitle, ["instruction"] = instruction ?? $"Do the '{label}' action now", ["status"] = "waiting",
             ["step"] = step, ["steps"] = steps, ["detail"] = $"Watching {watch.Length} value(s) for up to {timeoutMs / 1000} s",
         }, ct);
-        await GuideTools.LogAsync(bridges, game, $"Claude: waiting for '{label}'", "step", ct);
+        await GuideTools.LogAsync(bridges, game, $"{ExileApiMcp.Hosting.SessionIdentity.Label}: waiting for '{label}'", "step", ct);
         if (highlight != null) await GuideTools.HighlightAsync(bridges, game, highlight, ct);
         await onStatus("waiting");
         Dictionary<string, string>? current = before, last = before;

@@ -17,10 +17,16 @@ How a HUD turns plugin source into running code, and the fastest verified loop f
 3. **Check the log:** `hud_log plugin=<folder> level=error`.
 4. **Verify live** with the `get_*` tools, `eval_path`, or `run_csharp`.
 
-## Things that need a full HUD restart (`tools/restart-hud.ps1 -Game poe1|poe2` in the scaffolding repo)
+## Things that need a full HUD restart (`hud_restart reason=...`)
 - a new plugin folder;
 - a change to *Whats An AI Bridge* itself, which can't reload itself;
 - HUD core updates.
+
+**Restart only through `hud_restart`.** Several agents may share the HUD (Claude Code sessions in worktrees, Claude Desktop, scripts), and a restart during another agent's measurement or piloted test ruins it. The bridge knows every connected session by name (your MCP server identifies itself by its working directory's git branch) and what each is doing:
+- The request **waits** while a measurement (`pipeline_trace`, `profile_plugin`, `hud_health_report`), a compile, a recording, a queued step, a guided flow, an instruction the user is acting on, or an explicit lease runs, and goes ahead when they finish. Nothing blocking: the in-game card counts down a few seconds with Not now.
+- The user sees the request on the guide card with the blockers and can press **Restart now** (over them) or **Not now** (`denied`: say in chat what you need the restart for, or retry later). A second request **merges** into one already granted: wait for the HUD to come back, don't restart again.
+- `hud_sessions` shows who else is connected and what they do. Before a before/after comparison or a piloted session that spans several calls, `hud_lease acquire` keeps others' restarts away; release it when done.
+- While the HUD is down, bridge calls fail with "the HUD is being restarted by X (reason), retry": wait ~20 s instead of debugging.
 
 ## The setting reloads depend on
 **Core → Plugin Settings → "Avoid locking plugin dlls"** is off by default on both HUDs.
