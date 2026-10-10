@@ -257,7 +257,7 @@
       "subject": "Element.GetClientRect under IngameUi.WorldMap (waypoint Teleport and caravan Travel maps)",
       "games": {
         "poe1": { "status": "unverified", "note": "PoE1's HUD uses the same x scale (Camera.Width / 2560 / (aspect / 1.6) = Height / 1600); whether the PoE1 game pans its world map by W/2560 is unmeasured. The bridge's highlight correction is off on PoE1 (WorldMapPanCorrected) until it is" },
-        "poe2": { "status": "verified", "date": "2026-10-10", "where": "1920x1080: 0.075 px per layout unit of WorldMap[0].Position.X (pan clamps at +-422.4 on the Act 2 map: +-31.7 px)", "evidence": "Whats A Route: pan.X -2.9 -> HUD x 883.7 vs orb ~881; pan.X -340.8 -> HUD 766.9 vs orb ~740 (27 px = 340.8 x 0.079). Bridge highlights (guided drags with the user, Teleport view): at pan -422.4 the raw box was 32-35 px right of the icon, corrected ~2 px; at +422.4 raw 31.7 px left, corrected ~1-2 px. Vertical is exact. Node offsets inside the container are right; only the pan is under-scaled. Read the pan raw from WorldMap[0] +0x100 (finding ui.worldmap.pan-offset): WorldMap[0].Position and the rects built from it are cached and trail a drag (9.4 px avg, 52 px max)" }
+        "poe2": { "status": "verified", "date": "2026-10-10", "where": "1920x1080: 0.075 px per layout unit of WorldMap[0].Position.X (pan clamps at +-422.4 on the Act 2 map: +-31.7 px)", "evidence": "Whats A Route: pan.X -2.9 -> HUD x 883.7 vs orb ~881; pan.X -340.8 -> HUD 766.9 vs orb ~740 (27 px = 340.8 x 0.079). Bridge highlights (guided drags with the user, Teleport view): at pan -422.4 the raw box was 32-35 px right of the icon, corrected ~2 px; at +422.4 raw 31.7 px left, corrected ~1-2 px. Vertical is exact. Node offsets inside the container are right; only the pan is under-scaled. Read the pan raw from WorldMap[0] +0x100 (finding ui.worldmap.pan-offset): WorldMap[0].Position and the rects built from it are cached, refreshed once per HUD frame with the raw value ~3 ms late" }
       },
       "check": {
         "kind": "script",
@@ -293,7 +293,7 @@
       "subject": "IngameUi.WorldMap[0] (pan container element)",
       "games": {
         "poe1": { "status": "unverified" },
-        "poe2": { "status": "verified", "date": "2026-10-10", "where": "WorldMap[0] +0x100 (x), +0x104 (y), float", "evidence": "At rest +0x100/+0x104 = Position exactly (339.7334, 109.62964). Whats A Route: over 667 samples while dragging, the cached Position trailed the raw read by 9.4 px avg, 52 px max. The bridge calibrates it each time the map opens (CalibratePan: hint, else a scan of the first 0x400 bytes) and moves highlight boxes with it every frame; mid-drag screenshots show boxes on their icons" }
+        "poe2": { "status": "verified", "date": "2026-10-10", "where": "WorldMap[0] +0x100 (x), +0x104 (y), float", "evidence": "At rest +0x100/+0x104 = Position exactly (339.7334, 109.62964). Sampled every ~0.5 ms over two 15 s fast drags: raw changes every 5.4 ms (game frames), the cached Position every 17.5 ms (HUD frames) and only ever takes values raw had (no eased copy; +0x100/+0x104 is the only matching pair in 0x600 bytes), median 2.7 ms after raw (p90 5.1 ms). The bridge calibrates it each time the map opens (CalibratePan: hint, else a scan of the first 0x400 bytes) and moves highlight boxes with it every frame; mid-drag screenshots show boxes on their icons" }
       },
       "check": {
         "kind": "script",
