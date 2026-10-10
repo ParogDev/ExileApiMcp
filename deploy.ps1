@@ -12,7 +12,8 @@
     checkout, so what runs is always a commit on GitHub. Default commit: the one the scaffolding repo's origin/main points
     MCP/ExileApiMcp at (merged and bumped = released). -Ref takes any commit or branch of this repo's origin.
 
-    Exit codes: 0 deployed (or already current), 2 bad ref, 3 build failed, 4 another deploy is running.
+    Exit codes: 0 deployed (or already current), 2 bad ref, 3 build failed, 4 another deploy is running,
+    5 built but current.json could not be replaced.
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File MCP\ExileApiMcp\deploy.ps1 -Who goofy-hertz -Reason "tool error messages"
@@ -101,9 +102,18 @@ try {
         version = $version; sha = $sha; dir = $dir; deployedAt = (Get-Date).ToUniversalTime().ToString('o'); by = $Who; reason = $Reason
         previous = if ($prev) { [ordered]@{ version = $prev.version; sha = $prev.sha } } else { $null }
     }
+    Get-ChildItem $root -Filter 'current.json.tmp-*' | Remove-Item -Force -ErrorAction SilentlyContinue   # left by a failed deploy
     $tmpCurrent = "$current.tmp-$PID"
-    [IO.File]::WriteAllText($tmpCurrent, ($info | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding($false)))
-    if (Test-Path $current) { [IO.File]::Replace($tmpCurrent, $current, $null) } else { [IO.File]::Move($tmpCurrent, $current) }
+    try {
+        [IO.File]::WriteAllText($tmpCurrent, ($info | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding($false)))
+        # [NullString]::Value, not $null: PowerShell passes $null to a string parameter as "", which Replace rejects.
+        if (Test-Path $current) { [IO.File]::Replace($tmpCurrent, $current, [NullString]::Value) } else { [IO.File]::Move($tmpCurrent, $current) }
+    }
+    catch {
+        Remove-Item $tmpCurrent -Force -ErrorAction SilentlyContinue
+        Write-Output "ERROR: built $dir but could not point $current at it: $($_.Exception.Message)"
+        exit 5
+    }
     Add-Content -Path (Join-Path $builds 'deploy.log') -Value "$($info.deployedAt) $version $short by $Who$(if ($Reason) { " ($Reason)" })" -Encoding UTF8
 
     # Keep the newest 4 builds; an older one still in use can't be deleted (its DLL is loaded) and stays until next time.
