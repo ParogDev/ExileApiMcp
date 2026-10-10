@@ -1,5 +1,7 @@
 ﻿using ExileApiMcp.Bridge;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using ModelContextProtocol;
 using ModelContextProtocol.Extensions.Apps;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -9,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.59.0";
+    public const string Version = "3.59.1";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -108,6 +110,46 @@ internal static class McpSetup
         return "";
     }
 
+    /// <summary>The failure an unhandled tool exception stands for: the exception chain's types and messages (no stack:
+    /// it can carry build paths). A binding failure (JsonException, "Path: $") doesn't name its argument, so the arguments
+    /// are checked against the tool's inputSchema and the ones whose JSON kind doesn't fit are named.</summary>
+    internal static string DescribeFailure(string tool, Exception ex, IDictionary<string, JsonElement>? args, JsonElement? inputSchema)
+    {
+        while (ex is System.Reflection.TargetInvocationException or AggregateException && ex.InnerException != null) ex = ex.InnerException;
+        var parts = new List<string>();
+        for (var e = ex; e != null && parts.Count < 4; e = e.InnerException)
+            parts.Add($"{e.GetType().Name}: {e.Message}");
+        var mismatches = SchemaMismatches(args, inputSchema);
+        var hint = mismatches.Count > 0 ? $". Wrong argument type: {string.Join("; ", mismatches)}"
+            : ex is JsonException or ArgumentException or FormatException or InvalidCastException
+                ? " (often an argument of the wrong type: check the call against the tool's inputSchema)" : "";
+        return $"{tool} failed: {string.Join(" <- ", parts).TrimEnd('.')}{hint}";
+    }
+
+    /// <summary>"'kinds' expects array|null, got string" for each argument whose JSON kind its schema type doesn't allow.</summary>
+    internal static List<string> SchemaMismatches(IDictionary<string, JsonElement>? args, JsonElement? inputSchema)
+    {
+        var found = new List<string>();
+        if (args == null || inputSchema is not { ValueKind: JsonValueKind.Object } schema
+            || !schema.TryGetProperty("properties", out var props) || props.ValueKind != JsonValueKind.Object) return found;
+        foreach (var (key, value) in args)
+        {
+            if (!props.TryGetProperty(key, out var p) || !p.TryGetProperty("type", out var t)) continue;
+            var allowed = t.ValueKind == JsonValueKind.Array ? t.EnumerateArray().Select(x => x.GetString() ?? "").ToList() : [t.GetString() ?? ""];
+            var got = value.ValueKind switch
+            {
+                JsonValueKind.String => "string", JsonValueKind.Array => "array", JsonValueKind.Object => "object",
+                JsonValueKind.True or JsonValueKind.False => "boolean", JsonValueKind.Null or JsonValueKind.Undefined => "null",
+                _ => value.TryGetInt64(out _) ? "integer" : "number",
+            };
+            if (!allowed.Contains(got) && !(got == "integer" && allowed.Contains("number")))
+                found.Add($"'{key}' expects {string.Join("|", allowed)}, got {got} {Clip(value.GetRawText())}");
+        }
+        return found;
+    }
+
+    private static string Clip(string s) => s.Length > 40 ? s[..37] + "..." : s;
+
     public static IMcpServerBuilder AddExileApiMcp(this IServiceCollection services)
     {
         services.AddSingleton<BridgeRegistry>();
@@ -148,10 +190,18 @@ internal static class McpSetup
                         Console.Error.WriteLine($"[call] {name} {sw.ElapsedMilliseconds}ms{(result.IsError == true ? " isError" : "")}");
                     return result;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is McpException || ct.IsCancellationRequested)
                 {
+                    // McpException: the SDK already shows its message. Cancellation: nobody is listening.
                     Console.Error.WriteLine($"[call] {name} {sw.ElapsedMilliseconds}ms failed: {ex.Message}");
                     throw;
+                }
+                catch (Exception ex)
+                {
+                    // Anything else the SDK would turn into a bare "An error occurred invoking '<name>'." (argument binding
+                    // included): say what broke instead, so the caller can fix the call or report the real failure.
+                    Console.Error.WriteLine($"[call] {name} {sw.ElapsedMilliseconds}ms failed: {ex}");
+                    return new CallToolResult { IsError = true, Content = [new TextContentBlock { Text = DescribeFailure(name, ex, request.Params?.Arguments, (request.MatchedPrimitive as McpServerTool)?.ProtocolTool.InputSchema) }] };
                 }
             }))
             .WithToolsFromAssembly()
