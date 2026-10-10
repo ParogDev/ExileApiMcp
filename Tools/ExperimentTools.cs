@@ -101,7 +101,7 @@ public static class ExperimentTools
         {
             o = await RunStepAsync(bridges, watch, label, experiment, limit, settleMs, instruction, step, steps, game,
                 async s => { state["status"] = s; await WriteInFlight(experiment, state); }, ct, highlight, progress);
-            state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : o["interrupted"]?.Value<bool>() == true ? "interrupted" : "failed";
+            state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : o["interrupted"]?.Value<bool>() == true ? "interrupted" : o["error"]?.ToString() == "not_your_turn" ? "not_your_turn" : "failed";
             state["result"] = o;
         }
         catch (OperationCanceledException) { state["status"] = "cancelled"; throw; }
@@ -450,7 +450,7 @@ public static class ExperimentTools
                 // RunStepAsync clamps to 120 s for blocking callers; the non-blocking path passes its own cap.
                 var o = await RunStepAsync(bridges, watch, label, experiment, timeoutMs, settleMs, instruction, step, steps, game,
                     async s => { state["status"] = s; await WriteInFlight(experiment, state); }, cts.Token, highlight);
-                state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : o["interrupted"]?.Value<bool>() == true ? "interrupted" : "failed";
+                state["status"] = o["changed"]?.Value<bool>() == true ? "captured" : o["interrupted"]?.Value<bool>() == true ? "interrupted" : o["error"]?.ToString() == "not_your_turn" ? "not_your_turn" : "failed";
                 state["result"] = o;
                 if (o["message"] != null && o["interrupted"] != null) state["error"] = o["message"];
             }
