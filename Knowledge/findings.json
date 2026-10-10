@@ -1,6 +1,15 @@
 {
-  "about": "Verified facts about game data and memory, with their status PER GAME and a check that re-runs them. A finding verified on one game is a hypothesis on the other: run verify_finding there and record the result here (status, date, where, evidence). Statuses: verified | differs | unverified | n/a. Check kinds: data (game_data: row n of a game data table contains the expected text - the cheapest cross-game check), correlate (memory_correlate finds a bit equal to `expect` with 0 counterexamples), stored (the label's value is stored in the range), eval (eval_path value matches `expect`), code (find_field_access: a decompiled excerpt of the struct's code contains every `expectAll` string - needs Ghidra and a snapshot of that game's exe), manual (an experiment: follow `how`).",
+  "about": "Verified facts about game data and memory, with their status PER GAME and a check that re-runs them. A finding verified on one game is a hypothesis on the other: run verify_finding there and record the result here (status, date, where, evidence). Statuses: verified | differs | unverified | n/a. Check kinds: data (game_data: row n of a game data table contains the expected text - the cheapest cross-game check), correlate (memory_correlate finds a bit equal to `expect` with 0 counterexamples), stored (the label's value is stored in the range), eval (eval_path value matches `expect`), code (find_field_access: a decompiled excerpt of the struct's code contains every `expectAll` string - needs Ghidra and a snapshot of that game's exe), series (observe_series over the observer journal: `unit` holds `expect.relation` - same value, same step or step xK - with `expect.unit`; needs observation on long enough), manual (an experiment: follow `how`).",
   "findings": [
+    {
+      "id": "server.mirror-0xC00",
+      "title": "ServerData +0x7100 mirrors +0x6500 (0xC00 apart; also 0x7700/0x6B00, 0x6DA0/0x61A0, 0x7080/0x6480): a double-buffered copy",
+      "subject": "ServerData (ServerDataOffsets), ranges the HUD does not map",
+      "games": {
+        "poe2": { "status": "verified", "date": "2026-10-09", "where": "server +0x7100 ~ +0x6500", "evidence": "observe_series layer=server unit=0x7100 (town, ~10 min over several HUD runs): 0x6500 same value in 152/152 paired changes, 258/258 changes within 200 ms of each other. What the values mean (8-byte entries drifting by 1-2 in the low byte and the fifth byte, ~9 changes/s) and which copy is current are open." }
+      },
+      "check": { "kind": "series", "layer": "server", "unit": "0x7100", "windowMs": 200, "expect": { "unit": "0x6500", "relation": "same value" } }
+    },
     {
       "id": "stash.flags.has-affinity",
       "title": "Stash tab Flags bit 6 = the tab has at least one affinity",
