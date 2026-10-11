@@ -679,11 +679,25 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             if (dirty.Length > 0 || ahead.Length > 0) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (changes or commits)"); return; }
             var branch = Git(wt, "rev-parse --abbrev-ref HEAD").Output.Trim();
             var rm = Git(repo, $"worktree remove \"{wt}\"");
+            // The CLI locks a --worktree it creates ("claude session route-f8-<seq> (pid N)") and an ended session can
+            // leave the lock behind: unlocked only when that pid no longer runs, then removed.
+            if (rm.Code != 0 && FeedbackKit.StaleLockPid(rm.Output) is { } lockPid && !ProcessRuns(lockPid))
+            {
+                Git(repo, $"worktree unlock \"{wt}\"");
+                rm = Git(repo, $"worktree remove \"{wt}\"");
+            }
             if (rm.Code != 0) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: git worktree remove refused: {rm.Output.Trim()}"); return; }
             if (branch.Length > 0 && branch != "HEAD" && Git(repo, $"merge-base --is-ancestor \"{branch}\" origin/main").Code == 0)
                 Git(repo, $"branch -D \"{branch}\"");
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: removing worktree: {ex.Message}"); }
+    }
+
+    private static bool ProcessRuns(int pid)
+    {
+        try { using var p = Process.GetProcessById(pid); return !p.HasExited; }
+        catch (ArgumentException) { return false; }
+        catch { return true; }   // can't tell: leave the lock alone
     }
 
     private static (int Code, string Output) Git(string dir, string args)

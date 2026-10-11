@@ -387,6 +387,9 @@ Start Port    End Port
     var live = ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "98b400ca");
     var stopped = ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "c37e5f7f");
     Check("agents: state, session id, alive by pid", live is { SessionId: "98b400ca-5279", State: "done", Alive: true } && stopped is { Alive: false });
+    Check("worktree: the CLI's lock pid, not another lock's",
+        ExileApiMcp.Dispatch.FeedbackKit.StaleLockPid("fatal: cannot remove a locked working tree, lock reason: claude session route-f8-138 (pid 25444)\nuse 'remove -f -f'") == 25444
+        && ExileApiMcp.Dispatch.FeedbackKit.StaleLockPid("fatal: cannot remove a locked working tree, lock reason: on a USB stick") == null);
     Check("agents: unlisted is null", ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "ffffffff") == null);
     Throws<FormatException>("agents: no list is a CLI failure, not 'unlisted'", () => ExileApiMcp.Dispatch.FeedbackKit.ParseAgent("error: service down", "98b400ca"));
     var named2 = ExileApiMcp.Dispatch.FeedbackKit.DisplayName(JObject.Parse("""{ "seq": 4, "data": { "Note": "fix  it" } }"""));

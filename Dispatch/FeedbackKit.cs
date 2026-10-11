@@ -147,6 +147,12 @@ public static class FeedbackKit
         return a;
     }
 
+    /// <summary>The pid in a refused `git worktree remove` of a worktree the CLI locked ("cannot remove a locked working
+    /// tree, lock reason: claude session route-f8-138 (pid 25444)"), or null when it is another lock.</summary>
+    public static int? StaleLockPid(string gitOutput) =>
+        Regex.Match(gitOutput, @"locked working tree, lock reason: claude session [^\r\n]*\(pid (\d+)\)") is { Success: true } m
+        && int.TryParse(m.Groups[1].Value, out var pid) ? pid : null;
+
     /// <summary>The short id `claude --bg` prints ("backgrounded · 98b400ca · name"), or null.</summary>
     public static string? ParseBackgrounded(string stdout) =>
         Regex.Match(Regex.Replace(stdout, @"\x1b\[[0-9;?]*[A-Za-z]", ""), @"backgrounded\s*\S\s*([0-9a-f]{6,})") is { Success: true } m ? m.Groups[1].Value : null;
