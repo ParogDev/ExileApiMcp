@@ -7,10 +7,10 @@ import type { Toast } from "../sync";
 import { errorText, isUnreachable, type Host, type ListenState, type ToolResult } from "./host";
 import type {
   BridgeEntry, Catalog, CatalogTool, Game, LayerMapResult, LayersResult, ObserveEvent, ObserveEventsResult, ObserveStatus,
-  PerfSnapshot, SeriesResult, SettingChangeResult, SettingNode, SettingsResult, TimelineResult,
+  PerfSnapshot, RouteError, RouteState, SeriesResult, SettingChangeResult, SettingNode, SettingsResult, TimelineResult,
 } from "./types";
 
-export type Page = "overview" | "tools" | "settings" | "observer" | "perf" | "memory" | "explorer" | "stats";
+export type Page = "overview" | "tools" | "settings" | "observer" | "route" | "perf" | "memory" | "explorer" | "stats";
 export interface Route { page: Page; id?: string; sub?: string }
 
 export const PAGES: { page: Page; label: string; standaloneOnly?: boolean }[] = [
@@ -18,6 +18,7 @@ export const PAGES: { page: Page; label: string; standaloneOnly?: boolean }[] = 
   { page: "tools", label: "Tools" },
   { page: "settings", label: "Settings" },
   { page: "observer", label: "Observer" },
+  { page: "route", label: "Route" },
   { page: "perf", label: "Performance", standaloneOnly: true },
   { page: "memory", label: "Memory", standaloneOnly: true },
   { page: "explorer", label: "Explorer", standaloneOnly: true },
@@ -84,8 +85,24 @@ export interface HealthState {
   history: { at: number; fps: number }[];
 }
 
+/** The Route page: the route plugin's state (route_state), polled at 1 Hz while the page is open and visible. */
+export interface RouteNavState {
+  state?: RouteState;
+  /** When the state was last read; `ms` is the call's round trip. */
+  at?: number;
+  ms?: number;
+  loading: boolean;
+  /** The last call's error: the route_state error object (by code) or the thrown message. */
+  error?: RouteError;
+  /** Polling on (the page is open and Live is on). */
+  live: boolean;
+  /** How many reads so far in this session. */
+  reads: number;
+}
+
 export interface Snapshot {
   route: Route;
+  nav: RouteNavState;
   catalog?: Catalog;
   catalogError?: string;
   catalogAt?: number;
@@ -117,10 +134,13 @@ export const MAX_EVENTS = 1000;
 const EVENTS_POLL_LIMIT = 500;
 
 const EMPTY_TIMELINE: TimelineState = { journal: {} };
+/** route_state every second while the Route page is visible; 5 s between retries while it fails. */
+export const ROUTE_POLL_MS = 1000;
+const ROUTE_RETRY_MS = 5000;
 
 export class ControlStore {
   private snap: Snapshot = {
-    route: { page: "overview" }, loadingCatalog: false, games: [],
+    route: { page: "overview" }, nav: { loading: false, live: false, reads: 0 }, loadingCatalog: false, games: [],
     health: { watching: false, loading: false, via: "off", history: [] },
     observer: { events: [], seq: 0, busy: false },
     timeline: EMPTY_TIMELINE,
@@ -136,6 +156,8 @@ export class ControlStore {
   private healthWatchGen = 0;
   private eventsTimer?: ReturnType<typeof setTimeout>;
   private gamesTimer?: ReturnType<typeof setTimeout>;
+  private navTimer?: ReturnType<typeof setTimeout>;
+  private navGen = 0;
 
   constructor(public readonly host: Host) {}
 
@@ -166,6 +188,7 @@ export class ControlStore {
     this.healthWatchGen++;
     clearTimeout(this.eventsTimer);
     clearTimeout(this.gamesTimer);
+    this.setRouteLive(false);
     this.unlisten?.();
     this.unlisten = undefined;
     for (const r of this.snap.runs) r.abort?.abort();
@@ -242,9 +265,53 @@ export class ControlStore {
 
   setGame(game: Game) {
     if (game === this.snap.game) return;
-    this.set({ game, observer: { events: [], seq: 0, busy: false }, timeline: EMPTY_TIMELINE, health: { ...this.snap.health, snapshot: undefined, history: [] } });
+    this.set({ game, observer: { events: [], seq: 0, busy: false }, timeline: EMPTY_TIMELINE, health: { ...this.snap.health, snapshot: undefined, history: [] }, nav: { ...this.snap.nav, state: undefined, at: undefined, error: undefined } });
     this.resubscribe();
     void this.pollEvents();
+    if (this.snap.nav.live) void this.pollRoute(++this.navGen);
+  }
+
+  // ── Route (the navigation plugin's state) ────────────────────────
+
+  /** Poll route_state at 1 Hz while on (the Route page mounts with it on, unmounts with it off); nothing while hidden. */
+  setRouteLive(on: boolean) {
+    if (on === this.snap.nav.live) return;
+    this.navGen++;
+    clearTimeout(this.navTimer);
+    this.set({ nav: { ...this.snap.nav, live: on } });
+    if (on) void this.pollRoute(this.navGen);
+  }
+
+  /** One read now (also what the poll does). */
+  async refreshRoute(): Promise<void> {
+    if (!this.snap.game || !this.hasTool("route_state")) return;
+    const gen = this.navGen;
+    this.set({ nav: { ...this.snap.nav, loading: true } });
+    const t0 = Date.now();
+    try {
+      const r = await this.call("route_state", this.gameArgs(), { quiet: true });
+      if (gen !== this.navGen && !this.snap.nav.live) return;
+      if (r.isError) {
+        const d = r.data as RouteError | undefined;
+        this.set({ nav: { ...this.snap.nav, loading: false, error: d?.error ? d : { error: "error", message: r.text || "route_state failed" } } });
+        return;
+      }
+      const state = r.data as RouteState | undefined;
+      if (!state || typeof state !== "object" || !Array.isArray(state.steps)) throw new Error("route_state returned no route state");
+      this.set({ nav: { ...this.snap.nav, state, at: Date.now(), ms: r.ms ?? Date.now() - t0, loading: false, error: undefined, reads: this.snap.nav.reads + 1 } });
+    } catch (e) {
+      if (gen !== this.navGen && !this.snap.nav.live) return;
+      this.set({ nav: { ...this.snap.nav, loading: false, error: { error: isUnreachable(errorText(e)) ? "unreachable" : "error", message: errorText(e) } } });
+    }
+  }
+
+  private async pollRoute(gen: number) {
+    clearTimeout(this.navTimer);
+    if (gen !== this.navGen || !this.snap.nav.live || !this.running) return;
+    if (!document.hidden && this.snap.game && this.snap.catalog) await this.refreshRoute();
+    if (gen !== this.navGen || !this.snap.nav.live || !this.running) return;
+    const wait = this.snap.nav.error ? ROUTE_RETRY_MS : ROUTE_POLL_MS;
+    this.navTimer = setTimeout(() => void this.pollRoute(gen), wait);
   }
 
   /** Does the server offer this tool? (observe_series may not exist yet on an older server.) */

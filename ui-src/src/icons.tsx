@@ -62,6 +62,10 @@ const PATHS = {
   grid: "M4 4h16v16H4zM4 12h16M12 4v16",
   circleX: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 9l-6 6",
   circleCheck: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8.5 12.5l2.5 2.5 5-5",
+  route: "M6 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM12 19h4.5a3.5 3.5 0 0 0 0-7h-9a3.5 3.5 0 0 1 0-7H12",
+  flag: "M5 21V4M5 4h12l-2 4 2 4H5",
+  mapPin: "M12 21s-7-6.5-7-11.5a7 7 0 0 1 14 0C19 14.5 12 21 12 21zM12 9.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
+  compass: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM15.5 8.5l-2 5-5 2 2-5z",
 } as const;
 
 export type IconName = keyof typeof PATHS;

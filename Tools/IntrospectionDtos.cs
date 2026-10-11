@@ -53,6 +53,23 @@ public sealed class BridgeMethodsResult
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
+/// <summary>plugin_bridge_call: one PluginBridge delegate invoked by name (the bridge's hud.bridge_call).</summary>
+public sealed class BridgeCallResult
+{
+    public bool Ok { get; set; }
+    public string? Name { get; set; }
+    /// <summary>e.g. "String ()".</summary>
+    public string? Signature { get; set; }
+    /// <summary>json (a string result that parsed as JSON), text, value (a scalar or serialized object) or null.</summary>
+    public string? ResultType { get; set; }
+    /// <summary>What the method returned, shaped by resultType.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public JsonElement? Result { get; set; }
+    /// <summary>How long the call took inside the HUD.</summary>
+    public double? Ms { get; set; }
+    public string? Note { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
 public sealed class BridgeMethodInfo
 {
     public string? Name { get; set; }
