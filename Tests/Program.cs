@@ -321,7 +321,7 @@ Start Port    End Port
     var cmdArgs = ExileApiMcp.Dispatch.FeedbackKit.CmdArguments(@"C:\x\claude.exe", 42, @"C:\h\42", @"C:\h\42\mcp.json", [@"C:\live", @"C:\Path of Hexile"]);
     Check("cmd: headless, own worktree, prompt on stdin, output to files",
         cmdArgs.StartsWith("/d /s /c \"") && cmdArgs.Contains("-p --output-format json") && cmdArgs.Contains("--worktree route-f8-42") && cmdArgs.Contains("--strict-mcp-config")
-        && cmdArgs.Contains("< \"C:\\h\\42\\prompt.txt\"") && cmdArgs.Contains("> \"C:\\h\\42\\output.json\"") && cmdArgs.Contains("2> \"C:\\h\\42\\stderr.log\"")
+        && cmdArgs.Contains($"< \"{Path.Combine(@"C:\h\42", "prompt.txt")}\"") && cmdArgs.Contains($"> \"{Path.Combine(@"C:\h\42", "output.json")}\"") && cmdArgs.Contains($"2> \"{Path.Combine(@"C:\h\42", "stderr.log")}\"")
         && cmdArgs.Contains("--add-dir \"C:\\Path of Hexile\"") && cmdArgs.EndsWith("\""), cmdArgs);
     Check("env: the starting session's Claude variables are scrubbed",
         ExileApiMcp.Dispatch.FeedbackKit.Scrub("CLAUDE_CODE_SESSION_ID") && ExileApiMcp.Dispatch.FeedbackKit.Scrub("CLAUDECODE") && ExileApiMcp.Dispatch.FeedbackKit.Scrub("ANTHROPIC_API_KEY")
