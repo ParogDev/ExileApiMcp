@@ -33,6 +33,8 @@ public sealed class DeployResult
     public string? HudRuns { get; set; }
     public List<string> Warnings { get; set; } = [];
     public string? Note { get; set; }
+    /// <summary>The deploy's lease on the incident board (key deploy:&lt;folder&gt;): owner, heartbeat, orphaned.</summary>
+    public IncidentView? Incident { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 

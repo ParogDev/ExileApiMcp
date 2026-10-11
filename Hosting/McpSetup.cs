@@ -11,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.63.0";
+    public const string Version = "3.64.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -67,6 +67,13 @@ internal static class McpSetup
         card; it waits its turn and returns the answer, or pending with an id for ask_user_result) instead of chat;
         await_change, experiment_step_start and guide_flow wait their turn by themselves. exile://attention/{game}/queue
         shows who holds the card and where you stand.
+        Problems that affect every session go on the machine-wide incident board (incidents): a bridge down with the broken
+        link named (HUD not running, restart in progress, Windows reserving the bridge ports, no token, nothing listening),
+        a HUD restart with its ETA, a deploy left in the main checkout (orphaned when its session is gone). They are raised
+        and resolved automatically, and a tool error from an unreachable bridge ends with the open incidents. When one
+        affects your work, say so (incident_respond ok|blocked|waiting, minutes) and plan around it; to resume as soon as it
+        is over, run incident_wait since=<rev> in the background instead of polling. Raise other machine-wide problems with
+        incident_raise.
         experiment_presets has ready-made stash experiments. Knowledge pack shared/working-with-users says how to word
         an instruction and what goes on the card, in detail and in chat. The Memory View's Experiments tab
         (show_memory_view) lets the user run a preset themselves or follow your run step by step.
@@ -183,6 +190,11 @@ internal static class McpSetup
         services.AddSingleton<IResourceHub>(sp => sp.GetRequiredService<ObserveHub>());
         services.AddSingleton<IResourceHub>(sp => sp.GetRequiredService<PerfHub>());
         services.AddSingleton<IResourceHub>(sp => sp.GetRequiredService<AttentionHub>());
+        // The incident board (Incidents/): a watcher on the board file (incidents.json) for incident_wait and
+        // exile://incidents, and the background checks (bridge back, restart in progress, deploy heartbeats, orphan scan).
+        services.AddSingleton<ExileApiMcp.Incidents.IncidentWatcher>();
+        services.AddSingleton<IResourceHub>(sp => new ExileApiMcp.Incidents.IncidentHub(sp.GetRequiredService<ExileApiMcp.Incidents.IncidentWatcher>()));
+        services.AddHostedService<ExileApiMcp.Incidents.IncidentMonitor>();
         // Light/dark icon pairs for everything registered with an IconSet icon (Hosting/IconThemes.cs).
         services.PostConfigure<McpServerOptions>(IconThemes.Apply);
         return services
@@ -208,7 +220,7 @@ internal static class McpSetup
                 // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
                 // Polls and the experiment tools stay out of it: await_change writes its own lines, and the Memory View's
                 // experiment runner re-reads the record and presets while it follows along.
-                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "experiment_status" or "experiment_step_start" or "experiment_step_cancel" or "experiment_queue_status" or "guide_state" or "bridge_status" or "observe_wait" or "observe_events" or "hud_sessions" or "ask_user" or "ask_user_result")
+                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "experiment_status" or "experiment_step_start" or "experiment_step_cancel" or "experiment_queue_status" or "guide_state" or "bridge_status" or "observe_wait" or "observe_events" or "hud_sessions" or "ask_user" or "ask_user_result" or "incidents" or "incident_wait")
                     && request.Services?.GetService(typeof(BridgeRegistry)) is BridgeRegistry bridges)
                     _ = ExileApiMcp.Tools.GuideTools.LogAsync(bridges, null, $"{SessionIdentity.Label}: {name}{CallHint(request.Params?.Arguments)}", "agent", CancellationToken.None);
                 try

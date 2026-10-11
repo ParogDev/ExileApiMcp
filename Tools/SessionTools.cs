@@ -24,7 +24,9 @@ public static class SessionTools
     [Description("The other agents on this HUD (Claude Code sessions in worktrees, Claude Desktop, scripts): their labels, what " +
                  "each is doing right now (measuring, recording, piloting the user through a step, compiling), explicit leases, " +
                  "pending HUD restart requests with what blocks them, who holds the in-game card and what each session waits to show " +
-                 "the player (its attention-queue items with their place in line; exile://attention/{game}/queue is the live view). Check it before a HUD restart or a long measurement " +
+                 "the player (its attention-queue items with their place in line; exile://attention/{game}/queue is the live view), " +
+                 "plus the open incidents on the machine-wide board (bridge down, restart, ports, deploys incl. orphaned ones) with " +
+                 "each session's response. Check it before a HUD restart or a long measurement " +
                  "when you share the HUD; 'you' is your own session id.")]
     public static async Task<CallToolResult> HudSessions(BridgeRegistry bridges,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
@@ -34,7 +36,18 @@ public static class SessionTools
         if (r is not JObject o || o["sessions"] == null)
             throw new McpException("This HUD's bridge has no sessions yet: update What's an AI Bridge and restart the HUD.");
         var text = SessionsText(o);
-        return Dto.Result(Dto.From<SessionsView>(o), text);
+        var view = Dto.From<SessionsView>(o);
+        // The incident board: what is broken for everyone right now, and how each session answered (Incidents/).
+        // A board problem never costs the session list: it is named in the text instead.
+        try
+        {
+            Incidents.DeployIncidents.Scan();
+            var open = Incidents.IncidentStore.Read().Incidents.Where(i => i.IsOpen).OrderByDescending(i => i.RaisedAt).ToList();
+            view.Incidents = IncidentTools.Views(open);
+            text += open.Count == 0 ? "\nIncident board: nothing open." : $"\nIncident board ({open.Count} open; incident_respond to answer):\n{IncidentTools.Lines(open)}";
+        }
+        catch (Exception ex) { text += $"\nIncident board unreadable ({Incidents.IncidentStore.FilePath}): {ex.GetType().Name}: {ex.Message}"; }
+        return Dto.Result(view, text);
     }
 
     private static string SessionsText(JObject o)
@@ -154,12 +167,31 @@ public static class SessionTools
         var stderr = proc.StandardError.ReadToEndAsync(ct);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(waitSec + 180));   // the restart itself: grace 15 s, start, 8 s alive check, focus
+        // Once the script has the go and starts stopping the HUD (restart-state.json phase "stopping"), put the restart on the
+        // incident board with an ETA, so every session hears of it at once (Incidents/IncidentAuto.cs).
+        var callStart = DateTime.UtcNow;
+        Incidents.Incident? incident = null;
+        using var watchStop = new CancellationTokenSource();
+        var watch = Task.Run(async () =>
+        {
+            while (!watchStop.IsCancellationRequested && incident == null)
+            {
+                incident = Incidents.IncidentAuto.CheckRestartState(bridge, callStart);
+                try { await Task.Delay(1000, watchStop.Token); } catch (OperationCanceledException) { }
+            }
+        });
         try { await proc.WaitForExitAsync(timeout.Token); }
         catch (OperationCanceledException)
         {
             try { proc.Kill(entireProcessTree: true); } catch { }
             throw new McpException($"restart-hud.ps1 gave no result within {waitSec + 180} s.");
         }
+        finally
+        {
+            watchStop.Cancel();
+            await watch;
+        }
+        incident ??= Incidents.IncidentAuto.CheckRestartState(bridge, callStart);
         output.AddRange((await stdout).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r')));
         var err = await stderr;
         if (!string.IsNullOrWhiteSpace(err)) output.Add("stderr: " + err.Trim());
@@ -204,6 +236,21 @@ public static class SessionTools
             "cancelled" => "The UAC prompt was declined (no prompt-free task installed: tools\\install-hud-restart-tasks.ps1).",
             _ => "See output; <HUD>\\restart-hud.log has the elevated half's lines.",
         };
+        // Close the board's restart incident: back, or not restarted at all. A HUD that doesn't come back keeps it open, and
+        // the incident monitor re-diagnoses it (HUD not running, bridge not listening...).
+        try
+        {
+            if (code == 0 && !stopOnly && result.BackAfterSec != null)
+                Incidents.IncidentStore.ResolveKeys(Incidents.IncidentAuto.BridgeKeys(g), $"the {g} HUD is back, bridge answered {result.BackAfterSec} s after the restart");
+            // Not restarted at all (Loader.exe missing, UAC declined, Not now, still blocked): the HUD was never stopped.
+            // A restart that failed after stopping (3, 4) leaves the HUD possibly down: its incident stays open.
+            else if (code is 1 or 2 or 5 or 6 && incident != null)
+                Incidents.IncidentStore.Resolve(incident.Id, $"restart {status}: {result.Note}");
+            var key = stopOnly ? $"bridge-down:{g}" : $"hud-restart:{g}";
+            if (Incidents.IncidentLogic.Find(Incidents.IncidentStore.Read(), key) is { } inc && inc.RaisedAt >= callStart.AddSeconds(-1))
+                result.Incident = IncidentTools.View(inc, Incidents.IncidentStore.ReadHeartbeats());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { output.Add($"incident board not updated: {ex.Message}"); }
         var text = $"{g}: {status} (exit {code}, {sw.Elapsed.TotalSeconds:0} s)" + (result.BackAfterSec != null ? $", bridge back after {result.BackAfterSec} s" : "") + "\n" + string.Join("\n", output);
         var call = Dto.Result(result, text);
         if (code != 0) call.IsError = true;

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using ExileApiMcp.Bridge;
 using ExileApiMcp.Hosting;
 using ExileApiMcp.Hud;
+using ExileApiMcp.Incidents;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -29,16 +30,19 @@ public static class DeployTools
     [Description("From a worktree session: make the running HUD compile your plugin's committed code. The HUD compiles plugins " +
                  "from the MAIN checkout's Plugins folders (junctions), never a worktree, so edits in a worktree don't reach it. " +
                  "action=deploy fetches your worktree submodule's HEAD commit into the main checkout's submodule (detached; " +
-                 "refused when the main checkout has uncommitted changes there, or another session's deploy is active), under " +
-                 "a reload lease, then reload_plugin (hud_restart for Whats An AI Bridge). Uncommitted worktree edits are not " +
-                 "deployed: commit first. action=restore puts the main checkout back to the branch/commit it was on; " +
-                 "action=status shows what the HUD compiles vs what you edited. Until restore (or a merged PR and a pointer " +
-                 "bump), the scaffolding main checkout shows the plugin as modified: the result says so.")]
+                 "refused when the main checkout has uncommitted changes there, or another live session's deploy is active), " +
+                 "under a reload lease, then reload_plugin (hud_restart for Whats An AI Bridge). Uncommitted worktree edits are " +
+                 "not deployed: commit first. action=restore puts the main checkout back to the branch/commit it was on; " +
+                 "action=status shows what the HUD compiles vs what you edited. Each deploy is a lease on the incident board " +
+                 "(deploy:<folder>, kept alive by your server's heartbeat): every session sees it, and once your session is gone " +
+                 "(or silent 10 min) it is orphaned and any session may restore it or deploy over it without force. Until " +
+                 "restore (or a merged PR and a pointer bump), the scaffolding main checkout shows the plugin as modified.")]
     public static async Task<CallToolResult> DeployPlugin(BridgeRegistry bridges,
         [Description("Plugin folder (or a unique part of it), e.g. 'Whats A Route'")] string plugin,
         [Description("deploy (default) | restore | status")] string action = "deploy",
         [Description("Reload after deploy / restore (default true): reload_plugin, or hud_restart for the bridge")] bool reload = true,
-        [Description("deploy: replace another session's active deploy of this plugin (it is told nothing: ask first)")] bool force = false,
+        [Description("deploy / restore: replace another session's LIVE deploy of this plugin (needs message too). An orphaned deploy (its session is gone or silent for 10 min) needs no force")] bool force = false,
+        [Description("With force over a live deploy: what you tell its owner (recorded on its incident, which the owner hears about)")] string? message = null,
         [Description("poe1 | poe2: the HUD to reload; default every running HUD that compiles this folder")] string? game = null,
         CancellationToken ct = default)
     {
@@ -75,8 +79,45 @@ public static class DeployTools
         if (state != null) r.Deployed = StateInfo(state);
         if (!inMain && PluginGit.ReadHead(edited, out _) is { } editedHead) r.Edited = Checkout(edited, editedHead);
 
+        // The deploy lease on the incident board: who owns it, and whether its session is gone (orphaned).
+        var owner = DeployIncidents.Owner(folder);
+        if (owner.Incident == null && state != null)
+        {
+            // No lease on the board: the scan raises a deploy left detached off origin/main as orphaned. Anything else
+            // without a lease (the deployer's board write failed, or it runs a build without the board) is treated as live.
+            DeployIncidents.Scan(force: true);
+            owner = DeployIncidents.Owner(folder);
+        }
+        if (owner.Incident != null) r.Incident = IncidentTools.View(owner.Incident, Incidents.IncidentStore.ReadHeartbeats());
+        string? takeover = null;
+        if (act != "status" && state != null && state.By != SessionIdentity.Label)
+        {
+            var mine = owner.Incident?.OwnerPid == SessionIdentity.Pid;
+            if (owner.Incident == null)
+            {
+                if (!force)
+                    return Finish(r, "refused", false,
+                        $"{state.By} deployed {Short(state.DeployedSha)} ({state.Subject}) from {state.From} at {state.At:u}, with no lease on the incident board " +
+                        "(its commit is on origin/main, or the deployer couldn't record one): ask them (or the user), then pass force=true.");
+                takeover = $"{act} by {SessionIdentity.Label} over {state.By}'s unleased deploy (force)" + (string.IsNullOrWhiteSpace(message) ? "" : $": {message}");
+            }
+            else if (!owner.Orphaned && !mine)
+            {
+                if (!force || string.IsNullOrWhiteSpace(message))
+                    return Finish(r, "refused", false,
+                        $"{state.By} deployed {Short(state.DeployedSha)} ({state.Subject}) from {state.From} at {state.At:u}, and that session is live ({owner.Why}). " +
+                        "Ask them (or the user); to go ahead anyway pass force=true with message=\"...\" (recorded on their incident).");
+                takeover = $"{act} by {SessionIdentity.Label} over the live deploy (force): {message}";
+            }
+            else if (!mine)
+            {
+                takeover = $"orphaned deploy by {state.By} ({owner.Why}): {act} by {SessionIdentity.Label}" + (string.IsNullOrWhiteSpace(message) ? "" : $": {message}");
+                r.Warnings.Add($"Taking over {state.By}'s orphaned deploy ({owner.Why}).");
+            }
+        }
+
         if (act == "status") return Finish(r, "status", true, StatusNote(r, inMain));
-        if (act == "restore") return await Restore(bridges, r, main, mainHead, state, reload, game, ct);
+        if (act == "restore") return await Restore(bridges, r, main, mainHead, state, reload, game, takeover, ct);
 
         // ── Deploy ──
         if (inMain)
@@ -91,13 +132,20 @@ public static class DeployTools
             r.Warnings.Add($"{wip.Count} uncommitted change(s) in your worktree are NOT deployed (only commits are): {string.Join(", ", wip.Take(5))}{(wip.Count > 5 ? ", ..." : "")}. Commit them and deploy again.");
         if (mainHead.Changed.Count > 0)
             return Finish(r, "refused", false, $"The main checkout's {folder} has {mainHead.Changed.Count} uncommitted change(s) ({string.Join(", ", mainHead.Changed.Take(5))}): someone is editing there. Nothing was touched.");
-        if (state != null && state.By != SessionIdentity.Label && !force)
-            return Finish(r, "refused", false, $"{state.By} deployed {Short(state.DeployedSha)} ({state.Subject}) from {state.From} at {state.At:u}. Ask them (or the user), then restore it or pass force=true.");
         if (state != null && mainHead.Sha != state.DeployedSha)
             r.Warnings.Add($"The main checkout moved since the last deploy ({Short(state.DeployedSha)} -> {Short(mainHead.Sha)}); restore will return to {state.BeforeBranch ?? Short(state.BeforeSha)} as first recorded.");
         if (mainHead.Sha == r.Edited.Commit)
         {
             r.Note = $"The main checkout is already at {Short(mainHead.Sha)}.";
+            // Our deploy without its lease (the board write failed, or it predates the board): record it now.
+            if (state != null && state.DeployedSha == mainHead.Sha && (owner.Incident == null || owner.Incident.OwnerPid != SessionIdentity.Pid))
+                try
+                {
+                    if (state.By != SessionIdentity.Label) { state.By = SessionIdentity.Label; state.From = here; state.At = DateTimeOffset.UtcNow; PluginGit.WriteState(main, state); }
+                    var inc = DeployIncidents.Deployed(folder, mainHead.Sha, mainHead.Subject, state.BeforeBranch, state.BeforeSha, r.Games, main, takeover);
+                    r.Incident = IncidentTools.View(inc, Incidents.IncidentStore.ReadHeartbeats());
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { r.Warnings.Add($"The deploy's lease isn't on the incident board ({ex.Message})."); }
             if (reload) r.Reload = await Reload(bridges, folder, PickGames(r, game), $"reload {folder}", ct);
             r.HudRuns = HudRunsText(r);
             return Finish(r, "unchanged", r.Reload?.Ok != false, null);
@@ -120,6 +168,23 @@ public static class DeployTools
             before.By = SessionIdentity.Label; before.From = here; before.At = DateTimeOffset.UtcNow;
             PluginGit.WriteState(main, before);
             r.Deployed = StateInfo(before);
+            // The deploy as a lease on the incident board: every session sees it, and it is orphaned if this session goes away.
+            for (var attempt = 1; attempt <= 3; attempt++)
+            {
+                try
+                {
+                    var inc = DeployIncidents.Deployed(folder, got, r.Edited.Subject, before.BeforeBranch, before.BeforeSha, r.Games, main, takeover);
+                    r.Incident = IncidentTools.View(inc, Incidents.IncidentStore.ReadHeartbeats());
+                    break;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Without the lease, the orphan scan would offer this live deploy to anyone: say so loudly.
+                    if (attempt == 3)
+                        r.Warnings.Add($"Deployed, but NOT recorded on the incident board ({ex.Message}): other sessions may take it for an orphaned deploy. Run deploy_plugin action=deploy again to record it.");
+                    else await Task.Delay(500, ct);
+                }
+            }
             r.Before = new DeployCheckout { Path = main, Commit = before.BeforeSha, Branch = before.BeforeBranch };
             r.Main = Checkout(main, PluginGit.ReadHead(main, out _) ?? mainHead);
         }
@@ -135,9 +200,15 @@ public static class DeployTools
     }
 
     private static async Task<CallToolResult> Restore(BridgeRegistry bridges, DeployResult r, string main, PluginGit.Head mainHead,
-        PluginGit.DeployState? state, bool reload, string? game, CancellationToken ct)
+        PluginGit.DeployState? state, bool reload, string? game, string? takeover, CancellationToken ct)
     {
-        if (state == null) return Finish(r, "unchanged", true, $"Nothing deployed into the main checkout's {r.Plugin}: it is at {Short(mainHead.Sha)}{(mainHead.Branch != null ? $" on {mainHead.Branch}" : " (detached)")}.");
+        if (state == null)
+        {
+            if (mainHead.Branch != null)
+                try { DeployIncidents.Restored(r.Plugin, $"the main checkout's {r.Plugin} is on {mainHead.Branch}"); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { r.Warnings.Add($"The incident board wasn't updated ({ex.Message})."); }
+            return Finish(r, "unchanged", true, $"Nothing deployed into the main checkout's {r.Plugin}: it is at {Short(mainHead.Sha)}{(mainHead.Branch != null ? $" on {mainHead.Branch}" : " (detached; deploy_plugin recorded nothing to return to: switch it back by hand, or deploy over it)")}.");
+        }
         if (mainHead.Changed.Count > 0)
             return Finish(r, "refused", false, $"The main checkout's {r.Plugin} has {mainHead.Changed.Count} uncommitted change(s) ({string.Join(", ", mainHead.Changed.Take(5))}): not touched. Commit or stash them there first.");
         if (mainHead.Sha != state.DeployedSha)
@@ -152,6 +223,10 @@ public static class DeployTools
                 : PluginGit.Run(main, "checkout", "--quiet", "--detach", state.BeforeSha);
             if (!co.Ok) return Finish(r, "failed", false, $"git checkout in the main checkout failed (still at {Short(mainHead.Sha)}): {co.Err}");
             PluginGit.WriteState(main, null);
+            var back = state.BeforeBranch ?? Short(state.BeforeSha);
+            try { DeployIncidents.Restored(r.Plugin, $"restored to {back} by {SessionIdentity.Label}" + (takeover != null ? $" ({takeover})" : "")); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { r.Warnings.Add($"Restored, but the incident board wasn't updated ({ex.Message})."); }
+            r.Incident = null;
             r.Before = r.Main;
             r.Main = Checkout(main, PluginGit.ReadHead(main, out _) ?? mainHead);
             r.Deployed = null;
@@ -286,6 +361,8 @@ public static class DeployTools
         if (r.HudRuns != null) lines.Add("  " + r.HudRuns);
         foreach (var w in r.Warnings) lines.Add("  ! " + w);
         if (r.Note != null) lines.Add("  " + r.Note);
+        if (r.Incident is { State: "open" } inc)
+            lines.Add($"  lease: {inc.Id} by {inc.RaisedBy}{(inc.Orphaned == true ? $", ORPHANED ({inc.OwnerState})" : inc.OwnerState != null ? $", {inc.OwnerState}" : "")}");
         if (r.Reload?.Result is { } res) lines.Add("  reload: " + res.Replace("\n", "\n    "));
         var call = Dto.Result(r, string.Join("\n", lines));
         if (!ok) call.IsError = true;

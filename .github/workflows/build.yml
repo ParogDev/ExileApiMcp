@@ -31,6 +31,11 @@ jobs:
       - name: Build the supervisor
         run: dotnet build Supervisor/ExileApiMcp.Supervisor.csproj -c Release -nologo
 
+      # Unit checks (no test framework): the incident board's parsing, raise/respond/resolve, the bridge diagnosis
+      # from canned netsh output, deploy orphan judgement, and the store's mutex + atomic writes in a temp folder.
+      - name: Unit checks
+        run: dotnet run --project Tests/ExileApiMcp.Tests.csproj -c Release -nologo
+
       # The MCP App UIs are built locally in a container (ui-src/build.ps1) and the single-file
       # outputs are committed as ui/*.html. Rebuild them here with the same Node version and
       # lockfile, and fail if a committed bundle doesn't match its source.

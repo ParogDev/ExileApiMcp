@@ -93,20 +93,29 @@ public sealed class BridgeRegistry : IDisposable
     public async Task<(BridgeClient Bridge, JToken Result)> CallAsync(string? game, string method, JObject? parameters,
         CancellationToken ct)
     {
-        var bridge = await ResolveWaitingAsync(game, ct);
+        BridgeClient bridge;
+        try { bridge = await ResolveWaitingAsync(game, ct); }
+        catch (McpException ex) when (string.IsNullOrWhiteSpace(game) && !_bridges.Any(b => b.LooksAvailable))
+        {
+            // No HUD bridge at all: diagnose the HUDs that run (Incidents/IncidentAuto.cs) and name the open incidents.
+            throw new McpException(ex.Message + await Task.Run(() => Incidents.IncidentAuto.NoBridge(_bridges), CancellationToken.None));
+        }
         try
         {
             await bridge.EnsureConnectedAsync(ct);
+            JToken result;
             try
             {
-                return (bridge, await bridge.SendRequestAsync(method, parameters, ct));
+                result = await bridge.SendRequestAsync(method, parameters, ct);
             }
             catch (BridgeNotSentException)
             {
                 // Stale connection (e.g. the HUD restarted): the request never left, so reconnect and resend once.
                 await bridge.EnsureConnectedAsync(ct);
-                return (bridge, await bridge.SendRequestAsync(method, parameters, ct));
+                result = await bridge.SendRequestAsync(method, parameters, ct);
             }
+            Incidents.IncidentAuto.BridgeOk(bridge);   // resolves this game's bridge-down / hud-restart incidents (checked every 5 s at most)
+            return (bridge, result);
         }
         catch (BridgeUnavailableException ex)
         {
@@ -121,13 +130,16 @@ public sealed class BridgeRegistry : IDisposable
                     try
                     {
                         await bridge.EnsureConnectedAsync(ct);
-                        return (bridge, await bridge.SendRequestAsync(method, parameters, ct));
+                        var back = await bridge.SendRequestAsync(method, parameters, ct);
+                        Incidents.IncidentAuto.BridgeOk(bridge, force: true);
+                        return (bridge, back);
                     }
                     catch (BridgeUnavailableException) { }   // not back yet (BridgeNotSentException included)
                     catch (BridgeException again) { throw new McpException(again.Message); }
                 }
             }
-            throw new McpException(ex.Message + RestartHint(bridge));
+            // Name the broken link and raise it on the incident board (every session hears of it), then list what's open.
+            throw new McpException(ex.Message + RestartHint(bridge) + await Task.Run(() => Incidents.IncidentAuto.BridgeFailed(bridge, ex.Message), CancellationToken.None));
         }
         catch (BridgeException ex)
         {
