@@ -365,6 +365,39 @@ Start Port    End Port
     var bad = ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("""{"type":"result","is_error":true,"result":"Not logged in","terminal_reason":"api_error"}""");
     Check("output: an error result is a failure with its reason", bad.IsError && bad.Why!.Contains("api_error") && bad.Result == "Not logged in");
     Check("output: empty is a failure", ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("").IsError);
+
+    // Visible handlers (background session with Remote Control): name, arguments, the CLI's answers, the transcript.
+    var named = ExileApiMcp.Dispatch.FeedbackKit.DisplayName(JObject.Parse("""{ "seq": 12, "data": { "Event": "note", "Note": "the lever   step never \"ends\" after I pull it twice", "AreaName": "The Molten Vault" } }"""));
+    Check("name: seq, first words of the note, area, no quotes", named == "F8 #12: the lever step never 'ends' after I... (The Molten Vault)", named);
+    var verdict = ExileApiMcp.Dispatch.FeedbackKit.DisplayName(JObject.Parse("""{ "seq": 3, "data": { "Event": "Wrong place" } }"""));
+    Check("name: the verdict without a note", verdict == "F8 #3: Wrong place", verdict);
+    var bgArgs = ExileApiMcp.Dispatch.FeedbackKit.BackgroundArguments(42, "F8 #42: x", @"C:\h\42\mcp.json", [@"C:\live"], "Handle it.");
+    Check("bg: background, Remote Control named, own worktree, prompt last",
+        bgArgs[0] == "--bg" && bgArgs[1] == "--remote-control" && bgArgs[2] == "F8 #42: x" && string.Join(" ", bgArgs).Contains("--worktree route-f8-42")
+        && bgArgs.Contains("--strict-mcp-config") && !bgArgs.Contains("-p") && bgArgs[^1] == "Handle it.", string.Join(" | ", bgArgs));
+    Check("bg: short id from the CLI's answer",
+        ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("Starting background service…\nbackgrounded · 98b400ca · F8 test\n  claude agents") == "98b400ca"
+        && ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("Workspace not trusted.") == null);
+    const string agentsJson = """
+        [ { "pid": 1, "kind": "interactive", "sessionId": "s0", "status": "busy" },
+          { "pid": 26424, "id": "98b400ca", "kind": "background", "sessionId": "98b400ca-5279", "status": "idle", "state": "done" },
+          { "id": "c37e5f7f", "kind": "background", "sessionId": "c37e5f7f-3394", "state": "done" } ]
+        exit 0
+        """;
+    var live = ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "98b400ca");
+    var stopped = ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "c37e5f7f");
+    Check("agents: state, session id, alive by pid", live is { SessionId: "98b400ca-5279", State: "done", Alive: true } && stopped is { Alive: false });
+    Check("agents: unlisted or unreadable is null",
+        ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "ffffffff") == null && ExileApiMcp.Dispatch.FeedbackKit.ParseAgent("oops", "98b400ca") == null);
+    var (rcUrl, rcLast) = ExileApiMcp.Dispatch.FeedbackKit.ParseTranscript([
+        """{"type":"user","message":{"role":"user","content":"go"}}""",
+        """{"type":"system","subtype":"bridge_status","content":"/remote-control is active","url":"https://claude.ai/code/session_01Rx"}""",
+        """{"type":"assistant","message":{"content":[{"type":"text","text":"First look."},{"type":"tool_use","name":"Read"}]}}""",
+        """{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}""",
+        """{"type":"assistant","message":{"content":[{"type":"text","text":"Fixed the lever step. Pull it now."}]}}""",
+        "not json {",
+    ]);
+    Check("transcript: Remote Control URL and the last answer", rcUrl == "https://claude.ai/code/session_01Rx" && rcLast == "Fixed the lever step. Pull it now.", $"{rcUrl} | {rcLast}");
     Check("refusal: an older bridge's bare answer is a broken link",
         ExileApiMcp.Dispatch.FeedbackKit.Refusal(JObject.Parse("""{ "game": "poe2", "query": "pubsub.events", "timestamp": "x" }"""), "pubsub.events")?.Contains("no pubsub.events") == true);
     Check("refusal: ok true and ok false (claimed) are answers, an error object is not",

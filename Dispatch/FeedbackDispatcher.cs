@@ -16,12 +16,18 @@ namespace ExileApiMcp.Dispatch;
 /// up while a HUD is: see KeepAliveAsync), reads them (pubsub.events, as subscriber "route-dispatcher"), claims each one
 /// exactly once (pubsub.claim stage handle, with a ttl so a dispatcher that dies doesn't hold it forever; a second
 /// dispatcher, e.g. the draining worker of a swap, gets "claimed"), says "Claude is on it" on the card (feedback.reply
-/// status claimed), writes the handler's brief and starts `claude -p --worktree route-f8-&lt;seq&gt;` in the main checkout
-/// with the scrubbed environment, detached (outside this worker's process tree, so a swap or the supervisor's stop doesn't
-/// kill it). When the handler exits, its final message goes to the card (pubsub.claim stage reply first, so it is said
-/// once, and not at all when the handler already said done), and its worktree is removed when it holds nothing.
+/// status claimed), writes the handler's brief and starts it in the main checkout with the scrubbed environment, outside
+/// this worker's process tree (a swap or the supervisor's stop doesn't kill it), in worktree route-f8-&lt;seq&gt;:
+/// - visible first: `claude --bg --remote-control "F8 #&lt;seq&gt;: &lt;note&gt; (&lt;area&gt;)"`, a background session the user sees
+///   and can join in claude.ai/code and the Claude app (Remote Control). Its state comes from `claude agents --json`, its
+///   URL and last answer from its transcript. When its turn is done, the answer goes to the card; the session stays open
+///   for a few minutes for a follow-up (Linger), then is stopped (its transcript stays);
+/// - headless `claude -p` when the background session can't start (the card says which one runs).
+/// The final message goes to the card once (pubsub.claim stage reply first, and not at all when the handler already said
+/// done), and the worktree is removed when it holds nothing.
 ///
-/// One handler at a time (they share route.live.json): later presses wait, and the card says so. Every link that can break
+/// One handler at a time (they share route.live.json): later presses wait, and the card says so. A finished visible
+/// session that lingers for a follow-up doesn't hold the next press back. Every link that can break
 /// is said on the card and raised as incident feedback-dispatch:machine (CLI not found, not logged in, the session
 /// failing to start), never dropped: the press stays queued (unclaimed) and is retried every minute.
 /// State: handlers\dispatcher.json (MCP feedback_dispatcher) and handlers\&lt;seq&gt;\ (brief, output, stderr, state.json);
@@ -81,6 +87,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     {
         if (_running == null && DateTime.UtcNow >= _nextAdopt) { _nextAdopt = DateTime.UtcNow + AdoptEvery; Adopt(); }
         if (_running != null) await SuperviseAsync(ct);
+        if (_env.Exe != null) await ReapAsync(ct);
         // The CLI and its login: checked at start (a broken link is on the board before the first press), then every
         // minute while broken and every 10 min while fine, press or not.
         if (DateTime.UtcNow >= _nextEnvCheck) await RefreshEnvironmentAsync(ct);
@@ -176,15 +183,35 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             File.WriteAllText(mcpConfig, McpConfigJson(seq));
             foreach (var f in new[] { "output.json", "stderr.log" }) File.Delete(Path.Combine(dir, f));
 
-            var (pid, startTime) = await StartDetachedAsync(FeedbackKit.CmdArguments(_env.Exe!, seq, dir, mcpConfig, [LiveDir, repo]), repo, seq, ct);
-            state.Pid = pid;
-            state.Extra = new() { ["processStart"] = JsonSerializer.SerializeToElement(startTime) };
+            // Visible first: a background session with Remote Control, which the user sees (and can join) in Claude.
+            // Headless `claude -p` when that can't start (or HEXILE_DISPATCH_HEADLESS=1), and the card says which ran.
+            state.Name = FeedbackKit.DisplayName(press);
+            string? fallback = Environment.GetEnvironmentVariable("HEXILE_DISPATCH_HEADLESS") == "1" ? "HEXILE_DISPATCH_HEADLESS=1 is set" : null;
+            if (fallback == null)
+            {
+                try
+                {
+                    state.BackgroundId = await StartBackgroundAsync(FeedbackKit.BackgroundArguments(seq, state.Name, mcpConfig, [LiveDir, repo],
+                        FeedbackKit.Prompt(seq, briefPath)), repo, seq, ct);
+                    state.Mode = "remote-control";
+                }
+                catch (HandlerStartException ex) { fallback = $"Remote Control could not start: {ex.Message}"; }
+            }
+            if (state.Mode == null)
+            {
+                var (pid, startTime) = await StartDetachedAsync(FeedbackKit.CmdArguments(_env.Exe!, seq, dir, mcpConfig, [LiveDir, repo]), repo, seq, ct);
+                state.Pid = pid;
+                state.Extra = new() { ["processStart"] = JsonSerializer.SerializeToElement(startTime) };
+                state.Mode = "headless";
+                state.FallbackReason = fallback;
+            }
             state.Status = "running";
             state.Worktree = Path.Combine(repo, ".claude", "worktrees", FeedbackKit.Label(seq));
             _running = state;
             _presses.Remove(seq);
             SaveHandler(state);
-            Console.Error.WriteLine($"[Dispatch] #{seq}: handler pid {pid} started ({_env.Exe})");
+            Console.Error.WriteLine($"[Dispatch] #{seq}: handler started, {state.Mode} ({(state.BackgroundId != null ? $"background session {state.BackgroundId}" : $"pid {state.Pid}")}, {_env.Exe})");
+            await ReplyAsync(seq, "working", FeedbackKit.WhereText(seq, state.Mode, state.Name, state.FallbackReason), ct);
             IncidentStore.ResolveKeys([IncidentKey], $"a handler started for F8 press #{seq}");
             _toldFailed.Remove(seq);
         }
@@ -229,6 +256,43 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         if (line.Length < 2 || !int.TryParse(line[0], out var pid) || !DateTime.TryParse(line[1], null, System.Globalization.DateTimeStyles.RoundtripKind, out var started))
             throw new HandlerStartException($"the handler's launcher failed: {FeedbackKit.Clip(await stderr, 300)}", null);
         return (pid, started.ToUniversalTime());
+    }
+
+    /// <summary>
+    /// Starts the handler as a background session (`claude --bg --remote-control`): the CLI's background service runs it
+    /// (outside this worker's process tree, like the headless launcher's cmd.exe) and the CLI exits once it printed the
+    /// session's short id. The session inherits this environment (scrubbed, plus the handler's label).
+    /// </summary>
+    private async Task<string> StartBackgroundAsync(IReadOnlyList<string> args, string workDir, long seq, CancellationToken ct)
+    {
+        var (code, output) = await RunCliAsync(args, workDir, TimeSpan.FromSeconds(90), ct, seq);
+        return FeedbackKit.ParseBackgrounded(output) is { } id ? id
+            : throw new HandlerStartException($"`claude --bg` exited {code} without a session id: {FeedbackKit.Clip(output, 240)}", null);
+    }
+
+    /// <summary>Runs the CLI with the scrubbed environment (and the handler's label when seq is given) and returns its exit
+    /// code and output (stdout and stderr together). A CLI that hangs is killed after the timeout.</summary>
+    private async Task<(int Code, string Output)> RunCliAsync(IEnumerable<string> args, string? workDir, TimeSpan timeout, CancellationToken ct, long? seq = null)
+    {
+        var psi = new ProcessStartInfo(_env.Exe ?? throw new HandlerStartException("the Claude Code CLI was not found", null))
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
+            WorkingDirectory = workDir ?? UserProfile,
+        };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        foreach (var k in psi.Environment.Keys.Where(FeedbackKit.Scrub).ToList()) psi.Environment.Remove(k);
+        if (seq is { } s) { psi.Environment["HEXILE_AGENT"] = FeedbackKit.Label(s); psi.Environment["HEXILE_ROUTE_PRESS"] = s.ToString(); }
+        using var p = Process.Start(psi) ?? throw new HandlerStartException("the Claude Code CLI did not start", null);
+        p.StandardInput.Close();
+        var o = p.StandardOutput.ReadToEndAsync(ct);
+        var e = p.StandardError.ReadToEndAsync(ct);
+        try { await p.WaitForExitAsync(ct).WaitAsync(timeout, ct); }
+        catch (TimeoutException)
+        {
+            try { p.Kill(true); } catch { }
+            throw new HandlerStartException($"`claude {args.FirstOrDefault()}` did not finish within {timeout.TotalSeconds:0} s", null);
+        }
+        return (p.ExitCode, (await o) + (await e));
     }
 
     /// <summary>The CLI is there and logged in (checked at most once a minute while broken, every 10 min while fine).</summary>
@@ -355,6 +419,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     private async Task SuperviseAsync(CancellationToken ct)
     {
         var h = _running!;
+        if (h.Mode == "remote-control") { await SuperviseBackgroundAsync(h, ct); return; }
         using (var proc = HandlerProcess(h))
         {
             if (proc != null)
@@ -377,7 +442,143 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             var err = File.Exists(Path.Combine(h.Dir!, "stderr.log")) ? FeedbackKit.Clip(File.ReadAllText(Path.Combine(h.Dir!, "stderr.log")), 300) : "";
             error = h.Error ?? why + (result != null ? $": {result}" : "") + (err.Length > 0 ? $" (stderr: {err})" : "");
         }
+        h.SessionId = sessionId;
+        await FinishAsync(h, result, failed, error, ct);
+        RemoveWorktree(h);
+    }
 
+    // ── Watching a visible (background, Remote Control) handler ──────
+
+    /// <summary>How long a finished visible session stays open for the user to follow up in it before it is stopped
+    /// (HEXILE_DISPATCH_LINGER_MIN; pushed back while the user talks to it).</summary>
+    private static readonly TimeSpan Linger = TimeSpan.FromMinutes(
+        double.TryParse(Environment.GetEnvironmentVariable("HEXILE_DISPATCH_LINGER_MIN"), out var m) && m >= 0 ? m : 10);
+    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(3), ListGrace = TimeSpan.FromSeconds(45);
+    private DateTime _nextPoll = DateTime.MinValue, _nextReap = DateTime.MinValue;
+    private readonly HashSet<long> _toldBlocked = new();
+    private readonly Dictionary<string, string> _transcripts = new();
+
+    /// <summary>
+    /// A visible handler is an interactive session: it doesn't exit when its turn ends. `claude agents --json --all` says
+    /// its state (working, blocked on a question, done with its turn) and whether its process is alive; its transcript has
+    /// the claude.ai/code URL and the last answer, which goes to the card once the state is done. The session then stays
+    /// open for Linger (the user can follow up in it) and is stopped by ReapAsync; the next press doesn't wait for that.
+    /// </summary>
+    private async Task SuperviseBackgroundAsync(FeedbackHandlerState h, CancellationToken ct)
+    {
+        if (DateTime.UtcNow < _nextPoll) return;
+        _nextPoll = DateTime.UtcNow + PollEvery;
+        var agent = await AgentAsync(h.BackgroundId!, ct);
+        if (agent is { SessionId: { } sid } && h.SessionId == null) { h.SessionId = sid; SaveHandler(h); }
+        var (url, last) = Transcript(h.SessionId);
+        if (url != null && h.Url != url)
+        {
+            h.Url = url; SaveHandler(h);
+            Console.Error.WriteLine($"[Dispatch] #{h.Seq}: Remote Control at {url}");
+        }
+        var age = h.StartedAt is { } s ? DateTimeOffset.UtcNow - s : TimeSpan.Zero;
+
+        string? error = null;
+        if (age > HandlerMaxRun)
+            error = $"the handler ran longer than {HandlerMaxRun.TotalMinutes:0} min and was stopped" + (agent?.State is { } st ? $" (it was {st})" : "");
+        else if (agent == null)
+        {
+            if (age < ListGrace) return;   // the background service lists it within a few seconds
+            error = $"its background session {h.BackgroundId} is no longer listed by `claude agents`";
+        }
+        else if (agent.Value.State == "blocked" && agent.Value.Alive)
+        {
+            if (_toldBlocked.Add(h.Seq))
+                await ReplyAsync(h.Seq, "working", $"#{h.Seq} waits for an answer: open \"{h.Name}\" in Claude (claude.ai/code or the Claude app).", ct);
+            return;
+        }
+        else if (agent.Value.State == "done" && (last != null || !agent.Value.Alive)) { }   // its turn ended: the answer is ready
+        else if (!agent.Value.Alive)
+            error = $"its session exited before finishing (state {agent.Value.State ?? "unknown"})";
+        else return;   // still working
+
+        var failed = error != null;
+        if (failed) await StopSessionAsync(h, ct);
+        else h.StopAt = DateTimeOffset.UtcNow + Linger;
+        await FinishAsync(h, last, failed, error, ct);
+        if (h.Stopped) RemoveWorktree(h);
+    }
+
+    /// <summary>Finished visible sessions whose linger is over: stopped (the transcript stays), their worktree removed when
+    /// empty. A session the user is talking to (working, or blocked on a question) gets another Linger.</summary>
+    private async Task ReapAsync(CancellationToken ct)
+    {
+        if (DateTime.UtcNow < _nextReap || !Directory.Exists(HandlersDir)) return;
+        _nextReap = DateTime.UtcNow + AdoptEvery;
+        foreach (var f in Directory.EnumerateFiles(HandlersDir, "state.json", SearchOption.AllDirectories))
+        {
+            FeedbackHandlerState? h;
+            try { h = JsonSerializer.Deserialize<FeedbackHandlerState>(File.ReadAllText(f), Dto.Options); } catch { continue; }
+            if (h is not { Mode: "remote-control", Stopped: false, Status: "done" or "failed", StopAt: { } at } || at > DateTimeOffset.UtcNow || h.BackgroundId == null) continue;
+            var agent = await AgentAsync(h.BackgroundId, ct);
+            if (agent is { Alive: true, State: "working" or "blocked" })
+            {
+                h.StopAt = DateTimeOffset.UtcNow + Linger;
+                SaveHandler(h);
+                continue;
+            }
+            await StopSessionAsync(h, ct);
+            SaveHandler(h);
+            RemoveWorktree(h);
+        }
+    }
+
+    private async Task StopSessionAsync(FeedbackHandlerState h, CancellationToken ct)
+    {
+        if (h.BackgroundId == null || h.Stopped) return;
+        try
+        {
+            var (code, output) = await RunCliAsync(["stop", h.BackgroundId], null, TimeSpan.FromSeconds(60), ct);
+            Console.Error.WriteLine($"[Dispatch] #{h.Seq}: claude stop {h.BackgroundId}: exit {code} {FeedbackKit.Clip(output, 160)}");
+            h.Stopped = code == 0 || (await AgentAsync(h.BackgroundId, ct)) is null or { Alive: false };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: stopping {h.BackgroundId}: {ex.Message}"); }
+    }
+
+    /// <summary>The background session as `claude agents --json --all` lists it, or null when it isn't (or the CLI failed:
+    /// the next poll asks again).</summary>
+    private async Task<(string? SessionId, string? State, bool Alive)?> AgentAsync(string id, CancellationToken ct)
+    {
+        try
+        {
+            var (_, output) = await RunCliAsync(["agents", "--json", "--all"], null, TimeSpan.FromSeconds(30), ct);
+            return FeedbackKit.ParseAgent(output, id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine($"[Dispatch] claude agents: {ex.Message}"); return null; }
+    }
+
+    /// <summary>The session's transcript, ~/.claude/projects/&lt;dir&gt;/&lt;session-id&gt;.jsonl (the dir is the worktree's
+    /// path, so it is looked up once by file name).</summary>
+    private (string? Url, string? LastText) Transcript(string? sessionId)
+    {
+        if (sessionId == null) return (null, null);
+        try
+        {
+            if (!_transcripts.TryGetValue(sessionId, out var path))
+            {
+                var projects = Path.Combine(UserProfile, ".claude", "projects");
+                path = Directory.Exists(projects)
+                    ? Directory.EnumerateDirectories(projects).Select(d => Path.Combine(d, sessionId + ".jsonl")).FirstOrDefault(File.Exists) : null;
+                if (path == null) return (null, null);
+                _transcripts[sessionId] = path;
+            }
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var sr = new StreamReader(fs);
+            var lines = new List<string>();
+            while (sr.ReadLine() is { } l) lines.Add(l);
+            return FeedbackKit.ParseTranscript(lines);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return (null, null); }
+    }
+
+    /// <summary>Says the handler's answer on the card (exactly once across dispatchers) and records how it ended.</summary>
+    private async Task FinishAsync(FeedbackHandlerState h, string? result, bool failed, string? error, CancellationToken ct)
+    {
         // Exactly once across dispatchers: the reply stage is claimed before anything is said. A bridge call that fails
         // (the HUD restarting) throws out of here with _running kept: the next step tries again.
         var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject { ["seq"] = h.Seq, ["stage"] = "reply", ["by"] = By }, ct);
@@ -387,19 +588,21 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             var (_, rr) = await bridges.CallAsync(_game, "pubsub.events", new JObject { ["since"] = h.Seq, ["kinds"] = new JArray(FeedbackKit.ReplyKind), ["limit"] = 500 }, ct);
             var handlerSaidDone = (rr["events"] as JArray ?? []).Any(x => x["data"]?["ref"]?.Value<long>() == h.Seq && x["source"]?.ToString() != Subscriber
                                                                          && x["data"]?["status"]?.ToString() is "done" or "failed");
-            if (failed) await FailAsync(h.Seq, $"its Claude session failed: {error}", $"Details: {h.Dir}", ct);
+            if (failed) await FailAsync(h.Seq, $"its Claude session failed: {error}", h.Url != null ? $"Its transcript: {h.Url}" : $"Details: {h.Dir}", ct);
             else if (!handlerSaidDone)
-                await ReplyAsync(h.Seq, "done", FeedbackKit.Clip(result, 400) is { Length: > 0 } text ? text : $"Done with #{h.Seq}.", ct);
+            {
+                var text = FeedbackKit.Clip(result, h.Mode == "remote-control" ? 340 : 400) is { Length: > 0 } t ? t : $"Done with #{h.Seq}.";
+                if (h.Mode == "remote-control") text += $" (Session \"F8 #{h.Seq}\" in Claude.)";
+                await ReplyAsync(h.Seq, "done", text, ct);
+            }
             h.Replied = true;
         }
         h.EndedAt = DateTimeOffset.UtcNow;
-        h.SessionId = sessionId;
         h.Result = result;
         h.Error = error;
         h.Status = failed ? "failed" : "done";
         _running = null;
         SaveHandler(h);
-        RemoveWorktree(h);
     }
 
     /// <summary>The handler's worktree, when it holds nothing: no changes, no commits beyond origin/main. Otherwise kept.</summary>

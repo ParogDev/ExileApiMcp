@@ -81,7 +81,8 @@ public sealed class FeedbackDispatcherState
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
-/// <summary>One press's handler: a fresh headless Claude Code session in its own worktree.</summary>
+/// <summary>One press's handler: a fresh Claude Code session in its own worktree (a background session with Remote Control,
+/// or headless as the fallback).</summary>
 public sealed class FeedbackHandlerState
 {
     public long Seq { get; set; }
@@ -96,5 +97,19 @@ public sealed class FeedbackHandlerState
     public string? Error { get; set; }
     public string? SessionId { get; set; }
     public bool Replied { get; set; }
+    /// <summary>remote-control (a background session the user sees in Claude) | headless (`claude -p`, the fallback)</summary>
+    public string? Mode { get; set; }
+    /// <summary>The session's display name ("F8 #12: lever does not work (The Molten Vault)").</summary>
+    public string? Name { get; set; }
+    /// <summary>remote-control: the short id `claude agents` / `attach` / `stop` take.</summary>
+    public string? BackgroundId { get; set; }
+    /// <summary>remote-control: the session's claude.ai/code address, once Remote Control connected.</summary>
+    public string? Url { get; set; }
+    /// <summary>headless: why Remote Control was not used.</summary>
+    public string? FallbackReason { get; set; }
+    /// <summary>remote-control: when the finished session is stopped (pushed back while the user talks to it).</summary>
+    public DateTimeOffset? StopAt { get; set; }
+    /// <summary>remote-control: the session was stopped (its transcript stays openable).</summary>
+    public bool Stopped { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

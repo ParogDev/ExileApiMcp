@@ -107,8 +107,10 @@ public static class PubSubTools
     [McpServerTool(Name = "feedback_dispatcher", Title = "F8 dispatcher: state and handlers", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(FeedbackDispatcherState))]
     [Description("The F8 feedback dispatcher (on the shared MCP HTTP server): listening / idle / broken with the broken link, the " +
-                 "Claude Code CLI it found and whether it is logged in, the presses waiting, and the last handlers (a fresh headless " +
-                 "session per press, in worktree .claude\\worktrees\\route-f8-<seq>; brief, output and stderr in its dir). Read from " +
+                 "Claude Code CLI it found and whether it is logged in, the presses waiting, and the last handlers (a fresh session per " +
+                 "press, in worktree .claude\\worktrees\\route-f8-<seq>: a background session with Remote Control the user sees in Claude, " +
+                 "named 'F8 #<seq>: <note>', with its session id and claude.ai/code URL, or headless as the fallback; brief, output and " +
+                 "stderr in its dir). Read from " +
                  "handlers\\dispatcher.json, which the dispatcher rewrites every second: updatedAt older than a few seconds means no " +
                  "dispatcher runs (the shared server is down: any tools\\mcp-call.ps1 call starts it).")]
     public static CallToolResult FeedbackDispatcherStatus()
@@ -123,7 +125,11 @@ public static class PubSubTools
                    + $"CLI: {s.ClaudeExe ?? "not found yet"}{(s.LoggedIn == false ? " (NOT logged in)" : "")}\n"
                    + (s.LoggedIn == false && s.LoginCommand != null && s.Why?.Contains(s.LoginCommand) != true ? $"Sign in once, in PowerShell: {s.LoginCommand}\n" : "")
                    + $"Waiting: {(s.Waiting.Count == 0 ? "none" : string.Join(", ", s.Waiting.Select(w => "#" + w)))}\n"
-                   + string.Join("\n", s.Handlers.Select(h => $"#{h.Seq} {h.Status}{(h.Error != null ? $": {h.Error}" : h.Result != null ? $": {FeedbackKit.Clip(h.Result, 160)}" : "")} ({h.Dir})"));
+                   + string.Join("\n", s.Handlers.Select(h => $"#{h.Seq} {h.Status}{(h.Error != null ? $": {h.Error}" : h.Result != null ? $": {FeedbackKit.Clip(h.Result, 160)}" : "")} ({h.Dir})"
+                       + (h.Mode == "remote-control"
+                           ? $"\n    visible session \"{h.Name}\" (background {h.BackgroundId}, session {h.SessionId ?? "?"}){(h.Url != null ? $" {h.Url}" : " (no Remote Control URL yet)")}"
+                             + (h.Stopped ? ", stopped" : h.StopAt is { } at ? $", open for a follow-up until {at.ToLocalTime():HH:mm}" : "")
+                           : h.Mode == "headless" ? $"\n    headless{(h.FallbackReason != null ? $" ({h.FallbackReason})" : "")}{(h.SessionId != null ? $", session {h.SessionId}" : "")}" : "")));
         return Dto.Result(s, text);
     }
 
