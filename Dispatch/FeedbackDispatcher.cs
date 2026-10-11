@@ -33,7 +33,7 @@ namespace ExileApiMcp.Dispatch;
 /// State: handlers\dispatcher.json (MCP feedback_dispatcher) and handlers\&lt;seq&gt;\ (brief, output, stderr, state.json);
 /// any worker picks up a running handler from its state.json (Adopt), whoever started it.
 /// </summary>
-public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundService
+public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationLifetime lifetime) : BackgroundService
 {
     public const string Subscriber = "route-dispatcher", IncidentKey = "feedback-dispatch:machine";
     private static readonly TimeSpan PressMaxAge = TimeSpan.FromHours(2), HandlerMaxRun = TimeSpan.FromMinutes(40),
@@ -68,8 +68,13 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     public static string HandlersDir => Path.Combine(LiveDir, "handlers");
     public static string StatusFile => Path.Combine(HandlersDir, "dispatcher.json");
 
-    protected override Task ExecuteAsync(CancellationToken stop) => CallerIdentity.RunAsAsync(_as, async () =>
+    /// <summary>Stops as soon as this worker is told to stop (ApplicationStopping), not when the host gets to stopping
+    /// hosted services: a drained worker waits for its open requests first (up to an hour), and its dispatcher, with the
+    /// old build's code, must not take presses meanwhile. The new worker adopts a running handler from its state.json.</summary>
+    protected override Task ExecuteAsync(CancellationToken hostStop) => CallerIdentity.RunAsAsync(_as, async () =>
     {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(hostStop, lifetime.ApplicationStopping);
+        var stop = linked.Token;
         _ = KeepAliveAsync(stop);
         while (!stop.IsCancellationRequested)
         {
