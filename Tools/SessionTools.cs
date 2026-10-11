@@ -38,10 +38,15 @@ public static class SessionTools
         var text = SessionsText(o);
         var view = Dto.From<SessionsView>(o);
         // The incident board: what is broken for everyone right now, and how each session answered (Incidents/).
-        Incidents.DeployIncidents.Scan();
-        var open = Incidents.IncidentStore.Read().Incidents.Where(i => i.IsOpen).OrderByDescending(i => i.RaisedAt).ToList();
-        view.Incidents = IncidentTools.Views(open);
-        text += open.Count == 0 ? "\nIncident board: nothing open." : $"\nIncident board ({open.Count} open; incident_respond to answer):\n{IncidentTools.Lines(open)}";
+        // A board problem never costs the session list: it is named in the text instead.
+        try
+        {
+            Incidents.DeployIncidents.Scan();
+            var open = Incidents.IncidentStore.Read().Incidents.Where(i => i.IsOpen).OrderByDescending(i => i.RaisedAt).ToList();
+            view.Incidents = IncidentTools.Views(open);
+            text += open.Count == 0 ? "\nIncident board: nothing open." : $"\nIncident board ({open.Count} open; incident_respond to answer):\n{IncidentTools.Lines(open)}";
+        }
+        catch (Exception ex) { text += $"\nIncident board unreadable ({Incidents.IncidentStore.FilePath}): {ex.GetType().Name}: {ex.Message}"; }
         return Dto.Result(view, text);
     }
 
