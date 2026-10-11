@@ -4,12 +4,12 @@
 // while it is open, and the plugin's timings next to the load they were measured under. Fields the plugin adds
 // later show under "More", so a growing DTO never hides anything.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Banner, EmptyState, useNow } from "../../components";
 import { Icon } from "../../icons";
 import type { ControlStore, Snapshot } from "../store";
 import type { RouteError, RouteState, RouteStep } from "../types";
-import { Badge, Button, Card, JsonView, Stat, Switch, agoShort, fmtNum } from "../ui";
+import { Badge, Button, Card, JsonView, Segmented, Switch, agoShort, fmtNum } from "../ui";
 
 /** The fields this page renders; everything else in the state goes under "More". */
 const KNOWN = new Set<string>(["game", "area", "areaName", "mode", "stepIndex", "steps", "target", "label", "goals", "why", "playerGrid", "areaSize", "pathCells", "pathWorldLength", "edgePieces", "timings", "mapPath", "notes", "activeQuests", "questObjective", "travelTo", "travelMapOpen", "travelMapStops", "playerTile", "sightings"]);
@@ -22,6 +22,7 @@ export function RoutePage({ store, snap }: { store: ControlStore; snap: Snapshot
   const s = nav.state;
   const hasTool = !snap.catalog || store.hasTool("route_state");
   const noHud = store.gamesUp.length === 0 && snap.gamesAt !== undefined;
+  const unreachable = snap.games.find((g) => g.status === "unreachable");
   const step = s && s.stepIndex >= 0 && s.stepIndex < s.steps.length ? s.steps[s.stepIndex] : undefined;
   const extra = useMemo(() => {
     if (!s) return {};
@@ -30,6 +31,7 @@ export function RoutePage({ store, snap }: { store: ControlStore; snap: Snapshot
     return o;
   }, [s]);
   const stale = nav.at !== undefined && now - nav.at > 5000;
+  const [mapView, setMapView] = useState<MapView>("area");
 
   return (
     <div className="flex flex-col gap-3">
@@ -43,8 +45,8 @@ export function RoutePage({ store, snap }: { store: ControlStore; snap: Snapshot
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 text-[11px] text-fg-3">
           <span className="flex items-center gap-1.5 tnum" title={nav.at ? `Last read ${new Date(nav.at).toLocaleTimeString()} in ${fmtNum(nav.ms, 0)} ms · ${nav.reads} reads this session` : "Nothing read yet"}>
-            <span className={`size-1.5 rounded-full ${nav.live && !nav.error && !stale ? "bg-success live-dot" : nav.error ? "bg-danger" : "bg-fg-3"}`} />
-            {nav.live ? (nav.error ? "retrying every 5 s" : "1 Hz while visible") : "paused"}
+            <span className={`size-1.5 rounded-full ${nav.live && s && !nav.error && !stale ? "bg-success live-dot" : nav.error ? "bg-danger" : "bg-fg-3"}`} />
+            {!snap.game ? "no HUD" : nav.live ? (nav.error ? "retrying every 5 s" : "1 Hz while visible") : "paused"}
             {nav.at !== undefined && <span className="hidden sm:inline">· read {agoShort(now - nav.at)}{nav.ms !== undefined ? ` in ${fmtNum(nav.ms, 0)} ms` : ""}</span>}
           </span>
           <label className="flex items-center gap-1.5 text-fg-2" title="Poll route_state every second while this page is visible">
@@ -55,7 +57,13 @@ export function RoutePage({ store, snap }: { store: ControlStore; snap: Snapshot
       </div>
 
       {!hasTool && <Banner tone="info" icon="info" title="This server has no route_state tool">The Route page needs an ExileApiMcp build with <code className="font-code">route_state</code> (Tools/RouteTools.cs). Deploy a newer build (mcp_deploy) and reload this page.</Banner>}
-      {hasTool && noHud && <Banner tone="warning" icon="offline" title="No HUD is up">The route plugin runs inside the PoE2 HUD. Start it with "Whats An AI Bridge" and "Whats A Route" enabled; this page notices within 20 s.</Banner>}
+      {hasTool && noHud && (unreachable ? (
+        <Banner tone="danger" icon="offline" title={`The ${unreachable.game} HUD bridge is unreachable`} action={<Button size="sm" onClick={() => void store.refreshGames()}>Retry</Button>}>
+          {unreachable.error ?? "The bridge files exist but the HUD does not answer."} Is the HUD running with "Whats An AI Bridge" enabled? This page checks again every 20 s.
+        </Banner>
+      ) : (
+        <Banner tone="warning" icon="offline" title="No HUD is up">The route plugin runs inside the PoE2 HUD. Start it with "Whats An AI Bridge" and "Whats A Route" enabled; this page notices within 20 s.</Banner>
+      ))}
       {hasTool && !noHud && nav.error && <RouteErrorBanner error={nav.error} onRetry={() => void store.refreshRoute()} />}
 
       {!s ? (
@@ -77,9 +85,10 @@ export function RoutePage({ store, snap }: { store: ControlStore; snap: Snapshot
                 <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-success" />player</span>
                 <span className="flex items-center gap-1"><span className="h-0.5 w-3 rounded-full bg-ring" />route</span>
                 <span className="flex items-center gap-1"><span className="size-2 rotate-45 bg-p-spike" />goal</span>
+                <Segmented size="sm" label="Map view" value={mapView} onChange={setMapView} options={[{ value: "area", label: "Area", title: "The whole pathfinding grid" }, { value: "route", label: "Route", title: "Zoomed to the route and the player" }]} />
               </span>}>
               {s.areaSize && s.areaSize.length === 2 && s.areaSize[0] > 0 && s.areaSize[1] > 0 ? (
-                <RouteMap size={s.areaSize as [number, number]} path={s.mapPath} player={s.playerGrid ?? undefined} goalLabel={s.label ?? step?.label ?? undefined} why={s.why ?? undefined} />
+                <RouteMap size={s.areaSize as [number, number]} view={mapView} path={s.mapPath} player={s.playerGrid ?? undefined} goalLabel={s.label ?? step?.label ?? undefined} why={s.why ?? undefined} />
               ) : (
                 <EmptyState icon="mapPin" title="No terrain grid yet" className="py-6">The plugin builds the grid when an area loads{s.why ? `: ${s.why}` : "."}</EmptyState>
               )}
@@ -116,15 +125,14 @@ export function RoutePage({ store, snap }: { store: ControlStore; snap: Snapshot
                 </div>
                 {s.travelMapStops.length > 0 && (
                   <table className="w-full border-collapse border-t border-line text-[11px]">
-                    <thead><tr className="bg-surface-2 ds-label text-left text-fg-3"><th className="px-3 py-1 font-semibold">#</th><th className="px-2 py-1 font-semibold">Destination</th><th className="px-2 py-1 font-semibold">Id</th><th className="px-2 py-1 font-semibold">State</th><th className="px-3 py-1 text-right font-semibold">Screen</th></tr></thead>
+                    <thead><tr className="bg-surface-2 ds-label text-left text-fg-3"><th className="px-3 py-1 font-semibold">#</th><th className="px-2 py-1 font-semibold">Destination</th><th className="px-2 py-1 font-semibold">State</th><th className="px-3 py-1 text-right font-semibold" title="Where the stop is drawn, in screen pixels">Screen</th></tr></thead>
                     <tbody>
                       {s.travelMapStops.map((x) => (
                         <tr key={x.index} className={`border-t border-line ${x.chosen ? "bg-ring/10" : ""}`}>
-                          <td className="tnum px-3 py-1 text-fg-3">{x.index}</td>
-                          <td className="px-2 py-1 font-medium">{x.destName || "–"}</td>
-                          <td className="px-2 py-1 font-code text-fg-2">{x.destId}</td>
-                          <td className="px-2 py-1"><span className="flex gap-1">{x.chosen && <Badge tone="accent" icon="check">chosen</Badge>}{x.unlocked ? <Badge tone="success">unlocked</Badge> : <Badge tone="neutral" icon="lock">locked</Badge>}</span></td>
-                          <td className="tnum px-3 py-1 text-right text-fg-3">{x.x}, {x.y}</td>
+                          <td className="tnum px-3 py-1 align-top text-fg-3">{x.index}</td>
+                          <td className="min-w-0 px-2 py-1"><span className="block font-medium">{x.destName || "–"}</span><span className="block font-code text-[10.5px] text-fg-3">{x.destId}</span></td>
+                          <td className="px-2 py-1 align-top"><span className="flex flex-wrap gap-1">{x.chosen && <Badge tone="accent" icon="check">chosen</Badge>}{x.unlocked ? <Badge tone="success">unlocked</Badge> : <Badge tone="neutral" icon="lock">locked</Badge>}</span></td>
+                          <td className="tnum whitespace-nowrap px-3 py-1 text-right align-top text-fg-3">{x.x}, {x.y}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -219,17 +227,20 @@ function StepRow({ i, step, current }: { i: number; step: RouteStep; current: bo
   );
 }
 
-const KNOWN_TIMINGS = new Set<string>(["gridBuildMs", "fieldBuildMs", "fieldCellsReached", "edgeBuildMs", "edgeContours", "tickUs", "renderUs", "lastReplanUs", "resolveUs", "entities"]);
+const KNOWN_TIMINGS = new Set<string>(["gridBuildMs", "fieldBuildMs", "fieldCellsReached", "edgeBuildMs", "edgeContours", "tickUs", "renderUs", "lastReplanUs", "resolveUs", "sightingsScanUs", "entities", "places", "goals"]);
 
-/** A timing the plugin added later (e.g. SightingsScanUs, Places): its unit read from the name. */
+/** A timing the plugin added later: its unit read from the name (…Us, …Ms), the label from the camel case. */
 function extraTiming(k: string, v: unknown): { label: string; value: string; unit?: string } {
   const m = /^(.*?)(Us|Ms|Count)?$/.exec(k) ?? [k, k];
   const label = (m[1] || k).replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
   const unit = m[2] === "Us" ? "µs" : m[2] === "Ms" ? "ms" : undefined;
-  return { label, value: typeof v === "number" ? fmtNum(v, unit ? 0 : 1) : String(v), unit };
+  return { label, value: typeof v === "number" ? fmtNum(v, unit === "ms" ? 1 : 0) : String(v), unit };
 }
 
-/** Per-frame costs next to the load they were taken under (entities, cells); builds next to the size they covered. */
+interface TimingRow { label: string; value: number; unit: "µs" | "ms"; digits: number; when: string; under: ReactNode; tone?: "warn" | "bad" }
+
+/** Every timing next to the load it was measured under: what ran, how often, and the counts that scale it (entities,
+ *  places, goals, cells, pieces). Per-frame costs in µs, area builds in ms. */
 function Timings({ s }: { s: RouteState }) {
   const t = s.timings;
   const extras = Object.entries(t).filter(([k]) => !KNOWN_TIMINGS.has(k) && (typeof t[k] === "number" || typeof t[k] === "string"));
@@ -237,48 +248,75 @@ function Timings({ s }: { s: RouteState }) {
   const reached = cells ? Math.round((t.fieldCellsReached / cells) * 100) : undefined;
   const frameUs = t.tickUs + t.renderUs;
   const frameTone = frameUs > 2000 ? "bad" : frameUs > 500 ? "warn" : undefined;
+  const n = (v: number, one: string, many = `${one}s`) => `${fmtNum(v, 0)} ${v === 1 ? one : many}`;
+  const entities = n(t.entities, "entity", "entities"), places = n(t.places, "place"), goals = n(t.goals, "goal");
+  const perFrame: TimingRow[] = [
+    { label: "Tick", value: t.tickUs, unit: "µs", digits: 0, when: "every frame", under: entities, tone: frameTone },
+    { label: "Render", value: t.renderUs, unit: "µs", digits: 0, when: "every frame", under: `${n(s.edgePieces, "edge piece")} drawn${s.pathCells > 0 ? `, ${n(s.mapPath.length / 2, "path point")}` : ""}`, tone: frameTone },
+    { label: "Last replan", value: t.lastReplanUs, unit: "µs", digits: 0, when: "when the goal or the player's cell moves", under: s.pathCells > 0 ? `${n(s.pathCells, "cell")} of path, ${goals}` : "no path" },
+    { label: "Sightings scan", value: t.sightingsScanUs, unit: "µs", digits: 0, when: "2 Hz, smoothed", under: `${entities}, ${places}` },
+    { label: "Resolve", value: t.resolveUs, unit: "µs", digits: 0, when: "2 Hz, smoothed", under: `${entities}, ${places}, ${goals}` },
+  ];
+  const builds: TimingRow[] = [
+    { label: "Grid", value: t.gridBuildMs, unit: "ms", digits: 1, when: "once per area", under: s.areaSize && s.areaSize.length === 2 ? `${s.areaSize[0]} × ${s.areaSize[1]} = ${n(cells ?? 0, "cell")}` : "no grid" },
+    { label: "Field", value: t.fieldBuildMs, unit: "ms", digits: 1, when: "once per area", under: cells ? `${fmtNum(t.fieldCellsReached, 0)} of ${fmtNum(cells, 0)} cells reached (${reached}%)` : `${n(t.fieldCellsReached, "cell")} reached` },
+    { label: "Edges", value: t.edgeBuildMs, unit: "ms", digits: 1, when: "once per area", under: `${n(t.edgeContours, "contour")} → ${n(s.edgePieces, "piece")}` },
+  ];
+  const row = (r: TimingRow) => (
+    <tr key={r.label} className="border-t border-line">
+      <td className="whitespace-nowrap px-3 py-1 font-medium">{r.label}</td>
+      <td className={`tnum whitespace-nowrap px-2 py-1 text-right font-semibold ${r.tone === "bad" ? "text-danger" : r.tone === "warn" ? "text-warning" : ""}`}>{fmtNum(r.value, r.digits)} <span className="font-normal text-fg-3">{r.unit}</span></td>
+      <td className="px-2 py-1 text-fg-3">{r.when}</td>
+      <td className="px-3 py-1 text-fg-2">{r.under}</td>
+    </tr>
+  );
+  const head = (label: string) => (
+    <tr className="bg-surface-2 ds-label text-left text-fg-3"><th className="px-3 py-1 font-semibold" colSpan={2}>{label}</th><th className="px-2 py-1 font-semibold">When</th><th className="px-3 py-1 font-semibold">Measured under</th></tr>
+  );
   return (
-    <Card title="Timings" icon="clock" right={<span className="text-[10.5px] text-fg-3">measured with <b className="tnum font-semibold text-fg-2">{t.entities}</b> valid entities{cells ? <> on <b className="tnum font-semibold text-fg-2">{fmtNum(cells, 0)}</b> cells</> : null}</span>}>
-      <div className="flex flex-col gap-2">
-        <div>
-          <p className="mb-1 ds-label text-fg-3">Per frame</p>
-          <div className="grid grid-cols-2 gap-1.5 xs:grid-cols-4">
-            <Stat label="Tick" value={fmtNum(t.tickUs, 0)} unit="µs" tone={frameTone} sub={`logic · ${t.entities} entities`} />
-            <Stat label="Render" value={fmtNum(t.renderUs, 0)} unit="µs" tone={frameTone} sub={`${s.edgePieces} edge pieces drawn`} />
-            <Stat label="Last replan" value={fmtNum(t.lastReplanUs, 0)} unit="µs" sub={s.pathCells > 0 ? `${fmtNum(s.pathCells, 0)} cells of path` : "no path"} />
-            <Stat label="Resolve" value={fmtNum(t.resolveUs, 0)} unit="µs" sub={`2 Hz, smoothed · ${s.goals} goal${s.goals === 1 ? "" : "s"}`} />
-          </div>
-        </div>
-        <div>
-          <p className="mb-1 ds-label text-fg-3">Area builds (once per area)</p>
-          <div className="grid grid-cols-1 gap-1.5 xs:grid-cols-3">
-            <Stat label="Grid" value={fmtNum(t.gridBuildMs, 1)} unit="ms" sub={s.areaSize && s.areaSize.length === 2 ? `${s.areaSize[0]} × ${s.areaSize[1]} = ${fmtNum(cells, 0)} cells` : "no grid"} />
-            <Stat label="Field" value={fmtNum(t.fieldBuildMs, 1)} unit="ms" sub={cells ? `${fmtNum(t.fieldCellsReached, 0)} of ${fmtNum(cells, 0)} cells reached (${reached}%)` : `${fmtNum(t.fieldCellsReached, 0)} cells reached`} />
-            <Stat label="Edges" value={fmtNum(t.edgeBuildMs, 1)} unit="ms" sub={`${t.edgeContours} contours · ${s.edgePieces} pieces`} />
-          </div>
-        </div>
+    <Card title="Timings" icon="clock" pad={false} right={<span className="text-[10.5px] text-fg-3">under <b className="tnum font-semibold text-fg-2">{t.entities}</b> entities, <b className="tnum font-semibold text-fg-2">{t.places}</b> places{cells ? <>, <b className="tnum font-semibold text-fg-2">{fmtNum(cells, 0)}</b> cells</> : null}</span>}>
+      <table className="w-full border-collapse text-[11.5px]">
+        <thead>{head("Per frame")}</thead>
+        <tbody>{perFrame.map(row)}</tbody>
+        <thead>{head("Area builds")}</thead>
+        <tbody>{builds.map(row)}</tbody>
         {extras.length > 0 && (
-          <div>
-            <p className="mb-1 ds-label text-fg-3">Also reported</p>
-            <div className="flex flex-wrap gap-1">
-              {extras.map(([k, v]) => { const e = extraTiming(k, v); return <Badge key={k} tone="neutral" title={`timings.${k}`} className="normal-case tracking-normal">{e.label} <span className="tnum font-semibold text-fg">{e.value}</span>{e.unit && <span className="text-fg-3">{e.unit}</span>}</Badge>; })}
-            </div>
-          </div>
+          <>
+            <thead>{head("Also reported")}</thead>
+            <tbody>
+              {extras.map(([k, v]) => { const e = extraTiming(k, v); return (
+                <tr key={k} className="border-t border-line">
+                  <td className="px-3 py-1 font-medium">{e.label}</td>
+                  <td className="tnum whitespace-nowrap px-2 py-1 text-right font-semibold">{e.value} {e.unit && <span className="font-normal text-fg-3">{e.unit}</span>}</td>
+                  <td className="px-2 py-1 text-fg-3" colSpan={2}><span className="font-code">timings.{k}</span>: a timing this page has no row for yet</td>
+                </tr>
+              ); })}
+            </tbody>
+          </>
         )}
-        <p className="text-[10.5px] leading-snug text-fg-3">Tick and render are per frame: under 500 µs they cost nothing you can see; the HUD's own frame is ~16 ms. Builds run once when an area loads, so a slow one shows as a hitch at the entrance, not in play.</p>
-      </div>
+      </table>
+      <p className="border-t border-line px-3 py-2 text-[10.5px] leading-snug text-fg-3">Per-frame costs under 500 µs are invisible next to the HUD's ~16 ms frame. The 2 Hz scans and the builds (once per area) show as a hitch when they are slow, not as a lower frame rate.</p>
     </Card>
   );
 }
 
 // ── The map ──────────────────────────────────────────────────────
 
+type MapView = "area" | "route";
 const MAP_MAX_H = 440;
 const MAP_MIN_H = 180;
 
-/** The area's grid as the frame (y up, like the in-game map), the route as a polyline, the player as a dot, the goal at
- *  the path's end. Sized from the card's width (the grid's aspect ratio kept), so markers stay pixel-sized. */
-function RouteMap({ size, path, player, goalLabel, why }: { size: [number, number]; path: number[]; player?: number[]; goalLabel?: string; why?: string }) {
+/** The grid lines' spacing: 4-10 lines across the window. */
+function gridStep(span: number): number {
+  for (const s of [5, 10, 25, 50, 100, 250, 500, 1000, 2500]) if (span / s <= 10) return s;
+  return 5000;
+}
+
+/** The area's pathfinding grid as the frame, drawn the way get_map_image draws it: cell x to the right, cell y down
+ *  (the in-game map is this grid turned 45°). The route as a polyline, the player as a dot, the goal at the path's end.
+ *  "area" shows the whole grid; "route" the route's bounding box (with the player) padded, so a short path in a big
+ *  area is still legible. One uniform scale from the card's width, so markers stay pixel-sized. */
+function RouteMap({ size, view, path, player, goalLabel, why }: { size: [number, number]; view: MapView; path: number[]; player?: number[]; goalLabel?: string; why?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [cw, setCw] = useState(0);
   useEffect(() => {
@@ -290,34 +328,52 @@ function RouteMap({ size, path, player, goalLabel, why }: { size: [number, numbe
     return () => ro.disconnect();
   }, []);
   const [W, H] = size;
-  const scale = cw > 0 ? Math.min(cw / W, MAP_MAX_H / H) : 0;
-  const w = W * scale, h = Math.max(MAP_MIN_H, H * scale);
-  const sy = h / H, sx = w / W;
-  const X = (x: number) => x * sx, Y = (y: number) => (H - y) * sy;
   const pts = useMemo(() => {
     const out: [number, number][] = [];
     for (let i = 0; i + 1 < path.length; i += 2) out.push([path[i], path[i + 1]]);
     return out;
   }, [path]);
   const goal = pts.length ? pts[pts.length - 1] : undefined;
-  const gridStep = W > 1200 ? 250 : W > 500 ? 100 : 50;
+  const hasPlayer = !!player && player.length === 2;
+  // The window in grid cells: the whole grid, or the route and the player with a margin (at least 60 cells across).
+  const win = useMemo(() => {
+    if (view === "area") return { x: 0, y: 0, w: W, h: H };
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    if (hasPlayer) { xs.push(player![0]); ys.push(player![1]); }
+    if (xs.length === 0) return { x: 0, y: 0, w: W, h: H };
+    let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const pad = Math.max(30, (x1 - x0) * 0.15, (y1 - y0) * 0.15);
+    x0 = Math.max(0, Math.floor(x0 - pad)); y0 = Math.max(0, Math.floor(y0 - pad));
+    x1 = Math.min(W, Math.ceil(x1 + pad)); y1 = Math.min(H, Math.ceil(y1 + pad));
+    return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+  }, [view, pts, player, hasPlayer, W, H]);
+  const scale = cw > 0 ? Math.min(cw / win.w, MAP_MAX_H / win.h) : 0;
+  const w = win.w * scale, h = win.h * scale;
+  const boxH = Math.max(MAP_MIN_H, Math.ceil(h));
+  const X = (x: number) => (x - win.x) * scale, Y = (y: number) => (y - win.y) * scale;
+  const step = gridStep(Math.max(win.w, win.h));
   const vlines: number[] = [], hlines: number[] = [];
-  for (let x = gridStep; x < W; x += gridStep) vlines.push(x);
-  for (let y = gridStep; y < H; y += gridStep) hlines.push(y);
+  for (let x = Math.ceil(win.x / step) * step; x <= win.x + win.w; x += step) if (x > 0 && x < W) vlines.push(x);
+  for (let y = Math.ceil(win.y / step) * step; y <= win.y + win.h; y += step) if (y > 0 && y < H) hlines.push(y);
   // The goal label goes to the side of the goal that has room.
   const labelLeft = goal ? X(goal[0]) > w * 0.6 : false;
   const labelBelow = goal ? Y(goal[1]) < 24 : false;
+  const mono = { fontFamily: "var(--font-display)", letterSpacing: ".06em" } as const;
   return (
-    <div ref={ref} className="relative w-full overflow-hidden" style={{ height: scale ? h : MAP_MIN_H }}>
+    <div ref={ref} className="relative w-full overflow-hidden" style={{ height: boxH }}>
       {scale > 0 && (
-        <svg width={w} height={h} className="absolute left-1/2 top-0 -translate-x-1/2 select-none" role="img" aria-label={`Area grid ${W} by ${H} cells with the route${player ? " and the player" : ""}`}>
-          <rect x={0.5} y={0.5} width={w - 1} height={h - 1} fill="var(--color-surface-2)" stroke="var(--color-line-2)" />
+        <svg width={w} height={h} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 select-none" role="img"
+          aria-label={`Area grid ${W} by ${H} cells, x right and y down, with the route${hasPlayer ? " and the player" : ""}`}>
+          {/* The window's background, then the area's edge where it falls inside the window. */}
+          <rect x={0} y={0} width={w} height={h} fill="var(--color-surface-2)" />
           <g stroke="var(--color-line)" strokeWidth={1}>
             {vlines.map((x) => <line key={`v${x}`} x1={X(x) + 0.5} x2={X(x) + 0.5} y1={0} y2={h} />)}
             {hlines.map((y) => <line key={`h${y}`} x1={0} x2={w} y1={Y(y) + 0.5} y2={Y(y) + 0.5} />)}
           </g>
-          <text x={4} y={h - 4} className="fill-fg-3" fontSize={9} style={{ fontFamily: "var(--font-display)", letterSpacing: ".06em" }}>0,0</text>
-          <text x={w - 4} y={10} textAnchor="end" className="fill-fg-3" fontSize={9} style={{ fontFamily: "var(--font-display)", letterSpacing: ".06em" }}>{W},{H}</text>
+          <rect x={X(0) + 0.5} y={Y(0) + 0.5} width={W * scale - 1} height={H * scale - 1} fill="none" stroke="var(--color-line-2)" />
+          <text x={4} y={10} className="fill-fg-3" fontSize={9} style={mono}>{win.x},{win.y}</text>
+          <text x={w - 4} y={h - 4} textAnchor="end" className="fill-fg-3" fontSize={9} style={mono}>{win.x + win.w},{win.y + win.h}</text>
+          <text x={w - 4} y={10} textAnchor="end" className="fill-fg-3" fontSize={9} style={mono}>x → · y ↓ · {step} cells per line</text>
           {pts.length > 1 && (
             <>
               <polyline points={pts.map(([x, y]) => `${X(x)},${Y(y)}`).join(" ")} fill="none" stroke="var(--color-surface)" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" opacity={0.7} />
@@ -332,8 +388,8 @@ function RouteMap({ size, path, player, goalLabel, why }: { size: [number, numbe
               )}
             </g>
           )}
-          {player && player.length === 2 && (
-            <g transform={`translate(${X(player[0])} ${Y(player[1])})`}>
+          {hasPlayer && (
+            <g transform={`translate(${X(player![0])} ${Y(player![1])})`}>
               <circle r={9} fill="var(--color-success)" opacity={0.18} className="breathe" />
               <circle r={4} fill="var(--color-success)" stroke="var(--color-surface)" strokeWidth={1.5} />
             </g>
@@ -342,7 +398,7 @@ function RouteMap({ size, path, player, goalLabel, why }: { size: [number, numbe
       )}
       {pts.length === 0 && scale > 0 && (
         <div className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 px-6 text-center">
-          <span className="inline-block max-w-md rounded-sm border border-line bg-surface px-2 py-1 text-[11px] text-fg-2">{why ? `No path: ${why}` : "No path right now"}</span>
+          <span className="inline-block max-w-md rounded-sm border border-line bg-surface px-2 py-1 text-[11px] text-fg-2">{why ? "No path (the objective says why)" : "No path right now"}</span>
         </div>
       )}
     </div>

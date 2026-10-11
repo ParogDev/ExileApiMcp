@@ -270,7 +270,12 @@ export interface RouteTimings {
   renderUs: number;
   lastReplanUs: number;
   resolveUs: number;
+  /** Gathering places and recording sightings (2 Hz, before resolving), smoothed. */
+  sightingsScanUs: number;
+  /** The load the timings were taken under: valid entities, the places the non-monster walk matched, goal cells resolved. */
   entities: number;
+  places: number;
+  goals: number;
   [k: string]: unknown;
 }
 export interface RouteState {

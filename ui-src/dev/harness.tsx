@@ -84,6 +84,11 @@ if (server instanceof FakeMemory) {
 // perf: trace=<ms> is how long a refresh "traces" (default 3500, like the real tool); profile=<ms> a profile_plugin run.
 // control: trace=<ms> for the perf page / health reports (default 900 in this fake).
 if (server instanceof FakeControl && params.get("trace")) server.perf.traceMs = Number(params.get("trace"));
+// control: route=live|nopath|travel|town picks the route plugin's state (town = the real capture, dev/control/route-state.json).
+if (server instanceof FakeControl) {
+  const r = params.get("route");
+  if (r === "live" || r === "nopath" || r === "travel" || r === "town") server.routeMode = r;
+}
 if (server instanceof FakePerf) {
   if (params.get("trace")) server.traceMs = Number(params.get("trace"));
   if (params.get("profile")) server.profileMs = Number(params.get("profile"));
@@ -227,7 +232,7 @@ function Harness() {
               <Btn onClick={() => server.emit()}>observer event now</Btn>
               <Btn onClick={() => { server.observing = !server.observing; force((n) => n + 1); }}>{server.observing ? "stop observing (in game)" : "start observing (in game)"}</Btn>
             </div>
-            <p className="mt-1 text-fg-3">The catalog is the real capture (95 tools). Settings are synthesised (the bridge plugin + 3 others). Add a layer whose path contains "Missing" to see a preflight failure. standalone=1 renders the control center as the page at /app (push, resources, permission route); scenarios: live, offline, no-hud, flaky, push.</p>
+            <p className="mt-1 text-fg-3">The catalog is the real capture (112 tools). Settings are synthesised (the bridge plugin + 3 others). Add a layer whose path contains "Missing" to see a preflight failure. standalone=1 renders the control center as the page at /app (push, resources, permission route); scenarios: live, offline, no-hud, flaky, push.</p>
           </Field>
         )}
         {server instanceof FakeServer && (

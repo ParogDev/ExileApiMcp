@@ -1,5 +1,5 @@
 // In-memory stand-in for ExileApiMcp as the control center sees it: hud_catalog from the real capture
-// (dev/control/catalog.json, 95 tools), bridge_status, synthesised hud_settings / hud_settings_set (the shapes of
+// (dev/control/catalog.json, 112 tools), bridge_status, synthesised hud_settings / hud_settings_set (the shapes of
 // Tools/ControlDtos.cs, the bridge plugin's real settings plus three other plugins), the observer (status, events that
 // keep coming while observing, layers with preflight, a layer map), perf through FakePerf, and the explorer / memory /
 // stats fakes behind their tools so the standalone pages work. Any other catalog tool answers with a sample built from
@@ -15,6 +15,7 @@ import type { CallToolResult } from "@modelcontextprotocol/client";
 import type { ListenState } from "../src/control/host";
 import type { Catalog, JsonSchema, LayerMapResult, LayerStatus, LayersResult, ObserveEvent, PluginSettings, SettingChangeResult, SettingNode, SettingsResult } from "../src/control/types";
 import catalogFixture from "./control/catalog.json";
+import routeFixture from "./control/route-state.json";
 import { FakeExplorer } from "./fakeExplore";
 import { FakeMemory } from "./fakeMemory";
 import { FakePerf } from "./fakePerf";
@@ -379,7 +380,7 @@ export class FakeControl {
         let tools = CATALOG.tools.some((t) => t.name === SERIES_TOOL.name) ? CATALOG.tools : [...CATALOG.tools, SERIES_TOOL as unknown as Catalog["tools"][number]];
         if (!tools.some((t) => t.name === ROUTE_TOOL.name)) tools = [...tools, ROUTE_TOOL as unknown as Catalog["tools"][number]];
         const c = { ...CATALOG, tools, server: { ...CATALOG.server, gamesUp } };
-        return json(c, `${c.server.title} ${c.server.version}: ${c.tools.length} tools in 31 families, ${c.resources.length} resources (4 subscribable), ${c.prompts.length} prompts. HUDs up: ${gamesUp.join(", ") || "none"}`);
+        return json(c, `${c.server.title} ${c.server.version}: ${c.tools.length} tools in ${new Set(c.tools.map((t) => t.family)).size} families, ${c.resources.length} resources (4 subscribable), ${c.prompts.length} prompts. HUDs up: ${gamesUp.join(", ") || "none"}`);
       }
       case "bridge_status": {
         const poe2 = this.scenario === "no-hud" ? { game: "poe2", bridgeDir: "C:\\...\\halp2\\claude-bridge", status: "not running" }
@@ -438,13 +439,18 @@ export class FakeControl {
 
   // ── route_state: the Whats A Route plugin walking The Riverbank ───────────────────────────────────────────────────
 
-  /** The route plugin's state as its RouteStateDto comes back (PascalCase keys are the plugin's; the server camel-cases
-   *  the known ones). The player walks the route a little further on every read; `routeMode` picks a state:
-   *  "live" (a path to the next step), "nopath" (the target did not resolve: `why`), "travel" (the travel map is open). */
-  routeMode: "live" | "nopath" | "travel" = "live";
+  /** The route plugin's state as route_state returns it (the server camel-cases the DTO's fields; a field the plugin
+   *  adds later keeps its own casing). The player walks the route a little further on every read; `routeMode` picks a
+   *  state: "live" (a path to the next step), "nopath" (the target did not resolve: `why`), "travel" (the travel map is
+   *  open), "town" (the real capture dev/control/route-state.json: Ziggurat Encampment, no steps, a short path to the exit). */
+  routeMode: "live" | "nopath" | "travel" | "town" = "live";
   private routeT = 0;
   private routeState(): CallToolResult {
     this.routeT += 1;
+    if (this.routeMode === "town") {
+      const s = routeFixture as unknown as Record<string, unknown>;
+      return json(s, `${String(s.areaName)} (${String(s.area)}) · mode ${String(s.mode)}\nNo steps for this area\nTarget: ${String(s.target)} -> ${String(s.label)} (1 goal(s))`);
+    }
     const W = 620, H = 480;
     // A bent route from the south-west to a goal in the north-east, every 3rd cell.
     const pts: number[] = [];
@@ -470,7 +476,8 @@ export class FakeControl {
       playerGrid: player, areaSize: [W, H],
       pathCells: nopath ? 0 : remaining.length / 2 * 3, pathWorldLength: nopath ? 0 : Math.round(remaining.length / 2 * 3 * 10.87),
       edgePieces: 212,
-      timings: { gridBuildMs: 18.4, fieldBuildMs: 41.2, fieldCellsReached: 184_320, edgeBuildMs: 22.9, edgeContours: 37, tickUs: 83 + Math.round(Math.random() * 20), renderUs: 41 + Math.round(Math.random() * 10), lastReplanUs: 612, resolveUs: 210, entities: 38 + Math.floor(Math.random() * 6), SightingsScanUs: 1095.8, Places: 93 },
+      // The timings as the server emits them (camelCase), plus one the plugin added later (its own casing: "Also reported").
+      timings: { gridBuildMs: 18.4, fieldBuildMs: 41.2, fieldCellsReached: 184_320, edgeBuildMs: 22.9, edgeContours: 37, tickUs: 83 + Math.round(Math.random() * 20), renderUs: 41 + Math.round(Math.random() * 10), lastReplanUs: 612, resolveUs: 210, entities: 38 + Math.floor(Math.random() * 6), places: 93, sightingsScanUs: 1095.8, goals: nopath ? 0 : 1, DecoyScanUs: 12.5 },
       mapPath: nopath ? [] : remaining,
       notes: ["view: fresh (grid 2 s ago)", ...(nopath ? ["goals are remembered sightings (their entities are not loaded right now)"] : [])],
       activeQuests: ["TheMadWolf:3", "AMatterOfTime:1"],

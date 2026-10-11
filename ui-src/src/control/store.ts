@@ -180,6 +180,8 @@ export class ControlStore {
     void this.refreshObserver();
     this.resubscribe();
     void this.pollEvents();
+    // The Route page mounts (and switches its poll on) before the shell's effect starts the store: resume it here.
+    if (this.snap.nav.live) void this.pollRoute(++this.navGen);
   }
 
   stop() {
