@@ -298,5 +298,62 @@ Start Port    End Port
     reg.Dispose();
 }
 
+// ── F8 dispatcher: CLI discovery, handler command line, environment, brief, result parsing (Dispatch/FeedbackKit.cs) ──
+{
+    var root = Path.Combine(Path.GetTempPath(), "hexile-kit-" + Guid.NewGuid().ToString("N")[..8]);
+    try
+    {
+        var appData = Path.Combine(root, "Roaming");
+        var cc = Path.Combine(appData, "Claude", "claude-code");
+        foreach (var (ver, hash) in new[] { ("2.1.293", "aa"), ("2.1.295", "bb"), ("2.1.40", "cc") })
+        {
+            Directory.CreateDirectory(Path.Combine(cc, ver, hash));
+            File.WriteAllText(Path.Combine(cc, ver, hash, "claude.exe"), "");
+        }
+        Directory.CreateDirectory(Path.Combine(cc, "not-a-version"));
+        var (exe, looked) = ExileApiMcp.Dispatch.FeedbackKit.FindCli(ExileApiMcp.Dispatch.FeedbackKit.CliRoots(appData, Path.Combine(root, "Local")));
+        Check("cli: newest version wins (by version, not by name)", exe == Path.Combine(cc, "2.1.295", "bb", "claude.exe"), exe);
+        var (none, lookedNone) = ExileApiMcp.Dispatch.FeedbackKit.FindCli([Path.Combine(root, "nowhere")]);
+        Check("cli: none found names where it looked", none == null && lookedNone.Contains("nowhere"));
+    }
+    finally { try { Directory.Delete(root, true); } catch { } }
+
+    var cmdArgs = ExileApiMcp.Dispatch.FeedbackKit.CmdArguments(@"C:\x\claude.exe", 42, @"C:\h\42", @"C:\h\42\mcp.json", [@"C:\live", @"C:\Path of Hexile"]);
+    Check("cmd: headless, own worktree, prompt on stdin, output to files",
+        cmdArgs.StartsWith("/d /s /c \"") && cmdArgs.Contains("-p --output-format json") && cmdArgs.Contains("--worktree route-f8-42") && cmdArgs.Contains("--strict-mcp-config")
+        && cmdArgs.Contains($"< \"{Path.Combine(@"C:\h\42", "prompt.txt")}\"") && cmdArgs.Contains($"> \"{Path.Combine(@"C:\h\42", "output.json")}\"") && cmdArgs.Contains($"2> \"{Path.Combine(@"C:\h\42", "stderr.log")}\"")
+        && cmdArgs.Contains("--add-dir \"C:\\Path of Hexile\"") && cmdArgs.EndsWith("\""), cmdArgs);
+    Check("env: the starting session's Claude variables are scrubbed",
+        ExileApiMcp.Dispatch.FeedbackKit.Scrub("CLAUDE_CODE_SESSION_ID") && ExileApiMcp.Dispatch.FeedbackKit.Scrub("CLAUDECODE") && ExileApiMcp.Dispatch.FeedbackKit.Scrub("ANTHROPIC_API_KEY")
+        && ExileApiMcp.Dispatch.FeedbackKit.Scrub("HEXILE_MCP_LOCAL") && ExileApiMcp.Dispatch.FeedbackKit.Scrub("HEXILE_AGENT")
+        && !ExileApiMcp.Dispatch.FeedbackKit.Scrub("PATH") && !ExileApiMcp.Dispatch.FeedbackKit.Scrub("exilecore2Package") && !ExileApiMcp.Dispatch.FeedbackKit.Scrub("HEXILE_REPO"));
+
+    var press = JObject.Parse("""{ "seq": 120, "kind": "feedback", "at": "2026-10-11T10:05:00Z", "data": { "Event": "note", "Note": "lever not shown", "Area": "G3_2_2", "AreaName": "The Matlan Waterways", "Label": "Pull the Waterways Lever", "Target": "radar:Waterways Lever", "StepIndex": 0, "PlayerGrid": [10, 20], "Seq": 400, "State": { "Area": "G3_2_2" } } }""");
+    var trace = new List<JObject> { JObject.Parse("""{ "seq": 118, "kind": "route", "at": "2026-10-11T10:04:00Z", "data": { "Event": "quest", "Area": "G3_2_2", "AreaName": "The Matlan Waterways", "Quests": ["SearchForTheVaalRepository:34 text"] } }""") };
+    var brief = ExileApiMcp.Dispatch.FeedbackKit.Brief(press, trace, [], @"C:\m\docs\feedback-agent.md", @"C:\live", 110);
+    Check("brief: press, note, standing brief, reply path, trace and state",
+        brief.Contains("# F8 press #120") && brief.Contains("lever not shown") && brief.Contains(@"C:\m\docs\feedback-agent.md") && brief.Contains("feedback_reply seq=120")
+        && brief.Contains("since the previous press (#110)") && brief.Contains("SearchForTheVaalRepository:34") && brief.Contains("\"Area\": \"G3_2_2\""), brief);
+
+    var ok = ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("""{"type":"result","subtype":"success","is_error":false,"result":"Fixed the lever step. Pull the lever now.","session_id":"abc"}""");
+    Check("output: final message and session", ok.Result == "Fixed the lever step. Pull the lever now." && !ok.IsError && ok.SessionId == "abc");
+    var bad = ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("""{"type":"result","is_error":true,"result":"Not logged in","terminal_reason":"api_error"}""");
+    Check("output: an error result is a failure with its reason", bad.IsError && bad.Why!.Contains("api_error") && bad.Result == "Not logged in");
+    Check("output: empty is a failure", ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("").IsError);
+    var prev = System.Globalization.CultureInfo.CurrentCulture;
+    try
+    {
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+        var dated = JObject.Parse("""{ "at": "2026-10-11T10:05:00.1234567Z" }""");   // Newtonsoft makes it a Date token
+        var at = ExileApiMcp.Dispatch.FeedbackKit.At(dated["at"]);
+        Check("at: a Date token is UTC whatever the culture", at == new DateTimeOffset(2026, 10, 11, 10, 5, 0, TimeSpan.Zero).AddTicks(1234567), at?.ToString("O"));
+        var text = ExileApiMcp.Dispatch.FeedbackKit.At(new JValue("2026-10-11T10:05:00Z"));
+        Check("at: an ISO string is UTC", text == new DateTimeOffset(2026, 10, 11, 10, 5, 0, TimeSpan.Zero), text?.ToString("O"));
+    }
+    finally { System.Globalization.CultureInfo.CurrentCulture = prev; }
+    var clipped = ExileApiMcp.Dispatch.FeedbackKit.Clip("First sentence is here. Second sentence goes on and on and on.", 40);
+    Check("clip: cuts at a sentence end", clipped == "First sentence is here.", clipped);
+}
+
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures;
