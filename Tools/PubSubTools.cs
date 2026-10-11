@@ -121,7 +121,7 @@ public static class PubSubTools
         var text = (age.TotalSeconds > 15 ? $"NOT RUNNING: last update {age.TotalMinutes:0.#} min ago (the shared server is down; tools\\mcp-call.ps1 starts it).\n" : "")
                    + $"Dispatcher {s.Status}{(s.Why != null ? $": {s.Why}" : "")} (pid {s.Pid}, {s.Version}); cursor #{s.Cursor}\n"
                    + $"CLI: {s.ClaudeExe ?? "not found yet"}{(s.LoggedIn == false ? " (NOT logged in)" : "")}\n"
-                   + (s.LoggedIn == false && s.LoginCommand != null ? $"Sign in once, in PowerShell: {s.LoginCommand}\n" : "")
+                   + (s.LoggedIn == false && s.LoginCommand != null && s.Why?.Contains(s.LoginCommand) != true ? $"Sign in once, in PowerShell: {s.LoginCommand}\n" : "")
                    + $"Waiting: {(s.Waiting.Count == 0 ? "none" : string.Join(", ", s.Waiting.Select(w => "#" + w)))}\n"
                    + string.Join("\n", s.Handlers.Select(h => $"#{h.Seq} {h.Status}{(h.Error != null ? $": {h.Error}" : h.Result != null ? $": {FeedbackKit.Clip(h.Result, 160)}" : "")} ({h.Dir})"));
         return Dto.Result(s, text);

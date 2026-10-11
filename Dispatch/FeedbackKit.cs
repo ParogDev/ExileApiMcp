@@ -65,25 +65,29 @@ public static class FeedbackKit
         try
         {
             if (!Directory.Exists(packages)) return null;
-            foreach (var pkg in Directory.EnumerateDirectories(packages, "Claude_*").Order(StringComparer.OrdinalIgnoreCase))
-            {
-                var candidate = Path.Combine(pkg, "LocalCache", "Roaming", "Claude", "claude-code", rel);
-                if (File.Exists(candidate)) return candidate;
-            }
+            // Several Claude_* folders (a stale one left by an old install): the most recently written copy of that exe.
+            return Directory.EnumerateDirectories(packages, "Claude_*")
+                .Select(pkg => Path.Combine(pkg, "LocalCache", "Roaming", "Claude", "claude-code", rel))
+                .Where(File.Exists)
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        return null;
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
 
-    /// <summary>The sign-in command for the user's own PowerShell: the outside path (written with $env:LOCALAPPDATA when it
-    /// is under it) when found, else the path as the dispatcher sees it. PowerShell needs &amp; before a quoted path.</summary>
-    public static string LoginCommand(string exe, string userProfile)
+    /// <summary>The sign-in command for the user's own PowerShell: the outside path when found, else the path as the
+    /// dispatcher sees it (the fallback). Written with $env:LOCALAPPDATA when it lies under the real LocalAppData and the
+    /// variable names that same folder (envLocalAppData: the variable's value; a redirected one gets the literal path).
+    /// PowerShell needs &amp; before a quoted path; $ and ` in the literal part are escaped for its double quotes.</summary>
+    public static string LoginCommand(string exe, string userProfile, string? envLocalAppData)
     {
         var local = RealLocalAppData(userProfile);
         var path = OutsidePath(exe, local) ?? exe;
-        if (path.StartsWith(local + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            path = "$env:LOCALAPPDATA" + path[local.Length..];
-        return $"& \"{path}\" auth login";
+        var prefix = "";
+        if (path.StartsWith(local + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(envLocalAppData?.TrimEnd('\\'), local, StringComparison.OrdinalIgnoreCase))
+            (prefix, path) = ("$env:LOCALAPPDATA", path[local.Length..]);
+        return $"& \"{prefix}{path.Replace("`", "``").Replace("$", "`$").Replace("\"", "`\"")}\" auth login";
     }
 
     /// <summary>Variables a handler must not inherit: the starting session's Claude Code identity and auth plumbing, and

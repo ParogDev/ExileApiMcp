@@ -70,7 +70,7 @@ public sealed class FeedbackDispatcherState
     public long Cursor { get; set; }
     public string? ClaudeExe { get; set; }
     public bool? LoggedIn { get; set; }
-    /// <summary>When not logged in: the sign-in command for the user's own PowerShell (the CLI's path outside the desktop
+    /// <summary>Only when `claude auth status` answered "not logged in": the sign-in command for the user's own PowerShell (the CLI's path outside the desktop
     /// app's MSIX package, where the dispatcher's path doesn't exist).</summary>
     public string? LoginCommand { get; set; }
     public string? Repo { get; set; }

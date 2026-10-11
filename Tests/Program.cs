@@ -324,16 +324,21 @@ Start Port    End Port
         var pkgCc = Path.Combine(local, "Packages", "Claude_pzs8sxrjxfjjc", "LocalCache", "Roaming", "Claude", "claude-code");
         Directory.CreateDirectory(Path.Combine(pkgCc, "2.1.295", "bb"));
         File.WriteAllText(Path.Combine(pkgCc, "2.1.295", "bb", "claude.exe"), "");
-        var login = ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(exe!, profile);
+        var login = ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(exe!, profile, local);
         Check("login: the package path outside the MSIX, same version and hash, in PowerShell form",
             login == "& \"$env:LOCALAPPDATA\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\claude-code\\2.1.295\\bb\\claude.exe\" auth login", login);
         Check("login: a path already in the package stays (as $env:LOCALAPPDATA)",
-            ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(Path.Combine(pkgCc, "2.1.295", "bb", "claude.exe"), profile) == login);
-        var noPkg = ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(Path.Combine(cc, "2.1.293", "aa", "claude.exe"), profile);
+            ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(Path.Combine(pkgCc, "2.1.295", "bb", "claude.exe"), profile, local + "\\") == login);
+        var redirected = ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(exe!, profile, @"D:\Elsewhere\Local");
+        Check("login: %LOCALAPPDATA% redirected elsewhere: the literal path, not $env:LOCALAPPDATA",
+            redirected == $"& \"{Path.Combine(pkgCc, "2.1.295", "bb", "claude.exe").Replace("$", "`$")}\" auth login", redirected);
+        var noPkg = ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(Path.Combine(cc, "2.1.293", "aa", "claude.exe"), profile, local);
         Check("login: no package folder holds that version: the inside path as the fallback",
             noPkg == $"& \"{Path.Combine(cc, "2.1.293", "aa", "claude.exe")}\" auth login", noPkg);
         Check("login: a HEXILE_CLAUDE_EXE elsewhere is used as is",
-            ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(@"D:\tools\claude.exe", profile) == "& \"D:\\tools\\claude.exe\" auth login");
+            ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(@"D:\tools\claude.exe", profile, local) == "& \"D:\\tools\\claude.exe\" auth login");
+        Check("login: $ and ` in a literal path are escaped for PowerShell's double quotes",
+            ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(@"D:\t$dev\a`b\claude.exe", profile, local) == "& \"D:\\t`$dev\\a``b\\claude.exe\" auth login");
     }
     finally { try { Directory.Delete(root, true); } catch { } }
 
