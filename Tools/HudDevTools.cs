@@ -30,10 +30,14 @@ public static partial class HudDevTools
                  "compiles source plugins at startup, not on save. Each plugin's source says which folder the HUD " +
                  "compiles (the junction target: always the scaffolding's MAIN checkout, never a worktree), its git " +
                  "commit and branch, uncommitted files, a deploy_plugin deploy if one is active, and changedSinceCompile " +
-                 "when the folder changed after the HUD compiled it.")]
-    public static CallToolResult HudPlugins(BridgeRegistry bridges,
+                 "when the folder changed after the HUD compiled it. With the HUD running, each install also carries " +
+                 "'instrumentation': the Harmony patches of running measurements (profile_plugin, pipeline_trace), anything " +
+                 "left patched with no measurement (leftover: a plugin may run a patched copy; reload_plugin it) and the " +
+                 "bridge's cleanup events.")]
+    public static async Task<CallToolResult> HudPlugins(BridgeRegistry bridges,
         [Description("Plugin folder or project name (substring, case-insensitive); omit for all")] string? plugin = null,
-        [Description(GameOpt)] string? game = null)
+        [Description(GameOpt)] string? game = null,
+        CancellationToken ct = default)
     {
         var result = new JArray();
         foreach (var hud in Installs(bridges, game))
@@ -54,13 +58,19 @@ public static partial class HudDevTools
                 }
                 plugins.Add(o);
             }
-            result.Add(new JObject
+            var install = new JObject
             {
                 ["game"] = hud.Game,
                 ["hudRoot"] = hud.Root,
                 ["run"] = RunInfo(run),
                 ["plugins"] = plugins,
-            });
+            };
+            // Live, only when that HUD's bridge looks up (this tool must work with the HUD closed, and must not raise
+            // bridge-down for a HUD nobody started).
+            bool up;
+            try { up = bridges.Resolve(hud.Game).LooksAvailable; } catch { up = false; }
+            if (up && await Incidents.InstrumentIncidents.Fetch(bridges, hud.Game, ct) is { } instr) install["instrumentation"] = instr;
+            result.Add(install);
         }
         var top = new JObject { ["huds"] = result };
         // Deploys on the incident board (with orphaned ones the scan found: a main-checkout submodule detached off origin/main).
@@ -155,13 +165,22 @@ public static partial class HudDevTools
             var id = started["id"]?.Value<string>();
             if (id == null) return new JObject { ["error"] = started["message"] ?? started["error"] ?? "trace not started" };
             var g = bridge.Game == "auto" ? game : bridge.Game;
-            await Task.Delay(2300, ct);
             JToken r = started;
-            for (var i = 0; i < 20 && r["status"]?.Value<string>() != "done"; i++)
+            try
             {
-                try { (_, r) = await bridges.CallAsync(g, "pipeline.trace_result", new JObject { ["id"] = id }, ct); } catch (McpException) { }
-                if (r["status"]?.Value<string>() != "done") await Task.Delay(250, ct);
+                await Task.Delay(2300, ct);
+                for (var i = 0; i < 20 && r["status"]?.Value<string>() != "done"; i++)
+                {
+                    try { (_, r) = await bridges.CallAsync(g, "pipeline.trace_result", new JObject { ["id"] = id }, ct); } catch (McpException) { }
+                    if (r["status"]?.Value<string>() != "done") await Task.Delay(250, ct);
+                }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                await Incidents.InstrumentIncidents.CancelAsync(bridges, g, id);   // the trace's patches end now
+                throw;
+            }
+            if (r["status"]?.Value<string>() == "running") await Incidents.InstrumentIncidents.CancelAsync(bridges, g, id);
             static string Key(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
             double? Avg(string section) => (r[section] as JObject)?.Properties().FirstOrDefault(p => Key(p.Name) == Key(plugin))?.Value["avg"]?.Value<double>();
             return new JObject { ["tickMs"] = Avg("pluginTickMs"), ["renderMs"] = Avg("pluginRenderMs"), ["hudFps"] = r["hudFps"], ["frameWorkMs"] = r["updateMs"]?["avg"] };

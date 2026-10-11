@@ -37,20 +37,32 @@ public static class PipelineTraceTools
         if (id == null) return ToolResults.Json(started);   // instrumentation_disabled / busy / harmony_unavailable
         var g = bridge.Game == "auto" ? game : bridge.Game;
 
-        await Task.Delay(durationMs + 300, ct);
         JToken r = started;
-        for (var i = 0; i < 20 && r["status"]?.Value<string>() == "running"; i++)
+        try
         {
-            try { (_, r) = await bridges.CallAsync(g, "pipeline.trace_result", new JObject { ["id"] = id }, ct); }
-            catch (McpException) when (HudRestartState.Since(bridges, g, t0) is { } rs) { return HudRestartState.Interrupted(rs, "pipeline_trace"); }
-            catch (McpException) { }
-            if (r["status"]?.Value<string>() == "running") await Task.Delay(250, ct);
+            await Task.Delay(durationMs + 300, ct);
+            for (var i = 0; i < 20 && r["status"]?.Value<string>() == "running"; i++)
+            {
+                try { (_, r) = await bridges.CallAsync(g, "pipeline.trace_result", new JObject { ["id"] = id }, ct); }
+                catch (McpException) when (HudRestartState.Since(bridges, g, t0) is { } rs) { return HudRestartState.Interrupted(rs, "pipeline_trace"); }
+                catch (McpException) { }
+                if (r["status"]?.Value<string>() == "running") await Task.Delay(250, ct);
+            }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller gave up: end the trace's patches now, not at the end of its duration.
+            await Incidents.InstrumentIncidents.CancelAsync(bridges, g, id);
+            throw;
+        }
+        if (r["status"]?.Value<string>() == "running") await Incidents.InstrumentIncidents.CancelAsync(bridges, g, id);   // never left running for nobody
         // Not done, or an unknown id from a HUD that came back: a restart in between lost the trace.
         if (r["status"]?.Value<string>() != "done" && HudRestartState.Since(bridges, g, t0) is { } cut) return HudRestartState.Interrupted(cut, "pipeline_trace");
+        await Incidents.InstrumentIncidents.Fetch(bridges, g, ct);   // leftovers / orphans -> the incident board
+        var end = Incidents.InstrumentIncidents.EndLine(r["patches"]?["unpatch"]);
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = Summary(r) }],
+            Content = [new TextContentBlock { Text = Summary(r) + (end != null ? "\n" + end : "") }],
             StructuredContent = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(r.ToString(Newtonsoft.Json.Formatting.None)),
         };
     }
@@ -188,18 +200,35 @@ public static class PipelineTraceTools
         var id = started["id"]?.Value<string>();
         if (id == null) return ToolResults.Json(started);
         var g = bridge.Game == "auto" ? game : bridge.Game;
-        await Task.Delay(durationMs + 1000, ct);   // + patching time
         JToken r = started;
-        for (var i = 0; i < 60 && r["status"]?.Value<string>() != "done"; i++)
+        try
         {
-            try { (_, r) = await bridges.CallAsync(g, "profile.result", new JObject { ["id"] = id }, ct); }
-            catch (McpException) when (HudRestartState.Since(bridges, g, t0) is { } rs) { return HudRestartState.Interrupted(rs, $"profile_plugin {name}"); }
-            catch (McpException) { }
-            if (r["status"]?.Value<string>() != "done") await Task.Delay(500, ct);
+            await Task.Delay(durationMs + 1000, ct);   // + patching time
+            for (var i = 0; i < 60 && r["status"]?.Value<string>() != "done"; i++)
+            {
+                try { (_, r) = await bridges.CallAsync(g, "profile.result", new JObject { ["id"] = id }, ct); }
+                catch (McpException) when (HudRestartState.Since(bridges, g, t0) is { } rs) { return HudRestartState.Interrupted(rs, $"profile_plugin {name}"); }
+                catch (McpException) { }
+                if (r["status"]?.Value<string>() != "done") await Task.Delay(500, ct);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller gave up: end the profile's patches now, not at the end of its duration.
+            await Incidents.InstrumentIncidents.CancelAsync(bridges, g, id);
+            throw;
         }
         if (r["status"]?.Value<string>() != "done" && HudRestartState.Since(bridges, g, t0) is { } cut) return HudRestartState.Interrupted(cut, $"profile_plugin {name}");
-        if (r["status"]?.Value<string>() != "done") return ToolResults.Json(r);
+        if (r["status"]?.Value<string>() != "done")
+        {
+            // Still patching or measuring after the wait: don't leave it running for nobody.
+            await Incidents.InstrumentIncidents.CancelAsync(bridges, g, id);
+            return ToolResults.Json(r);
+        }
+        await Incidents.InstrumentIncidents.Fetch(bridges, g, ct);   // leftovers / orphans -> the incident board
         var sb = new StringBuilder();
+        if (r["error"] != null) return ToolResults.Json(r);
+        if (Incidents.InstrumentIncidents.EndLine(r["unpatch"]) is { } endLine) sb.AppendLine(endLine);
         sb.AppendLine($"{r["plugin"]}: {r["methodsPatched"]} methods for {r["durationMs"]} ms, {r["calls"]} calls, {r["selfTotalMsPerSecond"]} ms of CPU per second in its code");
         if (r["hookOverhead"] is JObject oh) sb.AppendLine($"(the profiler's own cost, {oh["usPerCall"]} us and {oh["bytesPerCall"]} B per call, is already subtracted)");
         sb.AppendLine("self ms/s | incl ms/s | us/call | calls | method");

@@ -32,10 +32,16 @@ public static class SessionTools
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
-        var (_, r) = await bridges.CallAsync(game, "session.list", new JObject(), ct);
+        var (listBridge, r) = await bridges.CallAsync(game, "session.list", new JObject(), ct);
         if (r is not JObject o || o["sessions"] == null)
             throw new McpException("This HUD's bridge has no sessions yet: update What's an AI Bridge and restart the HUD.");
         var text = SessionsText(o);
+        // The bridge's measurement patches (Instrumentation.cs): what is patched now, and anything left behind.
+        if (o["instrumentation"] is JObject instr)
+        {
+            text += "\n" + InstrumentationText(instr);
+            Incidents.InstrumentIncidents.Check(listBridge.Game == "auto" ? game : listBridge.Game, instr);
+        }
         var view = Dto.From<SessionsView>(o);
         // The incident board: what is broken for everyone right now, and how each session answered (Incidents/).
         // A board problem never costs the session list: it is named in the text instead.
@@ -48,6 +54,18 @@ public static class SessionTools
         }
         catch (Exception ex) { text += $"\nIncident board unreadable ({Incidents.IncidentStore.FilePath}): {ex.GetType().Name}: {ex.Message}"; }
         return Dto.Result(view, text);
+    }
+
+    /// <summary>One or two lines: the measurements patching the HUD now, and what is patched with none running (should be nothing).</summary>
+    internal static string InstrumentationText(JObject instr)
+    {
+        var active = (instr["active"] as JArray ?? []).OfType<JObject>().ToList();
+        var line = active.Count == 0 ? "HUD patches: none (no measurement running)"
+            : "HUD patches: " + string.Join("; ", active.Select(a => $"{a["kind"]} {a["id"]} by {a["who"] ?? "?"} ({a["label"]}): {a["methods"]} methods, ends within {a["secondsLeft"]} s"));
+        var left = instr["leftover"]?["count"]?.Value<int>() ?? 0;
+        if (left > 0) line += $"\nLEFT PATCHED with no measurement: {left} methods ({string.Join(", ", (instr["leftover"]?["methods"] as JArray ?? []).Take(5))}) - reload_plugin them";
+        if (instr["lastProblem"] is JObject p) line += $"\nLast instrumentation problem ({p["at"]}): {p["kind"]}: {p["text"]}";
+        return line;
     }
 
     private static string SessionsText(JObject o)

@@ -225,5 +225,40 @@ Start Port    End Port
     }
 }
 
+// ── Measurement patches (bridge instrumentation): leftovers stay open, orphan cleanups are recorded once ──
+{
+    var dir = Path.Combine(Path.GetTempPath(), "hexile-incidents-test-" + Guid.NewGuid().ToString("N")[..8]);
+    Environment.SetEnvironmentVariable("HEXILE_INCIDENT_DIR", dir);
+    Environment.SetEnvironmentVariable("HEXILE_AGENT", "unit-test");
+    try
+    {
+        JObject State(int leftover, JObject? problem = null) => new()
+        {
+            ["leftover"] = new JObject { ["count"] = leftover, ["methods"] = new JArray(Enumerable.Range(0, leftover).Select(n => $"Route.M{n} (whatsanaibridge.profile.x)")) },
+            ["lastProblem"] = problem,
+        };
+        InstrumentIncidents.Check("poe2", State(2));
+        var open = IncidentLogic.OpenByKey(IncidentStore.Read(), "instrument:poe2");
+        Check("instrument: leftover patches raise instrument:poe2", open != null && open.Title.StartsWith("2 HUD methods") && open.Detail!.Contains("Route.M0"));
+        InstrumentIncidents.Check("poe2", State(0));
+        Check("instrument: nothing left resolves it", IncidentLogic.OpenByKey(IncidentStore.Read(), "instrument:poe2") == null);
+        var at = DateTime.UtcNow.ToString("O");
+        var orphan = new JObject { ["seq"] = 4, ["at"] = at, ["kind"] = "orphaned", ["text"] = "3 methods were still patched", ["who"] = "route-act3" };
+        InstrumentIncidents.Check("poe2", State(0, orphan));
+        InstrumentIncidents.Check("poe2", State(0, orphan));
+        var recorded = IncidentStore.Read().Incidents.Where(i => i.Key == "instrument:poe2" && i.Get("problemAt")?.ToString() == at).ToList();
+        Check("instrument: an orphan cleanup is recorded once, already resolved", recorded.Count == 1 && !recorded[0].IsOpen && recorded[0].Detail!.Contains("route-act3"));
+        InstrumentIncidents.Check("poe2", State(0, new JObject { ["seq"] = 5, ["at"] = at, ["kind"] = "cut", ["text"] = "reloaded" }));
+        Check("instrument: a cut (plugin reloaded) is not an incident", IncidentStore.Read().Incidents.Count(i => i.Key == "instrument:poe2") == 2);
+        Check("instrument: end line warns when methods stay patched",
+            InstrumentIncidents.EndLine(new JObject { ["stillPatchedCount"] = 1, ["stillPatched"] = new JArray("A.B"), ["endedBy"] = "done" })!.StartsWith("WARNING")
+            && InstrumentIncidents.EndLine(new JObject { ["stillPatchedCount"] = 0, ["endedBy"] = "done" }) == null);
+    }
+    finally
+    {
+        try { Directory.Delete(dir, true); } catch { }
+    }
+}
+
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures;
