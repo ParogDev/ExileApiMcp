@@ -66,9 +66,14 @@ public static partial class HudDevTools
         // Deploys on the incident board (with orphaned ones the scan found: a main-checkout submodule detached off origin/main).
         Incidents.DeployIncidents.Scan();
         var deploys = Incidents.IncidentStore.Read().Incidents.Where(i => i.IsOpen && i.Kind == "deploy").ToList();
+        var typed = Dto.From<HudPluginsResult>(top);
+        var text = top.ToString(Newtonsoft.Json.Formatting.None);
         if (deploys.Count > 0)
-            top["incidents"] = JArray.Parse(System.Text.Json.JsonSerializer.Serialize(IncidentTools.Views(deploys), Dto.Options));
-        return Typed<HudPluginsResult>(top);
+        {
+            typed.Incidents = IncidentTools.Views(deploys);
+            text += "\nDeploys on the incident board:\n" + IncidentTools.Lines(deploys);
+        }
+        return Dto.Result(typed, text);
     }
 
     [McpServerTool(Name = "hud_log", Title = "HUD log (latest run)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,

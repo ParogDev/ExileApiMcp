@@ -81,12 +81,27 @@ public static class DeployTools
 
         // The deploy lease on the incident board: who owns it, and whether its session is gone (orphaned).
         var owner = DeployIncidents.Owner(folder);
+        if (owner.Incident == null && state != null)
+        {
+            // No lease on the board: the scan raises a deploy left detached off origin/main as orphaned. Anything else
+            // without a lease (the deployer's board write failed, or it runs a build without the board) is treated as live.
+            DeployIncidents.Scan(force: true);
+            owner = DeployIncidents.Owner(folder);
+        }
         if (owner.Incident != null) r.Incident = IncidentTools.View(owner.Incident, Incidents.IncidentStore.ReadHeartbeats());
         string? takeover = null;
         if (act != "status" && state != null && state.By != SessionIdentity.Label)
         {
             var mine = owner.Incident?.OwnerPid == SessionIdentity.Pid;
-            if (owner.Incident != null && !owner.Orphaned && !mine)
+            if (owner.Incident == null)
+            {
+                if (!force)
+                    return Finish(r, "refused", false,
+                        $"{state.By} deployed {Short(state.DeployedSha)} ({state.Subject}) from {state.From} at {state.At:u}, with no lease on the incident board " +
+                        "(its commit is on origin/main, or the deployer couldn't record one): ask them (or the user), then pass force=true.");
+                takeover = $"{act} by {SessionIdentity.Label} over {state.By}'s unleased deploy (force)" + (string.IsNullOrWhiteSpace(message) ? "" : $": {message}");
+            }
+            else if (!owner.Orphaned && !mine)
             {
                 if (!force || string.IsNullOrWhiteSpace(message))
                     return Finish(r, "refused", false,
@@ -122,6 +137,15 @@ public static class DeployTools
         if (mainHead.Sha == r.Edited.Commit)
         {
             r.Note = $"The main checkout is already at {Short(mainHead.Sha)}.";
+            // Our deploy without its lease (the board write failed, or it predates the board): record it now.
+            if (state != null && state.DeployedSha == mainHead.Sha && (owner.Incident == null || owner.Incident.OwnerPid != SessionIdentity.Pid))
+                try
+                {
+                    if (state.By != SessionIdentity.Label) { state.By = SessionIdentity.Label; state.From = here; state.At = DateTimeOffset.UtcNow; PluginGit.WriteState(main, state); }
+                    var inc = DeployIncidents.Deployed(folder, mainHead.Sha, mainHead.Subject, state.BeforeBranch, state.BeforeSha, r.Games, main, takeover);
+                    r.Incident = IncidentTools.View(inc, Incidents.IncidentStore.ReadHeartbeats());
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { r.Warnings.Add($"The deploy's lease isn't on the incident board ({ex.Message})."); }
             if (reload) r.Reload = await Reload(bridges, folder, PickGames(r, game), $"reload {folder}", ct);
             r.HudRuns = HudRunsText(r);
             return Finish(r, "unchanged", r.Reload?.Ok != false, null);
@@ -145,14 +169,21 @@ public static class DeployTools
             PluginGit.WriteState(main, before);
             r.Deployed = StateInfo(before);
             // The deploy as a lease on the incident board: every session sees it, and it is orphaned if this session goes away.
-            try
+            for (var attempt = 1; attempt <= 3; attempt++)
             {
-                var inc = DeployIncidents.Deployed(folder, got, r.Edited.Subject, before.BeforeBranch, before.BeforeSha, r.Games, main, takeover);
-                r.Incident = IncidentTools.View(inc, Incidents.IncidentStore.ReadHeartbeats());
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                r.Warnings.Add($"Deployed, but not recorded on the incident board ({ex.Message}): other sessions won't see it as a lease.");
+                try
+                {
+                    var inc = DeployIncidents.Deployed(folder, got, r.Edited.Subject, before.BeforeBranch, before.BeforeSha, r.Games, main, takeover);
+                    r.Incident = IncidentTools.View(inc, Incidents.IncidentStore.ReadHeartbeats());
+                    break;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Without the lease, the orphan scan would offer this live deploy to anyone: say so loudly.
+                    if (attempt == 3)
+                        r.Warnings.Add($"Deployed, but NOT recorded on the incident board ({ex.Message}): other sessions may take it for an orphaned deploy. Run deploy_plugin action=deploy again to record it.");
+                    else await Task.Delay(500, ct);
+                }
             }
             r.Before = new DeployCheckout { Path = main, Commit = before.BeforeSha, Branch = before.BeforeBranch };
             r.Main = Checkout(main, PluginGit.ReadHead(main, out _) ?? mainHead);
@@ -173,7 +204,9 @@ public static class DeployTools
     {
         if (state == null)
         {
-            if (mainHead.Branch != null) DeployIncidents.Restored(r.Plugin, $"the main checkout's {r.Plugin} is on {mainHead.Branch}");
+            if (mainHead.Branch != null)
+                try { DeployIncidents.Restored(r.Plugin, $"the main checkout's {r.Plugin} is on {mainHead.Branch}"); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { r.Warnings.Add($"The incident board wasn't updated ({ex.Message})."); }
             return Finish(r, "unchanged", true, $"Nothing deployed into the main checkout's {r.Plugin}: it is at {Short(mainHead.Sha)}{(mainHead.Branch != null ? $" on {mainHead.Branch}" : " (detached; deploy_plugin recorded nothing to return to: switch it back by hand, or deploy over it)")}.");
         }
         if (mainHead.Changed.Count > 0)

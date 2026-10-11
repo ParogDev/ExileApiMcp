@@ -105,6 +105,10 @@ public static class IncidentAuto
         try
         {
             var keys = BridgeKeys(bridge.Game);
+            // While a restart is still stopping / relaunching the HUD (phase "stopping"), the old HUD (before it closes) and the
+            // new one (before the script's alive check) both answer: that isn't "back" yet. Only a bridge-down goes then; the
+            // restart's own incident is closed by restart-hud.ps1 / hud_restart, or here once the phase moved on.
+            if (RestartStopping(bridge)) keys = [$"bridge-down:{bridge.Game}"];
             var open = IncidentStore.Read().Incidents.Where(i => i.IsOpen && keys.Contains(i.Key)).ToList();
             if (open.Count == 0) return;
             var note = $"the {bridge.Game} bridge answers again" + (open.FirstOrDefault(i => i.Kind == "hud-restart")?.RaisedAt is { } at
@@ -115,7 +119,19 @@ public static class IncidentAuto
         catch (Exception ex) { Console.Error.WriteLine($"[Incidents] resolving {bridge.Game} failed: {ex.Message}"); }
     }
 
-    /// <summary>restart-state.json says a restart is stopping the HUD: raise hud-restart (once) with an ETA of about 60 s.</summary>
+    /// <summary>restart-state.json says phase "stopping", written in the last 3 minutes.</summary>
+    public static bool RestartStopping(BridgeClient bridge)
+    {
+        try
+        {
+            var path = Path.Combine(bridge.BridgeDir, "restart-state.json");
+            if (!File.Exists(path) || DateTime.UtcNow - File.GetLastWriteTimeUtc(path) > TimeSpan.FromMinutes(3)) return false;
+            return HudRestartState.Read(bridge)?.Phase == "stopping";
+        }
+        catch { return false; }
+    }
+
+    /// <summary>restart-state.json says a restart is stopping the HUD: raise hud-restart (once per restart) with an ETA of about 60 s.</summary>
     public static Incident? CheckRestartState(BridgeClient bridge, DateTime? startedAfter = null)
     {
         try
@@ -132,8 +148,11 @@ public static class IncidentAuto
             var stopOnly = o["stopOnly"]?.Type == JTokenType.Boolean && o["stopOnly"]!.Value<bool>();
             var G = bridge.Game == "poe1" ? "PoE1" : "PoE2";
             var key = stopOnly ? $"bridge-down:{bridge.Game}" : $"hud-restart:{bridge.Game}";
-            var open = IncidentStore.Read().Incidents.FirstOrDefault(i => i.IsOpen && i.Key == key);
+            var board = IncidentStore.Read();
+            var open = board.Incidents.FirstOrDefault(i => i.IsOpen && i.Key == key);
             if (open != null) return open;
+            // Once per restart: an incident for this restart that was resolved already (the script's, or ours) stays resolved.
+            if (board.Incidents.Any(i => i.Key == key && i.RaisedAt >= r.StartedAt.AddSeconds(-5))) return null;
             var v = new BridgeDiagnosis.Verdict
             {
                 Kind = stopOnly ? "bridge-down" : "hud-restart", Scope = bridge.Game, Cause = stopOnly ? "hud-stopped" : "restarting",

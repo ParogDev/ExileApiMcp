@@ -237,7 +237,9 @@ public static class SessionTools
         {
             if (code == 0 && !stopOnly && result.BackAfterSec != null)
                 Incidents.IncidentStore.ResolveKeys(Incidents.IncidentAuto.BridgeKeys(g), $"the {g} HUD is back, bridge answered {result.BackAfterSec} s after the restart");
-            else if (code is not (0 or 7) && incident != null)
+            // Not restarted at all (Loader.exe missing, UAC declined, Not now, still blocked): the HUD was never stopped.
+            // A restart that failed after stopping (3, 4) leaves the HUD possibly down: its incident stays open.
+            else if (code is 1 or 2 or 5 or 6 && incident != null)
                 Incidents.IncidentStore.Resolve(incident.Id, $"restart {status}: {result.Note}");
             var key = stopOnly ? $"bridge-down:{g}" : $"hud-restart:{g}";
             if (Incidents.IncidentLogic.Find(Incidents.IncidentStore.Read(), key) is { } inc && inc.RaisedAt >= callStart.AddSeconds(-1))

@@ -98,7 +98,7 @@ public sealed class BridgeRegistry : IDisposable
         catch (McpException ex) when (string.IsNullOrWhiteSpace(game) && !_bridges.Any(b => b.LooksAvailable))
         {
             // No HUD bridge at all: diagnose the HUDs that run (Incidents/IncidentAuto.cs) and name the open incidents.
-            throw new McpException(ex.Message + Incidents.IncidentAuto.NoBridge(_bridges));
+            throw new McpException(ex.Message + await Task.Run(() => Incidents.IncidentAuto.NoBridge(_bridges), CancellationToken.None));
         }
         try
         {
@@ -139,7 +139,7 @@ public sealed class BridgeRegistry : IDisposable
                 }
             }
             // Name the broken link and raise it on the incident board (every session hears of it), then list what's open.
-            throw new McpException(ex.Message + RestartHint(bridge) + Incidents.IncidentAuto.BridgeFailed(bridge, ex.Message));
+            throw new McpException(ex.Message + RestartHint(bridge) + await Task.Run(() => Incidents.IncidentAuto.BridgeFailed(bridge, ex.Message), CancellationToken.None));
         }
         catch (BridgeException ex)
         {

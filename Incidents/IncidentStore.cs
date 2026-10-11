@@ -206,22 +206,35 @@ public static class IncidentStore
 
             var text = File.Exists(FilePath) ? ReadShared(FilePath) : "";
             IncidentFile f;
+            var mustWrite = text.Length == 0;
             try { f = IncidentLogic.Parse(text); }
             catch (JsonException ex)
             {
-                // A corrupt board must not block every session: keep the bad copy for a look and start a new one.
+                // A corrupt board must not block every session: keep the bad copy for a look and start a new one (written
+                // now, whatever the mutation does, so the next writer doesn't copy it again). rev continues from the last
+                // good read, so waiters never see it go back.
                 var bad = FilePath + $".corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}";
                 File.Copy(FilePath, bad, overwrite: true);
                 Console.Error.WriteLine($"[Incidents] {FilePath} was not valid JSON ({ex.Message}); kept as {Path.GetFileName(bad)}, starting a new board");
                 f = new IncidentFile();
+                lock (CacheLock) if (_cache is { } c) f.Rev = c.File.Rev;
+                mustWrite = true;
             }
-            var before = f.Incidents.ToDictionary(i => i.Id, i => IncidentJson.SerializeCompact(i));
+            // Repair what other writers may leave: an incident without an id gets one (ids address incidents in every tool).
+            foreach (var i in f.Incidents.Where(i => string.IsNullOrWhiteSpace(i.Id)))
+            {
+                i.Id = IncidentLogic.NewId(DateTime.UtcNow);
+                mustWrite = true;
+            }
+            // Compared by reference: ids may repeat in a hand-edited board.
+            var before = new Dictionary<Incident, string>(ReferenceEqualityComparer.Instance);
+            foreach (var i in f.Incidents) before[i] = IncidentJson.SerializeCompact(i);
             var beforeCount = f.Incidents.Count;
             var result = mutate(f);
             IncidentLogic.Prune(f, DateTime.UtcNow);
 
-            var changed = f.Incidents.Where(i => !before.TryGetValue(i.Id, out var b) || b != IncidentJson.SerializeCompact(i)).ToList();
-            if (changed.Count == 0 && f.Incidents.Count == beforeCount && text.Length > 0) return result;
+            var changed = f.Incidents.Where(i => !before.TryGetValue(i, out var b) || b != IncidentJson.SerializeCompact(i)).ToList();
+            if (changed.Count == 0 && f.Incidents.Count == beforeCount && !mustWrite) return result;
 
             f.Rev++;
             foreach (var i in changed) i.Set("rev", f.Rev);
@@ -302,12 +315,12 @@ public static class IncidentStore
         try
         {
             if (!File.Exists(HeartbeatPath)) return [];
-            var o = JObject.Parse(ReadShared(HeartbeatPath));
+            // DateParseHandling.None: the values stay the ISO strings we wrote (JObject.Parse would make DateTimes whose
+            // ToString() is culture-dependent).
+            var o = JsonConvert.DeserializeObject<JObject>(ReadShared(HeartbeatPath), IncidentJson.Settings) ?? new JObject();
             var d = new Dictionary<string, DateTime>();
             foreach (var p in o.Properties())
-                if (DateTime.TryParse(p.Value.ToString(), System.Globalization.CultureInfo.InvariantCulture,
-                        System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var t))
-                    d[p.Name] = DateTime.SpecifyKind(t, DateTimeKind.Utc);
+                if (DeployIncidents.ParseIso(p.Value) is { } t) d[p.Name] = t;
             return d;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return []; }

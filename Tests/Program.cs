@@ -196,10 +196,28 @@ Start Port    End Port
         File.WriteAllText(IncidentStore.FilePath, "{ \"rev\": 3, \"incid");
         Check("store: partial file reads as the last good board", IncidentStore.Read().Incidents.Count == 17);
 
+        var revBefore = IncidentStore.Read().Rev;
+        IncidentStore.ResolveKeys(["custom:parallel 1"], "after corruption");
+        var repaired = IncidentLogic.Parse(File.ReadAllText(IncidentStore.FilePath));
+        Check("store: a corrupt board is replaced on the next write, rev continues",
+            repaired.Rev > revBefore && Directory.GetFiles(dir, "incidents.json.corrupt-*").Length == 1, $"rev {repaired.Rev} vs {revBefore}");
+
+        File.WriteAllText(IncidentStore.FilePath, """{ "rev": 50, "incidents": [ { "id": "", "kind": "custom", "scope": "machine", "title": "a", "state": "open", "key": "k1" }, { "id": "dup", "kind": "custom", "scope": "machine", "title": "b", "state": "open", "key": "k2" }, { "id": "dup", "kind": "custom", "scope": "machine", "title": "c", "state": "open", "key": "k3" } ] }""");
+        IncidentStore.Respond("k2", "ok", null, null, "unit-test");
+        var fixedBoard = IncidentStore.Read();
+        Check("store: empty ids repaired, duplicate ids tolerated", fixedBoard.Rev == 51 && fixedBoard.Incidents.All(x => x.Id.Length > 0) && fixedBoard.Incidents.Count == 3);
+
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-GB");
+        IncidentStore.Beat(["i-gb"], ["i-gb"]);
+        var gb = IncidentStore.ReadHeartbeats();
+        System.Globalization.CultureInfo.CurrentCulture = culture;
+        Check("heartbeats: read back right under another culture", gb.TryGetValue("i-gb", out var gbt) && Math.Abs((DateTime.UtcNow - gbt).TotalMinutes) < 1);
+
         IncidentStore.Beat(["i-a"], ["i-a", "i-b"]);
         IncidentStore.Beat(["i-b"], ["i-b"]);
         var beats = IncidentStore.ReadHeartbeats();
-        Check("heartbeats: sidecar kept apart, closed ids dropped", beats.ContainsKey("i-b") && !beats.ContainsKey("i-a") && IncidentStore.Read().Incidents.Count == 17);
+        Check("heartbeats: sidecar kept apart, closed ids dropped", beats.ContainsKey("i-b") && !beats.ContainsKey("i-a") && IncidentStore.Read().Rev == 51);
     }
     finally
     {
