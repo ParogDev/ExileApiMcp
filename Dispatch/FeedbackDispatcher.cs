@@ -68,24 +68,29 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     public static string HandlersDir => Path.Combine(LiveDir, "handlers");
     public static string StatusFile => Path.Combine(HandlersDir, "dispatcher.json");
 
-    /// <summary>Stops as soon as this worker is told to stop (ApplicationStopping), not when the host gets to stopping
-    /// hosted services: a drained worker waits for its open requests first (up to an hour), and its dispatcher, with the
-    /// old build's code, must not take presses meanwhile. The new worker adopts a running handler from its state.json.</summary>
-    protected override Task ExecuteAsync(CancellationToken hostStop) => CallerIdentity.RunAsAsync(_as, async () =>
+    /// <summary>Retired: this worker was told to stop (ApplicationStopping). The host stops hosted services only after
+    /// its open requests finish (a drained worker can wait up to an hour), and the old build's dispatcher must not take
+    /// presses, supervise or write the status meanwhile: the new worker adopts a running handler from its state.json. A
+    /// step already under way finishes (it is never cut between a claim and its state.json).</summary>
+    private bool Retired => lifetime.ApplicationStopping.IsCancellationRequested;
+
+    protected override Task ExecuteAsync(CancellationToken stop) => CallerIdentity.RunAsAsync(_as, async () =>
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(hostStop, lifetime.ApplicationStopping);
-        var stop = linked.Token;
         _ = KeepAliveAsync(stop);
-        while (!stop.IsCancellationRequested)
+        while (!stop.IsCancellationRequested && !Retired)
         {
             try { await StepAsync(stop); }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
             catch (Exception ex) { _status = "broken"; _why = $"dispatcher step: {ex.Message.Split('\n')[0]}"; Console.Error.WriteLine($"[Dispatch] {_why}"); }
-            WriteStatus();
+            if (!Retired) WriteStatus();
             try { await Task.Delay(1000, stop); } catch (OperationCanceledException) { break; }
         }
-        _status = "stopped"; _why = "this server is stopping (a newer build took over, or it idled out): the next one carries on";
-        WriteStatus();
+        Console.Error.WriteLine("[Dispatch] stopped: this worker is retiring (a newer build took over, or it idled out); the next one carries on");
+        if (!Retired)
+        {
+            _status = "stopped"; _why = "this server is stopping (it idled out, or its supervisor stopped): the next one carries on";
+            WriteStatus();
+        }
     });
 
     private async Task StepAsync(CancellationToken ct)
@@ -822,7 +827,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     {
         var port = int.TryParse(Environment.GetEnvironmentVariable("HEXILE_PUBLIC_PORT"), out var p) ? p : 50910;
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(6) };
-        while (!stop.IsCancellationRequested)
+        while (!stop.IsCancellationRequested && !Retired)
         {
             try
             {
