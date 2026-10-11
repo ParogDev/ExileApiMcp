@@ -1,5 +1,5 @@
 // In-memory stand-in for ExileApiMcp as the control center sees it: hud_catalog from the real capture
-// (dev/control/catalog.json, 95 tools), bridge_status, synthesised hud_settings / hud_settings_set (the shapes of
+// (dev/control/catalog.json, 112 tools), bridge_status, synthesised hud_settings / hud_settings_set (the shapes of
 // Tools/ControlDtos.cs, the bridge plugin's real settings plus three other plugins), the observer (status, events that
 // keep coming while observing, layers with preflight, a layer map), perf through FakePerf, and the explorer / memory /
 // stats fakes behind their tools so the standalone pages work. Any other catalog tool answers with a sample built from
@@ -15,6 +15,7 @@ import type { CallToolResult } from "@modelcontextprotocol/client";
 import type { ListenState } from "../src/control/host";
 import type { Catalog, JsonSchema, LayerMapResult, LayerStatus, LayersResult, ObserveEvent, PluginSettings, SettingChangeResult, SettingNode, SettingsResult } from "../src/control/types";
 import catalogFixture from "./control/catalog.json";
+import routeFixture from "./control/route-state.json";
 import { FakeExplorer } from "./fakeExplore";
 import { FakeMemory } from "./fakeMemory";
 import { FakePerf } from "./fakePerf";
@@ -28,6 +29,9 @@ const UNREACHABLE = "The poe2 HUD bridge is not reachable (connection refused on
 const OFFLINE_TOOLS = new Set(["hud_catalog", "bridge_status", "hud_find_types", "hud_type", "hud_plugins", "hud_log", "knowledge", "findings", "hud_api_diff", "hud_property_map", "recording_list", "recording_info", "recording_frame", "recording_range", "recording_search", "recording_summary", "observe_timeline", "observe_series", "experiment_presets", "code_struct_layout", "find_field_access", "game_data", "find_in_game_data"]);
 /** observe_series (PR #100) may postdate the catalog capture: the fake offers it like the server does. */
 const SERIES_TOOL = { name: "observe_series", title: "One unit's values over time, its shape and relations", description: "The series of one observer unit from the journal: points, shape (toggle | states | counter | timer | continuous | text), top values, and how it relates to other units that change at the same moments.", family: "Observe", readOnly: true, destructive: false, idempotent: true, openWorld: false, inputSchema: { type: "object", properties: { layer: { type: "string" }, unit: { type: "string" }, windowMs: { type: "integer" }, game: { type: "string" } }, required: ["layer", "unit"] } };
+
+/** route_state (Tools/RouteTools.cs) postdates the catalog capture: the fake offers it like the server does. */
+const ROUTE_TOOL = { name: "route_state", title: "Route plugin: live state", description: "What the PoE2 campaign navigation plugin 'Whats A Route' is doing right now: area, mode, the current step with its target and label, why there is no path when there is none, every step, active quests, the player's grid cell, the area size, the route as grid cells, and the plugin's own timings with the load they were measured under.", family: "Route", readOnly: true, destructive: false, idempotent: true, openWorld: false, inputSchema: { type: "object", properties: { game: { type: ["string", "null"] } } }, outputSchema: { type: "object", properties: { area: { type: "string" }, steps: { type: "array" }, timings: { type: "object" } } } };
 
 function json(data: unknown, text?: string, isError = false): CallToolResult {
   return { content: [{ type: "text", text: text ?? JSON.stringify(data, null, 2) }], structuredContent: data as Record<string, unknown>, isError };
@@ -373,9 +377,10 @@ export class FakeControl {
     switch (name) {
       case "hud_catalog": {
         const gamesUp = this.scenario === "no-hud" || this.scenario === "offline" ? [] : ["poe2"];
-        const tools = CATALOG.tools.some((t) => t.name === SERIES_TOOL.name) ? CATALOG.tools : [...CATALOG.tools, SERIES_TOOL as unknown as Catalog["tools"][number]];
+        let tools = CATALOG.tools.some((t) => t.name === SERIES_TOOL.name) ? CATALOG.tools : [...CATALOG.tools, SERIES_TOOL as unknown as Catalog["tools"][number]];
+        if (!tools.some((t) => t.name === ROUTE_TOOL.name)) tools = [...tools, ROUTE_TOOL as unknown as Catalog["tools"][number]];
         const c = { ...CATALOG, tools, server: { ...CATALOG.server, gamesUp } };
-        return json(c, `${c.server.title} ${c.server.version}: ${c.tools.length} tools in 31 families, ${c.resources.length} resources (4 subscribable), ${c.prompts.length} prompts. HUDs up: ${gamesUp.join(", ") || "none"}`);
+        return json(c, `${c.server.title} ${c.server.version}: ${c.tools.length} tools in ${new Set(c.tools.map((t) => t.family)).size} families, ${c.resources.length} resources (4 subscribable), ${c.prompts.length} prompts. HUDs up: ${gamesUp.join(", ") || "none"}`);
       }
       case "bridge_status": {
         const poe2 = this.scenario === "no-hud" ? { game: "poe2", bridgeDir: "C:\\...\\halp2\\claude-bridge", status: "not running" }
@@ -419,6 +424,7 @@ export class FakeControl {
       case "observe_layer_map": return json(this.layerMap(String(a.layer ?? "server"), !!a.unmappedOnly, Number(a.limit ?? 60)));
       case "observe_timeline": return this.observeTimeline(a);
       case "observe_series": return this.observeSeries(a);
+      case "route_state": return this.routeState();
       case "knowledge": return json({ topic: a.topic ?? "index", text: "# Knowledge\n\nPacks: shared/dev-loop, shared/api-costs, poe2/stats-layout ..." }, "# Knowledge\n\nPacks: shared/dev-loop, shared/api-costs, poe2/stats-layout ...");
       case "run_csharp": return json({ ok: false, error: "scripts_disabled", message: "Enable 'Allow C# Scripts' in the bridge settings (Dev loop) to run scripts." }, undefined, true);
       case "reload_plugin": return json({ ok: true, plugin: a.plugin ?? "Whats An AI Bridge", compiledInMs: 2140, diagnostics: [] }, `Reloaded ${a.plugin ?? "Whats An AI Bridge"} in 2.1 s, no diagnostics`);
@@ -429,6 +435,66 @@ export class FakeControl {
         return json({ ok: true, tool: name, arguments: a, note: "The harness has no fixture for this tool: it echoes the call." }, `${name} called with ${JSON.stringify(a)}`);
       }
     }
+  }
+
+  // ── route_state: the Whats A Route plugin walking The Riverbank ───────────────────────────────────────────────────
+
+  /** The route plugin's state as route_state returns it (the server camel-cases the DTO's fields; a field the plugin
+   *  adds later keeps its own casing). The player walks the route a little further on every read; `routeMode` picks a
+   *  state: "live" (a path to the next step), "nopath" (the target did not resolve: `why`), "travel" (the travel map is
+   *  open), "town" (the real capture dev/control/route-state.json: Ziggurat Encampment, no steps, a short path to the exit). */
+  routeMode: "live" | "nopath" | "travel" | "town" = "live";
+  private routeT = 0;
+  private routeState(): CallToolResult {
+    this.routeT += 1;
+    if (this.routeMode === "town") {
+      const s = routeFixture as unknown as Record<string, unknown>;
+      return json(s, `${String(s.areaName)} (${String(s.area)}) · mode ${String(s.mode)}\nNo steps for this area\nTarget: ${String(s.target)} -> ${String(s.label)} (1 goal(s))`);
+    }
+    const W = 620, H = 480;
+    // A bent route from the south-west to a goal in the north-east, every 3rd cell.
+    const pts: number[] = [];
+    for (let i = 0; i <= 90; i++) {
+      const u = i / 90;
+      pts.push(Math.round(80 + 430 * u + 40 * Math.sin(u * 7)), Math.round(400 - 300 * u * u - 60 * Math.sin(u * 5)));
+    }
+    const k = Math.min(60, Math.floor(this.routeT * 1.5)) * 2;
+    const remaining = pts.slice(k);
+    const player = [remaining[0], remaining[1]];
+    const nopath = this.routeMode === "nopath", travel = this.routeMode === "travel";
+    const steps = [
+      { target: "waypoint", label: "Waypoint", doneFlag: "waypoint:G1_2", done: true, optional: false },
+      { target: "npc:Renly", label: "Talk to Renly", doneFlag: null, done: true, optional: true },
+      { target: "quest:Bloodraven", label: "The Bloodraven's lair", doneFlag: "quest:TheMadWolf:3", done: false, optional: false },
+      { target: "transition:G1_3", label: "Exit to Clearfell", doneFlag: null, done: false, optional: false },
+    ];
+    const state = {
+      game: "poe2", area: "G1_2", areaName: "The Riverbank", mode: "campaign", stepIndex: 2, steps,
+      target: nopath ? "quest:Bloodraven" : "quest:Bloodraven", label: nopath ? null : "Bloodraven",
+      goals: nopath ? 0 : 1,
+      why: nopath ? "target quest:Bloodraven: no entity 'Metadata/Monsters/Bloodraven' in the area and no sighting of it in this instance (walk on: it is recorded when seen)" : null,
+      playerGrid: player, areaSize: [W, H],
+      pathCells: nopath ? 0 : remaining.length / 2 * 3, pathWorldLength: nopath ? 0 : Math.round(remaining.length / 2 * 3 * 10.87),
+      edgePieces: 212,
+      // The timings as the server emits them (camelCase), plus one the plugin added later (its own casing: "Also reported").
+      timings: { gridBuildMs: 18.4, fieldBuildMs: 41.2, fieldCellsReached: 184_320, edgeBuildMs: 22.9, edgeContours: 37, tickUs: 83 + Math.round(Math.random() * 20), renderUs: 41 + Math.round(Math.random() * 10), lastReplanUs: 612, resolveUs: 210, entities: 38 + Math.floor(Math.random() * 6), places: 93, sightingsScanUs: 1095.8, goals: nopath ? 0 : 1, DecoyScanUs: 12.5 },
+      mapPath: nopath ? [] : remaining,
+      notes: ["view: fresh (grid 2 s ago)", ...(nopath ? ["goals are remembered sightings (their entities are not loaded right now)"] : [])],
+      activeQuests: ["TheMadWolf:3", "AMatterOfTime:1"],
+      questObjective: "TheMadWolf -> G1_2 (The Bloodraven's lair)",
+      travelTo: travel ? "G1_town" : null,
+      travelMapOpen: travel,
+      travelMapStops: travel ? [
+        { index: 0, destId: "G1_town", destName: "Clearfell Encampment", unlocked: true, chosen: true, x: 812, y: 455 },
+        { index: 1, destId: "G1_2", destName: "The Riverbank", unlocked: true, chosen: false, x: 1030, y: 390 },
+        { index: 2, destId: "G1_3", destName: "Clearfell", unlocked: false, chosen: false, x: 1210, y: 300 },
+      ] : [],
+      playerTile: "Art/Models/Terrain/Act1/Riverbank/tiles/riverbank_path_01.tdt",
+      sightings: 7,
+      // A field the plugin added after this page was written: it must still show (under "More").
+      CaravanDestinationChosen: travel ? "G1_town" : null,
+    };
+    return json(state, `${state.areaName} (${state.area}) · mode campaign\nStep 3/4: ${steps[2].label}`);
   }
 
   private findSetting(plugin: string, path: string): SettingNode | undefined {

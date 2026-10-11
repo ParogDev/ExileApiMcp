@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json;
 using ExileApiMcp.Bridge;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -44,4 +45,21 @@ public static class IntrospectionTools
     public static async Task<CallToolResult> PluginBridgeMethods(BridgeRegistry bridges, [Description(G)] string? game = null,
         CancellationToken ct = default) =>
         TypedReply.Of<BridgeMethodsResult>((await bridges.CallAsync(game, "hud.bridge_methods", null, ct)).Result);
+
+    [McpServerTool(Name = "plugin_bridge_call", Title = "Call a PluginBridge method", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(BridgeCallResult))]
+    [Description("Invoke one method a plugin registered on the HUD's PluginBridge, by name (plugin_bridge_methods lists them), with " +
+                 "scalar arguments only (numbers, strings, bools, enums; methods taking objects need run_csharp). A string result that " +
+                 "is JSON comes back parsed (resultType json), other strings as text, scalars as value. It runs whatever the method " +
+                 "does, so check its side effects first: WhatsARoute.GetState is a pure read, Radar.LookForRoute starts work. Errors " +
+                 "name the link: method_missing (the plugin is not loaded, or an older build), arity_mismatch, unsupported_parameter, invoke_failed.")]
+    public static async Task<CallToolResult> PluginBridgeCall(BridgeRegistry bridges,
+        [Description("Method name as registered, e.g. WhatsARoute.GetState or Radar.GetMapSvg")] string name,
+        [Description("Arguments in order, scalars only (e.g. [true]); omit for a parameterless method")] JsonElement[]? args = null,
+        [Description(G)] string? game = null, CancellationToken ct = default)
+    {
+        var p = new JObject { ["name"] = name };
+        if (args is { Length: > 0 }) p["args"] = new JArray(args.Select(a => JToken.Parse(a.GetRawText())));
+        return TypedReply.Of<BridgeCallResult>((await bridges.CallAsync(game, "hud.bridge_call", p, ct)).Result);
+    }
 }

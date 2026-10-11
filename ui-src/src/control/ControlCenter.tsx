@@ -7,6 +7,7 @@ import { Icon, type IconName } from "../icons";
 import { EmbeddedPage } from "./pages/Embedded";
 import { ObserverPage } from "./pages/Observer";
 import { OverviewPage } from "./pages/Overview";
+import { RoutePage } from "./pages/Route";
 import { SettingsPage } from "./pages/Settings";
 import { ToolsPage } from "./pages/Tools";
 import { ControlStore, PAGES, type Page } from "./store";
@@ -16,7 +17,7 @@ import { TOURS } from "./tour/tours";
 import type { Game } from "./types";
 import { Badge, Button, agoShort } from "./ui";
 
-const PAGE_ICON: Record<Page, IconName> = { overview: "grid", tools: "sliders", settings: "puzzle", observer: "eye", perf: "activity", memory: "chip", explorer: "layers", stats: "heart" };
+const PAGE_ICON: Record<Page, IconName> = { overview: "grid", tools: "sliders", settings: "puzzle", observer: "eye", route: "route", perf: "activity", memory: "chip", explorer: "layers", stats: "heart" };
 
 function useMedia(q: string): boolean {
   const [m, setM] = useState(() => window.matchMedia(q).matches);
@@ -93,6 +94,7 @@ function Shell({ store, snap }: { store: ControlStore; snap: ReturnType<ControlS
       {route.page === "tools" && <ToolsPage store={store} snap={snap} theme={host.theme} />}
       {route.page === "settings" && <SettingsPage store={store} snap={snap} />}
       {route.page === "observer" && <ObserverPage store={store} snap={snap} />}
+      {route.page === "route" && <RoutePage store={store} snap={snap} />}
       {(route.page === "perf" || route.page === "memory" || route.page === "explorer" || route.page === "stats") && (standalone ? <EmbeddedPage app={route.page} host={host} game={snap.game} /> : <StandaloneOnly page={route.page} store={store} />)}
     </div>
   );

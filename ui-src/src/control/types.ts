@@ -255,6 +255,64 @@ export interface HealthReportLite {
   plugins?: { name: string; tickMs: number; renderMs: number; allocKBPerFrame: number }[] | null;
 }
 
+// ── route_state (Tools/RouteDtos.cs: the Whats A Route plugin's RouteStateDto) ──────────────────────────────────
+
+export interface RouteStep { target: string; label?: string | null; doneFlag?: string | null; done: boolean; optional: boolean; [k: string]: unknown }
+export interface RouteTravelStop { index: number; destId?: string | null; destName?: string | null; unlocked: boolean; chosen: boolean; x: number; y: number; [k: string]: unknown }
+/** The plugin's timings and the load they were measured under. Per-frame costs are microseconds, builds milliseconds. */
+export interface RouteTimings {
+  gridBuildMs: number;
+  fieldBuildMs: number;
+  fieldCellsReached: number;
+  edgeBuildMs: number;
+  edgeContours: number;
+  tickUs: number;
+  renderUs: number;
+  lastReplanUs: number;
+  resolveUs: number;
+  /** Gathering places and recording sightings (2 Hz, before resolving), smoothed. */
+  sightingsScanUs: number;
+  /** The load the timings were taken under: valid entities, the places the non-monster walk matched, goal cells resolved. */
+  entities: number;
+  places: number;
+  goals: number;
+  [k: string]: unknown;
+}
+export interface RouteState {
+  game?: string | null;
+  area?: string | null;
+  areaName?: string | null;
+  mode?: string | null;
+  stepIndex: number;
+  steps: RouteStep[];
+  target?: string | null;
+  label?: string | null;
+  goals: number;
+  /** The first broken link when there is no path. */
+  why?: string | null;
+  playerGrid?: number[] | null;
+  areaSize?: number[] | null;
+  pathCells: number;
+  pathWorldLength: number;
+  edgePieces: number;
+  timings: RouteTimings;
+  /** Flat grid cells x0, y0, x1, y1, ... every few cells of the route. */
+  mapPath: number[];
+  notes: string[];
+  /** "QuestId:StateId". */
+  activeQuests: string[];
+  questObjective?: string | null;
+  travelTo?: string | null;
+  travelMapOpen: boolean;
+  travelMapStops: RouteTravelStop[];
+  playerTile?: string | null;
+  sightings: number;
+  /** Fields the plugin added since this page was written pass through (the server keeps them with their own casing). */
+  [k: string]: unknown;
+}
+/** The error object route_state returns (isError): plugin_not_loaded, plugin_threw, route_not_json, route_shape, bridge_unavailable, bridge_too_old. */
+export interface RouteError { error: string; message?: string; [k: string]: unknown }
+
 // ── bridge_status (untyped) ─────────────────────────────────────────
 
 export interface BridgeEntry {
