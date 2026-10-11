@@ -64,6 +64,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     protected override Task ExecuteAsync(CancellationToken stop) => CallerIdentity.RunAsAsync(_as, async () =>
     {
         _ = KeepAliveAsync(stop);
+        // Preflight: the CLI and its login are checked at start, so a broken link is on the board before the first press.
+        try { _env = await CheckEnvironmentAsync(stop); _nextEnvCheck = DateTime.UtcNow + (_env.Why == null ? TimeSpan.FromMinutes(10) : RetryEvery); } catch { }
+        if (_env.Why != null) Preflight(_env.Why, _env.Fix);
         while (!stop.IsCancellationRequested)
         {
             try { await StepAsync(stop); }
@@ -95,10 +98,13 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             await Task.Delay(4000, ct);
             return;
         }
-        if (r["error"] != null && r["ok"] == null)
+        if (r["ok"]?.Value<bool>() != true)
         {
+            // An older bridge answers unknown methods with a bare {game, query, timestamp}: no ok, no error.
             _status = "broken";
-            _why = $"the {_game} bridge refused pubsub.events (a build before pub/sub? update Whats An AI Bridge and restart the HUD): {r["error"]}: {r["message"]}";
+            _why = r["error"] != null
+                ? $"the {_game} bridge refused pubsub.events: {r["error"]}: {r["message"]}"
+                : $"the {_game} bridge has no pubsub.events (it answered {FeedbackKit.Clip(r.ToString(Newtonsoft.Json.Formatting.None), 120)}): a bridge build before pub/sub. Update Whats An AI Bridge in the main checkout and restart the HUD";
             await Task.Delay(5000, ct);
             return;
         }
@@ -110,7 +116,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             _cursor = Math.Max(_cursor, e["seq"]!.Value<long>());
             Take(e);
         }
-        _status = "listening"; _why = "";
+        (_status, _why) = _env.Why != null ? ("broken", _env.Why + (_env.Fix != null ? $" ({_env.Fix})" : "")) : ("listening", "");
         if (_running == null) await StartNextAsync(ct);
         else await TellQueuedAsync(ct);
     }
@@ -234,7 +240,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             _env = await CheckEnvironmentAsync(ct);
             _nextEnvCheck = DateTime.UtcNow + (_env.Why == null ? TimeSpan.FromMinutes(10) : RetryEvery);
         }
-        if (_env.Why == null) return true;
+        if (_env.Why == null) { if (_status == "broken") IncidentStore.ResolveKeys([IncidentKey], "the Claude Code CLI is there and logged in"); return true; }
         _status = "broken"; _why = _env.Why;
         if (_toldFailed.Add(seq)) await FailAsync(seq, _env.Why + " (it is kept and handled once that is fixed)", _env.Fix, ct);
         return false;
@@ -455,6 +461,23 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     {
         try { await bridges.CallAsync(_game, "pubsub.release", new JObject { ["seq"] = seq, ["stage"] = "handle", ["by"] = By, ["reason"] = reason }, ct); }
         catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine($"[Dispatch] release #{seq}: {ex.Message}"); }
+    }
+
+    /// <summary>The environment is broken before any press: on the board, so whoever looks sees what to fix.</summary>
+    private void Preflight(string why, string? fix)
+    {
+        _status = "broken"; _why = why;
+        Console.Error.WriteLine($"[Dispatch] preflight: {why}");
+        try
+        {
+            IncidentStore.Raise(new IncidentDraft
+            {
+                Kind = "custom", Scope = "machine", Key = IncidentKey, Title = "F8 feedback presses can't reach a Claude session",
+                Detail = $"Checked at the dispatcher's start: {why}. Presses are kept and handled once it is fixed.", Fix = fix,
+                Fields = { ["auto"] = true },
+            });
+        }
+        catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] raising {IncidentKey}: {ex.Message}"); }
     }
 
     private async Task FailAsync(long seq, string why, string? fix, CancellationToken ct)
