@@ -11,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.69.1";
+    public const string Version = "3.70.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -190,6 +190,9 @@ internal static class McpSetup
         services.AddSingleton<IResourceHub>(sp => sp.GetRequiredService<ObserveHub>());
         services.AddSingleton<IResourceHub>(sp => sp.GetRequiredService<PerfHub>());
         services.AddSingleton<IResourceHub>(sp => sp.GetRequiredService<AttentionHub>());
+        // The F8 dispatcher's files (Bridge/FeedbackHub.cs): exile://feedback/sessions for the control center's F8 page.
+        services.AddSingleton<FeedbackHub>();
+        services.AddSingleton<IResourceHub>(sp => sp.GetRequiredService<FeedbackHub>());
         // The incident board (Incidents/): a watcher on the board file (incidents.json) for incident_wait and
         // exile://incidents, and the background checks (bridge back, restart in progress, deploy heartbeats, orphan scan).
         services.AddSingleton<ExileApiMcp.Incidents.IncidentWatcher>();

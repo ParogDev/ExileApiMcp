@@ -88,6 +88,9 @@ if (server instanceof FakeControl && params.get("trace")) server.perf.traceMs = 
 if (server instanceof FakeControl) {
   const r = params.get("route");
   if (r === "live" || r === "nopath" || r === "travel" || r === "town") server.routeMode = r;
+  // control: f8=live|signin|down|empty picks the F8 dispatcher's state for the F8 sessions page.
+  const f = params.get("f8");
+  if (f === "live" || f === "signin" || f === "down" || f === "empty") server.f8Mode = f;
 }
 if (server instanceof FakePerf) {
   if (params.get("trace")) server.traceMs = Number(params.get("trace"));

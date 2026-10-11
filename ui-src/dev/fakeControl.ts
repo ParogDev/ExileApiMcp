@@ -13,7 +13,7 @@
 
 import type { CallToolResult } from "@modelcontextprotocol/client";
 import type { ListenState } from "../src/control/host";
-import type { Catalog, JsonSchema, LayerMapResult, LayerStatus, LayersResult, ObserveEvent, PluginSettings, SettingChangeResult, SettingNode, SettingsResult } from "../src/control/types";
+import type { Catalog, FeedbackSession, FeedbackSessionsResult, JsonSchema, LayerMapResult, LayerStatus, LayersResult, ObserveEvent, PluginSettings, SettingChangeResult, SettingNode, SettingsResult } from "../src/control/types";
 import catalogFixture from "./control/catalog.json";
 import routeFixture from "./control/route-state.json";
 import { FakeExplorer } from "./fakeExplore";
@@ -29,6 +29,9 @@ const UNREACHABLE = "The poe2 HUD bridge is not reachable (connection refused on
 const OFFLINE_TOOLS = new Set(["hud_catalog", "bridge_status", "hud_find_types", "hud_type", "hud_plugins", "hud_log", "knowledge", "findings", "hud_api_diff", "hud_property_map", "recording_list", "recording_info", "recording_frame", "recording_range", "recording_search", "recording_summary", "observe_timeline", "observe_series", "experiment_presets", "code_struct_layout", "find_field_access", "game_data", "find_in_game_data"]);
 /** observe_series (PR #100) may postdate the catalog capture: the fake offers it like the server does. */
 const SERIES_TOOL = { name: "observe_series", title: "One unit's values over time, its shape and relations", description: "The series of one observer unit from the journal: points, shape (toggle | states | counter | timer | continuous | text), top values, and how it relates to other units that change at the same moments.", family: "Observe", readOnly: true, destructive: false, idempotent: true, openWorld: false, inputSchema: { type: "object", properties: { layer: { type: "string" }, unit: { type: "string" }, windowMs: { type: "integer" }, game: { type: "string" } }, required: ["layer", "unit"] } };
+
+/** feedback_sessions (Tools/FeedbackSessionsTools.cs) postdates the catalog capture: the fake offers it like the server does. */
+const FEEDBACK_TOOL = { name: "feedback_sessions", title: "F8 presses and their Claude sessions", description: "Every F8 press of Whats A Route (PoE2) with the Claude Code session the dispatcher started for it, newest first, plus the dispatcher's state.", family: "PubSub", readOnly: true, destructive: false, idempotent: true, openWorld: false, inputSchema: { type: "object", properties: { seq: { type: ["integer", "null"] }, limit: { type: "integer" }, merge: { type: "boolean" }, game: { type: ["string", "null"] } } }, outputSchema: { type: "object", properties: { dispatcher: { type: "object" }, sessions: { type: "array" }, total: { type: "integer" } } } };
 
 /** route_state (Tools/RouteTools.cs) postdates the catalog capture: the fake offers it like the server does. */
 const ROUTE_TOOL = { name: "route_state", title: "Route plugin: live state", description: "What the PoE2 campaign navigation plugin 'Whats A Route' is doing right now: area, mode, the current step with its target and label, why there is no path when there is none, every step, active quests, the player's grid cell, the area size, the route as grid cells, and the plugin's own timings with the load they were measured under.", family: "Route", readOnly: true, destructive: false, idempotent: true, openWorld: false, inputSchema: { type: "object", properties: { game: { type: ["string", "null"] } } }, outputSchema: { type: "object", properties: { area: { type: "string" }, steps: { type: "array" }, timings: { type: "object" } } } };
@@ -181,10 +184,117 @@ export class FakeControl {
 
   // ── Harness hooks ────────────────────────────────────────────────
 
-  /** The harness ticks every 2 s: an event now and then while observing. */
+  /** The harness ticks every 2 s: an event now and then while observing; the running F8 handler moves on. */
   tick() {
     this.stats.tick();
     if (this.observing && this.scenario !== "push" && Math.random() < 0.7) this.emit();
+    this.tickFeedback();
+  }
+
+  // ── feedback_sessions: F8 presses and their sessions ──────────────────────────────────────────────────────────────
+
+  /** `f8Mode` picks the dispatcher's state: "live" (listening; one handler running, one press queued, three done, one
+   *  failed, one "it works"), "signin" (broken: the CLI is not signed in, with the command), "down" (the dispatcher's
+   *  file is stale: no shared server), "empty" (listening, no press yet). The running handler ends ~40 s after the page
+   *  opens and the queued press is taken next, pushed over exile://feedback/sessions like the server does. */
+  f8Mode: "live" | "signin" | "down" | "empty" = "live";
+  private f8T0 = Date.now();
+  private f8Phase = 0;
+  private static readonly F8_WORKTREE = "C:\\Users\\Parog\\Documents\\Projects\\Path of Hexile\\.claude\\worktrees\\route-f8-";
+  private static readonly F8_DIR = "C:\\Users\\Parog\\AppData\\Local\\Hexile\\WhatsARoute\\handlers\\";
+  private static readonly F8_SLUG = "C:\\Users\\Parog\\.claude\\projects\\C--Users-Parog-Documents-Projects-Path-of-Hexile--claude-worktrees-route-f8-";
+
+  private tickFeedback() {
+    if (this.f8Mode !== "live") return;
+    const age = Date.now() - this.f8T0;
+    const phase = age > 70_000 ? 2 : age > 40_000 ? 1 : 0;
+    if (phase !== this.f8Phase) { this.f8Phase = phase; this.notify("exile://feedback/sessions"); }
+  }
+
+  private feedbackSessions(a: Record<string, unknown>): CallToolResult {
+    const r = this.feedbackResult(a.seq !== undefined && a.seq !== null);
+    if (a.seq !== undefined && a.seq !== null) {
+      r.sessions = r.sessions.filter((s) => s.seq === Number(a.seq));
+      if (!r.sessions.length) return json({ error: "press_unknown", message: `No press #${String(a.seq)}.` }, undefined, true);
+    }
+    return json(r, `Dispatcher ${r.dispatcher.status}\n${r.sessions.length} press(es)`);
+  }
+
+  private feedbackResult(withFiles: boolean): FeedbackSessionsResult {
+    const now = Date.now();
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const dispatcherBase = {
+      updatedAt: iso(now - 400), updatedAgoSec: 0.4, version: "3.70.0", pid: 24096, host: "mcp-http",
+      claudeExe: "C:\\Users\\Parog\\AppData\\Roaming\\Claude\\claude-code\\2.1.295\\d2e29494ec83\\claude.exe", loggedIn: true,
+      repo: "C:\\Users\\Parog\\Documents\\Projects\\Path of Hexile", waiting: [] as number[],
+    };
+    const done = (seq: number, areaName: string, area: string, label: string, note: string | null, result: string, pressedMin: number, waitSec: number, durSec: number, cost: number, turns: number, extra: Partial<FeedbackSession> = {}): FeedbackSession => {
+      const pressed = now - pressedMin * 60_000, started = pressed + waitSec * 1000, ended = started + durSec * 1000;
+      return {
+        seq, status: "done", verdict: "note", note, area, areaName, label, target: `radar:${label}`, pressedAt: iso(pressed), startedAt: iso(started), endedAt: iso(ended), durationSec: durSec,
+        result, replied: true, pid: 9000 + seq, sessionId: `0e49bec2-35d1-4b23-8958-7ffb8864c${String(seq).padStart(3, "0")}`,
+        transcriptPath: `${FakeControl.F8_SLUG}${seq}\\0e49bec2-35d1-4b23-8958-7ffb8864c${String(seq).padStart(3, "0")}.jsonl`, transcriptExists: true,
+        worktree: `${FakeControl.F8_WORKTREE}${seq}`, worktreeExists: seq % 2 === 1, dir: `${FakeControl.F8_DIR}${seq}`,
+        costUsd: cost, usage: { inputTokens: 40, outputTokens: Math.round(turns * 340), cacheReadTokens: Math.round(turns * 48_000), cacheCreationTokens: 65_938, thinkingTokens: Math.round(turns * 150) }, turns, model: "claude-opus-5-5", apiMs: durSec * 940,
+        replies: [
+          { seq: seq + 1, at: iso(started), status: "claimed", text: `Claude is on it (#${seq}): a fresh session is reading your note.`, source: "route-dispatcher" },
+          { seq: seq + 3, at: iso(started + 20_000), status: "working", text: "Looking at where the step points; a fix is coming.", source: `route-f8-${seq}` },
+          { seq: seq + 7, at: iso(ended), status: "done", text: result, source: "route-dispatcher" },
+        ],
+        processStart: iso(started + 230),
+        ...(withFiles ? { brief: `# F8 press #${seq} (${new Date(pressed).toISOString().slice(11, 19)} UTC)\n\n- Verdict: **note** - the player wrote: "${note ?? ""}"\n- Area: ${areaName} (${area}), step index 0: ${label} (target radar:${label})\n- Player grid cell: [1241, 1948]\n\n## First\n1. Read the standing brief.\n2. Show the player you are on it when it takes more than a minute.\n\n## Trace since the previous press\n- 10:49:05 area in ${areaName} (${area})\n- 10:49:05 objective in ${areaName} (${area}) step '${label}' target radar:${label}\n\n## The route state at the press\n\`\`\`json\n{ "area": "${area}", "areaName": "${areaName}", "stepIndex": 0 }\n\`\`\`\n`, stderr: null } : {}),
+        ...extra,
+      };
+    };
+    if (this.f8Mode === "empty") return { dispatcher: { ...dispatcherBase, status: "listening", alive: true }, sessions: [], total: 0, handlersDir: FakeControl.F8_DIR.slice(0, -1), bridge: "poe2: 0 press(es), 0 replies merged", at: iso(now) };
+    if (this.f8Mode === "down") {
+      return {
+        dispatcher: { ...dispatcherBase, status: "not-running", alive: false, updatedAt: iso(now - 23 * 60_000), updatedAgoSec: 1380, why: "the dispatcher's last update was 23 min ago (it said \"stopped\": this server is stopping (a newer build took over, or it idled out): the next one carries on): the shared server is not running", fix: "The shared MCP HTTP server hosts the dispatcher: any tools\\mcp-call.ps1 call (or opening the control center) starts it." },
+        sessions: [done(89, "The Drowned City", "G3_8", "The Molten Vault (Mektul, reforging bench)", "I already did the molten vault, can you check my quest states?", "The Molten Vault step is gone: you killed Mektul and handed the hammer to Oswald. Follow the line to the Apex of Filth.", 48, 1, 286, 1.22, 29)],
+        total: 1, handlersDir: FakeControl.F8_DIR.slice(0, -1), bridge: "not merged: no poe2 HUD bridge", at: iso(now),
+      };
+    }
+    const sessions: FeedbackSession[] = [];
+    const phase = this.f8Phase;
+    const runStarted = now - 25_000 - Math.min(phase, 1) * 15_000;
+    // #112: queued behind #104 until phase 1, then running; #104 runs until phase 1 (then done).
+    if (phase === 0) sessions.push({ seq: 112, status: "queued", verdict: "note", note: "The waypoint marker is on the wrong side of the river", area: "G3_11", areaName: "The Drowned City", label: "Waypoint", target: "waypoint", pressedAt: iso(now - 9000), replied: false, replies: [{ seq: 113, at: iso(now - 8500), status: "queued", text: "Got #112: Claude finishes #104 first, then takes it.", source: "route-dispatcher" }] });
+    else sessions.push({
+      seq: 112, status: phase === 1 ? "running" : "done", verdict: "note", note: "The waypoint marker is on the wrong side of the river", area: "G3_11", areaName: "The Drowned City", label: "Waypoint", target: "waypoint",
+      pressedAt: iso(now - 9000 - (phase === 1 ? 40_000 : 70_000)), startedAt: iso(now - (phase === 1 ? 12_000 : 42_000)), endedAt: phase === 2 ? iso(now - 4000) : undefined, durationSec: phase === 1 ? 12 : 38,
+      result: phase === 2 ? "The waypoint step now points at the actual waypoint across the bridge. Follow the line; press F8 again if it still sits on the wrong bank." : undefined,
+      replied: phase === 2, pid: 9112, sessionId: phase === 2 ? "3e821345-dbe3-4a37-88e1-32bd16623112" : undefined, worktree: `${FakeControl.F8_WORKTREE}112`, worktreeExists: true, dir: `${FakeControl.F8_DIR}112`,
+      ...(phase === 2 ? { costUsd: 0.61, usage: { inputTokens: 22, outputTokens: 3100, cacheReadTokens: 410_000, cacheCreationTokens: 52_000, thinkingTokens: 800 }, turns: 11, model: "claude-opus-5-5", apiMs: 31_000, transcriptPath: `${FakeControl.F8_SLUG}112\\3e821345-dbe3-4a37-88e1-32bd16623112.jsonl`, transcriptExists: true } : {}),
+      replies: [{ seq: 113, at: iso(now - 8500), status: "queued", text: "Got #112: Claude finishes #104 first, then takes it.", source: "route-dispatcher" }, { seq: 118, at: iso(now - 12_000), status: "claimed", text: "Claude is on it (#112): a fresh session is reading your note.", source: "route-dispatcher" }],
+      name: "F8 #112: waypoint across the river", mode: "remote-control", url: "https://claude.ai/code/session_01ExampleRemoteControl112", processStart: iso(now - 11_800),
+    });
+    sessions.push({
+      seq: 104, status: phase === 0 ? "running" : "done", verdict: "note", note: "The forgemaster is not at the right place, it should bring the user to the door to go down", area: "G3_9", areaName: "The Molten Vault", label: "Mektul, the Forgemaster", target: "radar:Mektul, The Forgemaster (Reforging Bench)",
+      pressedAt: iso(runStarted - 4000), startedAt: iso(runStarted), endedAt: phase > 0 ? iso(now - 41_000) : undefined, durationSec: phase > 0 ? 24 : (now - runStarted) / 1000,
+      result: phase > 0 ? "I changed the Mektul step so the route goes north up the corridor and west across the lava bridge, ending just below Mektul. Follow the line, and press F8 again if that isn't the way down to him." : undefined,
+      replied: phase > 0, pid: 9104, sessionId: phase > 0 ? "0e49bec2-35d1-4b23-8958-7ffb8864c104" : undefined, worktree: `${FakeControl.F8_WORKTREE}104`, worktreeExists: true, dir: `${FakeControl.F8_DIR}104`,
+      ...(phase > 0 ? { costUsd: 0.96, usage: { inputTokens: 40, outputTokens: 8889, cacheReadTokens: 1_256_547, cacheCreationTokens: 65_938, thinkingTokens: 3956 }, turns: 26, model: "claude-opus-5-5", apiMs: 95_536, transcriptPath: `${FakeControl.F8_SLUG}104\\0e49bec2-35d1-4b23-8958-7ffb8864c104.jsonl`, transcriptExists: true } : {}),
+      replies: [{ seq: 105, at: iso(runStarted), status: "claimed", text: "Claude is on it (#104): a fresh session is reading your note.", source: "route-dispatcher" }, { seq: 109, at: iso(runStarted + 20_000), status: "working", text: "Looking at where the Mektul step points; a fix to show the way down is coming.", source: "route-f8-104" }],
+      name: "F8 #104: Mektul's door", mode: "remote-control", url: "https://claude.ai/code/session_01ExampleRemoteControl104", processStart: iso(runStarted + 260),
+    });
+    sessions.push(done(89, "The Drowned City", "G3_8", "The Molten Vault (Mektul, reforging bench)", "I already did the molten vault, can you check my quest states? Why is it telling me to go there again?", "The Molten Vault step is gone: you killed Mektul and handed the hammer to Oswald. Follow the line to the Apex of Filth.", 48, 1, 286, 1.22, 29, { replied: false }));
+    sessions.push({ seq: 61, status: "works", verdict: "works", area: "G3_7", areaName: "The Azak Bog", label: "Ignagduk, the Bog Witch", target: "radar:Ignagduk", pressedAt: iso(now - 62 * 60_000), replied: false, replies: [] });
+    sessions.push({
+      seq: 40, status: "failed", verdict: "note", note: "Lost after the trial, where do I go?", area: "G3_5", areaName: "Chimeral Wetlands", label: "Trial of Chaos", target: "radar:Trial", pressedAt: iso(now - 95 * 60_000), startedAt: iso(now - 94 * 60_000), endedAt: iso(now - 93 * 60_000), durationSec: 48,
+      error: "its Claude session failed: the session ended with an error (max_turns)", replied: true, pid: 9040, sessionId: "a72d1806-ac68-476c-9feb-154ead483040", transcriptPath: `${FakeControl.F8_SLUG}40\\a72d1806-ac68-476c-9feb-154ead483040.jsonl`, transcriptExists: true, worktree: `${FakeControl.F8_WORKTREE}40`, worktreeExists: false, dir: `${FakeControl.F8_DIR}40`,
+      costUsd: 0.31, usage: { inputTokens: 12, outputTokens: 900, cacheReadTokens: 210_000, cacheCreationTokens: 38_000, thinkingTokens: 200 }, turns: 6, model: "claude-opus-5-5", apiMs: 22_000,
+      replies: [{ seq: 41, at: iso(now - 94 * 60_000), status: "claimed", text: "Claude is on it (#40): a fresh session is reading your note.", source: "route-dispatcher" }, { seq: 46, at: iso(now - 93 * 60_000), status: "failed", text: "Claude could not take #40: its Claude session failed: the session ended with an error (max_turns). Details: " + FakeControl.F8_DIR + "40", source: "route-dispatcher" }],
+      ...(withFiles ? { stderr: "Error: reached max turns (6)\n    at run (cli.js:1203)" } : {}),
+    });
+    sessions.push(done(21, "The Molten Vault", "G3_9", "Mektul, the Forgemaster", "The forgemaster is not at the right place, it should bring the user to the door to go down", "I changed the Mektul step so the route goes north up the corridor and west across the lava bridge, ending just below Mektul. Before, it stopped at a spot in the room you're in. Follow the line, and press F8 again if that isn't the way down to him.", 130, 304, 103, 0.96, 26));
+    sessions.push(done(4, "Ziggurat Encampment", "G3_town", "Exit", "Drawing is visible through stash tab pannels", "The route plugin now has the fix that hides it behind the stash's tab list, so it should no longer show through. Open the stash again, and press F8 if it still does.", 140, 743, 31, 0.42, 9));
+    const signin = this.f8Mode === "signin";
+    const login = "& \"$env:LOCALAPPDATA\\Packages\\Claude_pzs8xqq5tjwqt\\LocalCache\\Roaming\\Claude\\claude-code\\2.1.295\\d2e29494ec83\\claude.exe\" auth login";
+    const dispatcher = signin
+      ? { ...dispatcherBase, status: "broken", alive: true, loggedIn: false, loginCommand: login, why: `the Claude Code CLI is not logged in, so it can't start a session on its own (Once, in PowerShell: ${login})`, fix: `Sign in once, in PowerShell: ${login}`, waiting: [112, 104], running: undefined }
+      : { ...dispatcherBase, status: "listening", alive: true, waiting: phase === 0 ? [112] : [], running: phase === 0 ? 104 : phase === 1 ? 112 : undefined };
+    if (signin) for (const s of sessions) if (s.status === "running" || s.status === "queued") { s.status = "queued"; s.startedAt = undefined; s.durationSec = undefined; s.error = `Claude could not take #${s.seq}: the Claude Code CLI is not logged in, so it can't start a session on its own (it is kept and handled once that is fixed).`; }
+    return { dispatcher, sessions, total: sessions.length, handlersDir: FakeControl.F8_DIR.slice(0, -1), bridge: "poe2: 7 press(es), 19 replies merged", at: iso(now) };
   }
 
   /** Emit one event now (the live feed's entering animation). `kind` forces one (e.g. harness.server.emit(false, "spike")). */
@@ -325,6 +435,7 @@ export class FakeControl {
     else if (uri.endsWith("/layers")) data = this.layersResult();
     else if (/\/layers\/[^/]+$/.test(uri)) data = this.layerMap(uri.split("/").pop()!, false, 200);
     else if (uri.includes("/perf/")) data = this.lastPerf ?? (await this.perf.handle("perf_watch", { since: 0 })).structuredContent;
+    else if (uri === "exile://feedback/sessions") data = this.feedbackResult(false);
     else throw new Error(`No resource at ${uri}`);
     return { json: data, text: JSON.stringify(data) };
   }
@@ -379,6 +490,7 @@ export class FakeControl {
         const gamesUp = this.scenario === "no-hud" || this.scenario === "offline" ? [] : ["poe2"];
         let tools = CATALOG.tools.some((t) => t.name === SERIES_TOOL.name) ? CATALOG.tools : [...CATALOG.tools, SERIES_TOOL as unknown as Catalog["tools"][number]];
         if (!tools.some((t) => t.name === ROUTE_TOOL.name)) tools = [...tools, ROUTE_TOOL as unknown as Catalog["tools"][number]];
+        if (!tools.some((t) => t.name === FEEDBACK_TOOL.name)) tools = [...tools, FEEDBACK_TOOL as unknown as Catalog["tools"][number]];
         const c = { ...CATALOG, tools, server: { ...CATALOG.server, gamesUp } };
         return json(c, `${c.server.title} ${c.server.version}: ${c.tools.length} tools in ${new Set(c.tools.map((t) => t.family)).size} families, ${c.resources.length} resources (4 subscribable), ${c.prompts.length} prompts. HUDs up: ${gamesUp.join(", ") || "none"}`);
       }
@@ -425,6 +537,7 @@ export class FakeControl {
       case "observe_timeline": return this.observeTimeline(a);
       case "observe_series": return this.observeSeries(a);
       case "route_state": return this.routeState();
+      case "feedback_sessions": return this.feedbackSessions(a);
       case "knowledge": return json({ topic: a.topic ?? "index", text: "# Knowledge\n\nPacks: shared/dev-loop, shared/api-costs, poe2/stats-layout ..." }, "# Knowledge\n\nPacks: shared/dev-loop, shared/api-costs, poe2/stats-layout ...");
       case "run_csharp": return json({ ok: false, error: "scripts_disabled", message: "Enable 'Allow C# Scripts' in the bridge settings (Dev loop) to run scripts." }, undefined, true);
       case "reload_plugin": return json({ ok: true, plugin: a.plugin ?? "Whats An AI Bridge", compiledInMs: 2140, diagnostics: [] }, `Reloaded ${a.plugin ?? "Whats An AI Bridge"} in 2.1 s, no diagnostics`);

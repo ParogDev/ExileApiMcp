@@ -324,3 +324,95 @@ export interface BridgeEntry {
   findingsToCheck?: string;
   hudApiChanged?: string;
 }
+
+// ── feedback_sessions / exile://feedback/sessions ───────────────────
+// Mirrors Tools/FeedbackSessionDtos.cs; change both together. Fields a newer dispatcher adds pass through.
+
+export interface FeedbackSessionsResult {
+  dispatcher: FeedbackDispatcherSummary;
+  sessions: FeedbackSession[];
+  total: number;
+  handlersDir?: string | null;
+  /** "poe2: n press(es), m replies merged" or "not merged: why". */
+  bridge?: string | null;
+  at: string;
+  [k: string]: unknown;
+}
+
+export interface FeedbackDispatcherSummary {
+  /** listening | idle | broken | stopped | not-running | never-ran */
+  status: string;
+  alive: boolean;
+  why?: string | null;
+  fix?: string | null;
+  updatedAgoSec?: number | null;
+  updatedAt?: string | null;
+  version?: string | null;
+  pid?: number | null;
+  host?: string | null;
+  claudeExe?: string | null;
+  loggedIn?: boolean | null;
+  loginCommand?: string | null;
+  repo?: string | null;
+  waiting: number[];
+  running?: number | null;
+  [k: string]: unknown;
+}
+
+export interface FeedbackSession {
+  seq: number;
+  /** queued | starting | running | done | failed | works */
+  status: string;
+  name?: string | null;
+  url?: string | null;
+  mode?: string | null;
+  verdict?: string | null;
+  note?: string | null;
+  area?: string | null;
+  areaName?: string | null;
+  label?: string | null;
+  target?: string | null;
+  pressedAt?: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  durationSec?: number | null;
+  result?: string | null;
+  error?: string | null;
+  replied: boolean;
+  pid?: number | null;
+  sessionId?: string | null;
+  transcriptPath?: string | null;
+  transcriptExists?: boolean | null;
+  worktree?: string | null;
+  worktreeExists?: boolean | null;
+  dir?: string | null;
+  costUsd?: number | null;
+  usage?: FeedbackUsage | null;
+  turns?: number | null;
+  model?: string | null;
+  apiMs?: number | null;
+  replies: FeedbackReply[];
+  /** Only with seq= (the detail read). */
+  brief?: string | null;
+  stderr?: string | null;
+  [k: string]: unknown;
+}
+
+export interface FeedbackUsage {
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheCreationTokens?: number | null;
+  thinkingTokens?: number | null;
+  [k: string]: unknown;
+}
+
+export interface FeedbackReply {
+  seq: number;
+  at?: string | null;
+  /** claimed | queued | working | done | failed */
+  status?: string | null;
+  text?: string | null;
+  source?: string | null;
+  [k: string]: unknown;
+}
