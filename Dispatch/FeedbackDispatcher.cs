@@ -46,6 +46,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     private (string? Exe, bool LoggedIn, string? Why, string? Fix) _env;
     private FeedbackHandlerState? _running;
     private string _status = "starting", _why = "";
+    private bool _envRaised, _bridgeBrokenRaised;
 
     /// <summary>On the shared HTTP server only (HEXILE_DISPATCH=1 forces it on elsewhere, 0 off): one dispatcher per machine.</summary>
     public static bool Enabled(int publicPort) => Environment.GetEnvironmentVariable("HEXILE_DISPATCH") switch
@@ -64,9 +65,6 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     protected override Task ExecuteAsync(CancellationToken stop) => CallerIdentity.RunAsAsync(_as, async () =>
     {
         _ = KeepAliveAsync(stop);
-        // Preflight: the CLI and its login are checked at start, so a broken link is on the board before the first press.
-        try { _env = await CheckEnvironmentAsync(stop); _nextEnvCheck = DateTime.UtcNow + (_env.Why == null ? TimeSpan.FromMinutes(10) : RetryEvery); } catch { }
-        if (_env.Why != null) Preflight(_env.Why, _env.Fix);
         while (!stop.IsCancellationRequested)
         {
             try { await StepAsync(stop); }
@@ -83,6 +81,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     {
         if (_running == null && DateTime.UtcNow >= _nextAdopt) { _nextAdopt = DateTime.UtcNow + AdoptEvery; Adopt(); }
         if (_running != null) await SuperviseAsync(ct);
+        // The CLI and its login: checked at start (a broken link is on the board before the first press), then every
+        // minute while broken and every 10 min while fine, press or not.
+        if (DateTime.UtcNow >= _nextEnvCheck) await RefreshEnvironmentAsync(ct);
         JToken r;
         try
         {
@@ -94,20 +95,18 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         }
         catch (ModelContextProtocol.McpException ex)
         {
-            _status = "idle"; _why = $"no {_game} HUD bridge: {ex.Message.Split('\n')[0]}";
+            (_status, _why) = _env.Why != null ? ("broken", EnvText()) : ("idle", $"no {_game} HUD bridge: {ex.Message.Split('\n')[0]}");
             await Task.Delay(4000, ct);
             return;
         }
-        if (r["ok"]?.Value<bool>() != true)
+        if (FeedbackKit.Refusal(r, "pubsub.events") is { } refusal)
         {
-            // An older bridge answers unknown methods with a bare {game, query, timestamp}: no ok, no error.
-            _status = "broken";
-            _why = r["error"] != null
-                ? $"the {_game} bridge refused pubsub.events: {r["error"]}: {r["message"]}"
-                : $"the {_game} bridge has no pubsub.events (it answered {FeedbackKit.Clip(r.ToString(Newtonsoft.Json.Formatting.None), 120)}): a bridge build before pub/sub. Update Whats An AI Bridge in the main checkout and restart the HUD";
+            _status = "broken"; _why = $"the {_game} bridge: {refusal}";
+            if (!_bridgeBrokenRaised) { _bridgeBrokenRaised = true; RaiseIncident(_why, "Update Whats An AI Bridge in the main checkout (pull, submodule update), then hud_restart.", null); }
             await Task.Delay(5000, ct);
             return;
         }
+        if (_bridgeBrokenRaised && _env.Why == null) { _bridgeBrokenRaised = false; IncidentStore.ResolveKeys([IncidentKey], $"the {_game} bridge has pub/sub"); }
         _bridgeOkAt = DateTime.UtcNow;
         var seq = r["seq"]?.Value<long>() ?? 0;
         if (seq < _cursor) { _cursor = 0; _presses.Clear(); return; }   // the bridge's log was reset: read it again
@@ -116,7 +115,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             _cursor = Math.Max(_cursor, e["seq"]!.Value<long>());
             Take(e);
         }
-        (_status, _why) = _env.Why != null ? ("broken", _env.Why + (_env.Fix != null ? $" ({_env.Fix})" : "")) : ("listening", "");
+        (_status, _why) = _env.Why != null ? ("broken", EnvText()) : ("listening", "");
         if (_running == null) await StartNextAsync(ct);
         else await TellQueuedAsync(ct);
     }
@@ -235,13 +234,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     /// <summary>The CLI is there and logged in (checked at most once a minute while broken, every 10 min while fine).</summary>
     private async Task<bool> EnvironmentOkAsync(long seq, CancellationToken ct)
     {
-        if (DateTime.UtcNow >= _nextEnvCheck)
-        {
-            _env = await CheckEnvironmentAsync(ct);
-            _nextEnvCheck = DateTime.UtcNow + (_env.Why == null ? TimeSpan.FromMinutes(10) : RetryEvery);
-        }
-        if (_env.Why == null) { if (_status == "broken") IncidentStore.ResolveKeys([IncidentKey], "the Claude Code CLI is there and logged in"); return true; }
-        _status = "broken"; _why = _env.Why;
+        if (DateTime.UtcNow >= _nextEnvCheck) await RefreshEnvironmentAsync(ct);
+        if (_env.Why == null) return true;
+        _status = "broken"; _why = EnvText();
         if (_toldFailed.Add(seq)) await FailAsync(seq, _env.Why + " (it is kept and handled once that is fixed)", _env.Fix, ct);
         return false;
     }
@@ -463,39 +458,56 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine($"[Dispatch] release #{seq}: {ex.Message}"); }
     }
 
-    /// <summary>The environment is broken before any press: on the board, so whoever looks sees what to fix.</summary>
-    private void Preflight(string why, string? fix)
+    private string EnvText() => _env.Why + (_env.Fix != null ? $" ({_env.Fix})" : "");
+
+    /// <summary>Checks the CLI and its login; a change to broken goes on the board (once, not again while already open), a
+    /// change back resolves it.</summary>
+    private async Task RefreshEnvironmentAsync(CancellationToken ct)
     {
-        _status = "broken"; _why = why;
-        Console.Error.WriteLine($"[Dispatch] preflight: {why}");
+        var wasBroken = _env.Why != null;
+        try { _env = await CheckEnvironmentAsync(ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _env = (_env.Exe, false, $"checking the Claude Code CLI failed: {ex.Message}", null);
+        }
+        _nextEnvCheck = DateTime.UtcNow + (_env.Why == null ? TimeSpan.FromMinutes(10) : RetryEvery);
+        if (_env.Why != null && (!wasBroken || !_envRaised))
+        {
+            Console.Error.WriteLine($"[Dispatch] {EnvText()}");
+            _envRaised = RaiseIncident(_env.Why, _env.Fix, null, onlyIfNew: true);
+        }
+        else if (_env.Why == null && (wasBroken || _envRaised))
+        {
+            _envRaised = false;
+            IncidentStore.ResolveKeys([IncidentKey], "the Claude Code CLI is there and logged in");
+        }
+    }
+
+    /// <summary>The one place feedback-dispatch:machine is raised. onlyIfNew: leave an open one alone (a restarted server
+    /// must not re-notify every session). True when it is on the board.</summary>
+    private static bool RaiseIncident(string why, string? fix, long? press, bool onlyIfNew = false)
+    {
         try
         {
-            IncidentStore.Raise(new IncidentDraft
+            if (onlyIfNew && IncidentLogic.OpenByKey(IncidentStore.Read(), IncidentKey) != null) return true;
+            var draft = new IncidentDraft
             {
                 Kind = "custom", Scope = "machine", Key = IncidentKey, Title = "F8 feedback presses can't reach a Claude session",
-                Detail = $"Checked at the dispatcher's start: {why}. Presses are kept and handled once it is fixed.", Fix = fix,
-                Fields = { ["auto"] = true },
-            });
+                Detail = (press is { } p ? $"Press #{p}: " : "") + $"{why}. The dispatcher (shared MCP HTTP server) keeps waiting presses and retries every minute.",
+                Fix = fix,
+                Fields = { ["auto"] = true, ["press"] = press },
+            };
+            IncidentStore.Raise(draft);
+            return true;
         }
-        catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] raising {IncidentKey}: {ex.Message}"); }
+        catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] raising {IncidentKey}: {ex.Message}"); return false; }
     }
 
     private async Task FailAsync(long seq, string why, string? fix, CancellationToken ct)
     {
         Console.Error.WriteLine($"[Dispatch] #{seq}: {why}");
         await ReplyAsync(seq, "failed", FeedbackKit.FailText(seq, why, fix), ct);
-        try
-        {
-            IncidentStore.Raise(new IncidentDraft
-            {
-                Kind = "custom", Scope = "machine", Key = IncidentKey,
-                Title = "F8 feedback presses can't reach a Claude session",
-                Detail = $"Press #{seq}: {why}. The dispatcher (shared MCP HTTP server) keeps waiting presses and retries every minute.",
-                Fix = fix,
-                Fields = { ["auto"] = true, ["press"] = seq },
-            });
-        }
-        catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] raising {IncidentKey}: {ex.Message}"); }
+        RaiseIncident(why, fix, seq);
     }
 
     private static void SaveHandler(FeedbackHandlerState s)

@@ -131,10 +131,8 @@ public static class PubSubTools
         var p = new JObject { ["since"] = since, ["limit"] = Math.Clamp(limit, 1, 500) };
         if (kinds is { Length: > 0 }) p["kinds"] = new JArray(kinds);
         var (_, r) = await bridges.CallAsync(game, "pubsub.events", p, ct);
-        if (r["ok"]?.Value<bool>() != true)
-            throw new PubSubBrokenException(r["error"] != null
-                ? $"The bridge refused pubsub.events ({r["error"]}: {r["message"]})."
-                : $"This bridge build has no pubsub.events (it answered {FeedbackKit.Clip(r.ToString(Newtonsoft.Json.Formatting.None), 120)}): update Whats An AI Bridge and restart the HUD.");
+        if (FeedbackKit.Refusal(r, "pubsub.events") is { } refusal) throw new PubSubBrokenException(refusal + ".");
+
         return Dto.From<PubSubEventsResult>(r);
     }
 
@@ -143,8 +141,8 @@ public static class PubSubTools
 
     private static CallToolResult Published(JToken r)
     {
-        if (r["ok"]?.Value<bool>() != true && r["error"] == null)
-            throw new McpException($"This bridge build has no pubsub.publish (it answered {FeedbackKit.Clip(r.ToString(Newtonsoft.Json.Formatting.None), 120)}): update Whats An AI Bridge and restart the HUD.");
+        if (FeedbackKit.Refusal(r, "pubsub.publish") is { } refusal) throw new McpException(refusal + ".");
+
         var typed = Dto.From<PubSubPublishResult>(r);
         return Dto.Result(typed, $"Published #{typed.Seq} ({typed.Kind}); {typed.Subscribers.Count} agent listener(s) on that kind.");
     }
