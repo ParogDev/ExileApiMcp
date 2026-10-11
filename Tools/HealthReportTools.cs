@@ -60,13 +60,23 @@ public static class HealthReportTools
             var id = started["id"]?.Value<string>();
             if (id == null) { sb.AppendLine($"Trace: {started["message"] ?? started["error"]}"); return (o, sb.ToString()); }
             var g = bridge.Game == "auto" ? game : bridge.Game;
-            await Task.Delay(3300, ct);
             r = started;
-            for (var i = 0; i < 20 && r["status"]?.Value<string>() != "done"; i++)
+            try
             {
-                try { (_, r) = await bridges.CallAsync(g, "pipeline.trace_result", new JObject { ["id"] = id }, ct); } catch (McpException) { }
-                if (r["status"]?.Value<string>() != "done") await Task.Delay(250, ct);
+                await Task.Delay(3300, ct);
+                for (var i = 0; i < 20 && r["status"]?.Value<string>() != "done"; i++)
+                {
+                    try { (_, r) = await bridges.CallAsync(g, "pipeline.trace_result", new JObject { ["id"] = id }, ct); } catch (McpException) { }
+                    if (r["status"]?.Value<string>() != "done") await Task.Delay(250, ct);
+                }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                await Incidents.InstrumentIncidents.CancelAsync(bridges, g, id);   // the trace's patches end now
+                throw;
+            }
+            if (r["status"]?.Value<string>() == "running") await Incidents.InstrumentIncidents.CancelAsync(bridges, g, id);
+            if (Incidents.InstrumentIncidents.EndLine(r["patches"]?["unpatch"]) is { } endLine) sb.AppendLine(endLine);
             if (r["status"]?.Value<string>() != "done" && HudRestartState.Since(bridges, g, t0) is { } cut) throw new HudRestartedException(cut, "The health report's trace");
         }
         catch (HudRestartedException ex)
