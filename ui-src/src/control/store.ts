@@ -366,7 +366,8 @@ export class ControlStore {
     this.set({ f8: { ...this.snap.f8, loading: true } });
     const t0 = Date.now();
     try {
-      const r = await this.call("feedback_sessions", { limit: 100 }, { quiet: true });
+      // The bridge merge needs a HUD; with none up (or none known yet) the files alone are the answer.
+      const r = await this.call("feedback_sessions", { limit: 100, merge: this.gamesUp.length > 0 }, { quiet: true });
       if (gen !== this.f8Gen) return;
       if (r.isError) throw new Error(r.text || "feedback_sessions failed");
       this.applyF8(r.data as FeedbackSessionsResult, r.ms ?? Date.now() - t0);

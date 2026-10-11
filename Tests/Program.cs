@@ -451,8 +451,13 @@ Start Port    End Port
     Check("merge: a waiting press and an 'it works' press become sessions; too old and answered elsewhere do not; newest first",
         sessions.Select(x => x.Seq).SequenceEqual([41L, 40L, 21L]) && sessions[1].Status == "queued" && sessions[0].Status == "works", string.Join(",", sessions.Select(x => $"{x.Seq}:{x.Status}")));
     Check("merge: a queued press that the dispatcher failed to start shows that failure", sessions[1].Error!.Contains("not logged in") && presses == 5 && replies == 3, sessions[1].Error);
-    ExileApiMcp.Dispatch.FeedbackSessions.AddWaiting(sessions, [99, 21]);
-    Check("waiting: unknown seqs become queued sessions, known ones are left alone", sessions.Count == 4 && sessions[0].Seq == 99 && sessions[0].Status == "queued" && sessions.Count(x => x.Seq == 21) == 1);
+    sessions.Add(new() { Seq = 50, Status = "failed", Error = "could not start" });
+    ExileApiMcp.Dispatch.FeedbackSessions.ApplyWaiting(sessions, [99, 21, 50]);
+    Check("waiting: unknown seqs become queued sessions, a failed-to-start one the dispatcher keeps is queued with its reason, done ones are left alone",
+        sessions.Count == 5 && sessions[0].Seq == 99 && sessions[0].Status == "queued" && sessions.Count(x => x.Seq == 21) == 1 && sessions.First(x => x.Seq == 21).Status == "done"
+        && sessions.First(x => x.Seq == 50).Status == "queued" && sessions.First(x => x.Seq == 50).Error == "could not start", string.Join(",", sessions.Select(x => $"{x.Seq}:{x.Status}")));
+    ExileApiMcp.Dispatch.FeedbackSessions.ApplyOutput(sessions[0], """{"num_turns":26.0}""");
+    Check("output: a non-integral turn count is rounded, not thrown", sessions[0].Turns == 26);
 
     var tmp = Path.Combine(Path.GetTempPath(), "hexile-f8-" + Guid.NewGuid().ToString("N"));
     try
@@ -465,7 +470,10 @@ Start Port    End Port
         File.WriteAllText(Path.Combine(tmp, "handlers", "21", "stderr.log"), "");
         var dispFile = Path.Combine(tmp, "handlers", "dispatcher.json");
         File.WriteAllText(dispFile, """{"status":"listening","updatedAt":"2026-10-11T10:59:59+00:00","waiting":[],"handlers":[]}""");
-        var folders = ExileApiMcp.Dispatch.FeedbackSessions.FromFolders(Path.Combine(tmp, "handlers"), tmp, fsNow, withFiles: true);
+        Directory.CreateDirectory(Path.Combine(tmp, "handlers", "3"));
+        File.WriteAllText(Path.Combine(tmp, "handlers", "3", "state.json"), """{"seq":3,"status":"done"}""");
+        var (folders, count) = ExileApiMcp.Dispatch.FeedbackSessions.FromFolders(Path.Combine(tmp, "handlers"), tmp, fsNow, withFiles: true, limit: 1);
+        Check("folders: only the newest `limit` folders are read, the count says how many there are", folders.Count == 1 && count == 2);
         Check("folders: one session per numbered folder, from state + brief + output, files when asked", folders.Count == 1 && folders[0].Seq == 21 && folders[0].Name == "F8 #21: Mektul" && folders[0].Note!.StartsWith("The forgemaster") && folders[0].CostUsd == 0.5 && folders[0].Brief != null && folders[0].Stderr == null && folders[0].DurationSec == 103 && folders[0].WorktreeExists == false && folders[0].TranscriptExists == false && folders[0].TranscriptPath!.EndsWith(@"C--wt-route-f8-21\0e49.jsonl"), folders.Count > 0 ? $"{folders[0].Name}|{folders[0].DurationSec}|{folders[0].TranscriptPath}" : "none");
         var fp1 = ExileApiMcp.Bridge.FeedbackHub.Fingerprint(Path.Combine(tmp, "handlers"), dispFile);
         File.WriteAllText(dispFile, """{"status":"listening","updatedAt":"2026-10-11T11:00:01+00:00","cursor":5,"waiting":[],"handlers":[]}""");

@@ -48,38 +48,61 @@ public static class FeedbackSessionsTools
         var now = DateTimeOffset.UtcNow;
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var dispatcher = FeedbackSessions.Dispatcher(FeedbackDispatcher.StatusFile, now);
-        var sessions = FeedbackSessions.FromFolders(FeedbackDispatcher.HandlersDir, userProfile, now, withFiles: seq != null, only: seq);
+        limit = Math.Clamp(limit, 1, 200);
+        var (sessions, folders) = FeedbackSessions.FromFolders(FeedbackDispatcher.HandlersDir, userProfile, now, withFiles: seq != null, only: seq, limit: limit);
+        // A dead dispatcher's last waiting list says nothing about now.
+        var waiting = dispatcher.Alive ? (seq == null ? dispatcher.Waiting : dispatcher.Waiting.Where(w => w == seq).ToList()) : [];
         string? bridgeNote = null;
         if (merge)
         {
             game ??= Environment.GetEnvironmentVariable("HEXILE_DISPATCH_GAME") is { Length: > 0 } g ? g : "poe2";
-            try
+            // No token file = no HUD: say so without a bridge call (a failed call would diagnose and raise bridge-down every read).
+            if (bridges.Bridges.FirstOrDefault(b => b.Game == game) is not { LooksAvailable: true })
+                bridgeNote = $"not merged: no {game} HUD bridge is running";
+            else
             {
-                using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                budget.CancelAfter(TimeSpan.FromSeconds(6));
-                var (_, r) = await bridges.CallAsync(game, "pubsub.events", new JObject
+                try
                 {
-                    ["since"] = 0, ["limit"] = 500, ["kinds"] = new JArray(FeedbackKit.PressKind, FeedbackKit.ReplyKind),
-                }, budget.Token);
-                if (FeedbackKit.Refusal(r, "pubsub.events") is { } refusal) bridgeNote = $"not merged: {refusal}";
-                else
-                {
-                    var events = (r["events"] as JArray ?? []).OfType<JObject>().ToList();
+                    using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    budget.CancelAfter(TimeSpan.FromSeconds(6));
+                    var events = await PressEventsAsync(bridges, game, budget.Token);
                     if (seq != null) events = events.Where(e => e["seq"]?.Value<long>() == seq || e["data"]?["ref"]?.Value<long>() == seq).ToList();
-                    var (presses, replies) = FeedbackSessions.Merge(sessions, events, dispatcher.Waiting, now);
+                    var (presses, replies) = FeedbackSessions.Merge(sessions, events, waiting, now);
                     bridgeNote = $"{game}: {presses} press(es), {replies} replies merged";
                 }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { bridgeNote = $"not merged: the {game} bridge did not answer within 6 s"; }
+                catch (ModelContextProtocol.McpException ex) { bridgeNote = $"not merged: {ex.Message.Split('\n')[0]}"; }
             }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { bridgeNote = $"not merged: the {game} bridge did not answer within 6 s"; }
-            catch (ModelContextProtocol.McpException ex) { bridgeNote = $"not merged: {ex.Message.Split('\n')[0]}"; }
         }
-        if (bridgeNote == null || bridgeNote.StartsWith("not merged", StringComparison.Ordinal)) FeedbackSessions.AddWaiting(sessions, seq == null ? dispatcher.Waiting : dispatcher.Waiting.Where(w => w == seq));
-        var total = sessions.Count;
+        FeedbackSessions.ApplyWaiting(sessions, waiting);
+        var total = Math.Max(folders, sessions.Count);
         return new FeedbackSessionsResult
         {
-            Dispatcher = dispatcher, Sessions = sessions.Take(Math.Clamp(limit, 1, 200)).ToList(), Total = total,
+            Dispatcher = dispatcher, Sessions = sessions.Take(limit).ToList(), Total = total,
             HandlersDir = FeedbackDispatcher.HandlersDir, Bridge = bridgeNote ?? "not merged (merge=false)", At = now,
         };
+    }
+
+    /// <summary>Every feedback and feedback.reply event the bridge still has: pubsub.events pages oldest first (500 a
+    /// page, `next` to continue), and its ring holds 2000, so at most 5 pages.</summary>
+    private static async Task<List<JObject>> PressEventsAsync(BridgeRegistry bridges, string game, CancellationToken ct)
+    {
+        var all = new List<JObject>();
+        long since = 0;
+        for (var page = 0; page < 5; page++)
+        {
+            var (_, r) = await bridges.CallAsync(game, "pubsub.events", new JObject
+            {
+                ["since"] = since, ["limit"] = 500, ["kinds"] = new JArray(FeedbackKit.PressKind, FeedbackKit.ReplyKind),
+            }, ct);
+            if (FeedbackKit.Refusal(r, "pubsub.events") is { } refusal) throw new ModelContextProtocol.McpException(refusal);
+            var events = (r["events"] as JArray ?? []).OfType<JObject>().ToList();
+            all.AddRange(events);
+            var next = r["next"]?.Type is JTokenType.Integer ? r["next"]!.Value<long>() : r["seq"]?.Value<long>() ?? 0;
+            if (events.Count < 500 || next <= since) break;
+            since = next;
+        }
+        return all;
     }
 }
 

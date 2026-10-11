@@ -59,17 +59,19 @@ public static class FeedbackSessions
 
     // ── The handler folders ──────────────────────────────────────────
 
-    /// <summary>Every handler folder under handlersDir as a session, newest first. withFiles: brief.md and stderr.log too.</summary>
-    public static List<FeedbackSession> FromFolders(string handlersDir, string userProfile, DateTimeOffset now, bool withFiles, long? only = null)
+    /// <summary>The newest `limit` handler folders under handlersDir as sessions, newest first, and how many folders there
+    /// are in all (older ones are not read: a brief is kilobytes, and this runs on every push). withFiles: brief.md and
+    /// stderr.log too.</summary>
+    public static (List<FeedbackSession> Sessions, int Folders) FromFolders(string handlersDir, string userProfile, DateTimeOffset now, bool withFiles, long? only = null, int limit = 200)
     {
         var list = new List<FeedbackSession>();
-        if (!Directory.Exists(handlersDir)) return list;
+        if (!Directory.Exists(handlersDir)) return (list, 0);
+        var folders = new List<(long Seq, string Dir)>();
         foreach (var dir in Directory.EnumerateDirectories(handlersDir))
-        {
-            if (!long.TryParse(Path.GetFileName(dir), out var seq) || (only != null && seq != only)) continue;
+            if (long.TryParse(Path.GetFileName(dir), out var seq) && (only == null || seq == only)) folders.Add((seq, dir));
+        foreach (var (seq, dir) in folders.OrderByDescending(f => f.Seq).Take(Math.Max(1, limit)))
             list.Add(FromFolder(dir, seq, userProfile, now, withFiles));
-        }
-        return list.OrderByDescending(s => s.Seq).ToList();
+        return (list, folders.Count);
     }
 
     public static FeedbackSession FromFolder(string dir, long seq, string userProfile, DateTimeOffset now, bool withFiles)
@@ -107,8 +109,8 @@ public static class FeedbackSessions
     /// their likely names, the rest passed through in Extra.</summary>
     public static void ApplyState(FeedbackSession s, FeedbackHandlerState st)
     {
-        s.Status = st.Status is "starting" or "running" or "done" or "failed" ? st.Status : st.Status.Length > 0 ? st.Status : "starting";
-        s.Pid = st.Pid; s.StartedAt = st.StartedAt; s.EndedAt = st.EndedAt; s.Worktree = st.Worktree; s.Dir ??= st.Dir;
+        s.Status = st.Status.Length > 0 ? st.Status : "starting";
+        s.Pid = st.Pid; s.StartedAt = st.StartedAt; s.EndedAt = st.EndedAt; s.Worktree = st.Worktree;
         s.Result = st.Result; s.Error = st.Error; s.SessionId = st.SessionId; s.Replied = st.Replied;
         if (st.Extra is { Count: > 0 })
         {
@@ -180,7 +182,7 @@ public static class FeedbackSessions
         catch (JsonException) { return; }
         if (r.ValueKind != JsonValueKind.Object) return;
         if (r.TryGetProperty("total_cost_usd", out var c) && c.ValueKind == JsonValueKind.Number) s.CostUsd = Math.Round(c.GetDouble(), 4);
-        if (r.TryGetProperty("num_turns", out var n) && n.ValueKind == JsonValueKind.Number) s.Turns = n.GetInt32();
+        if (r.TryGetProperty("num_turns", out var n) && n.ValueKind == JsonValueKind.Number) s.Turns = n.TryGetInt32(out var turns) ? turns : (int)Math.Round(Math.Clamp(n.GetDouble(), 0, int.MaxValue));
         if (r.TryGetProperty("duration_api_ms", out var a) && a.ValueKind == JsonValueKind.Number) s.ApiMs = a.GetDouble();
         if (r.TryGetProperty("session_id", out var id) && id.ValueKind == JsonValueKind.String) s.SessionId ??= id.GetString();
         if (r.TryGetProperty("result", out var res) && res.ValueKind == JsonValueKind.String) s.Result ??= res.GetString();
@@ -276,10 +278,14 @@ public static class FeedbackSessions
         return (presses, replies);
     }
 
-    /// <summary>The dispatcher's waiting list as queued sessions when the bridge is not there to describe them.</summary>
-    public static void AddWaiting(List<FeedbackSession> sessions, IEnumerable<long> waiting)
+    /// <summary>The dispatcher's waiting list (a live dispatcher's only): a press it keeps is queued, whatever its folder
+    /// says (a handler that failed to start leaves a failed state.json and is retried every minute: the error stays as
+    /// the reason), and one the bridge did not describe (no event in its ring) becomes a bare queued session.</summary>
+    public static void ApplyWaiting(List<FeedbackSession> sessions, IReadOnlyCollection<long> waiting)
     {
+        if (waiting.Count == 0) return;
         var have = sessions.Select(s => s.Seq).ToHashSet();
+        foreach (var s in sessions) if (waiting.Contains(s.Seq) && s.Status is "failed" or "starting") s.Status = "queued";
         foreach (var seq in waiting) if (have.Add(seq)) sessions.Add(new FeedbackSession { Seq = seq, Status = "queued" });
         sessions.Sort((a, b) => b.Seq.CompareTo(a.Seq));
     }

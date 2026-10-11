@@ -46,7 +46,7 @@ public sealed class FeedbackHub : IResourceHub, IDisposable
 
     private void Start()
     {
-        _fingerprint = Fingerprint();
+        try { _fingerprint = Fingerprint(); } catch { _fingerprint = null; }   // unreadable now: the first check signals
         _poll = new Timer(_ => { EnsureWatcher(); Check(); }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
         EnsureWatcher();
     }
