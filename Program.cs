@@ -48,7 +48,7 @@ static void DrainOnSupervisorSignal(WebApplication app) => _ = Task.Run(async ()
 {
     string? line;
     while ((line = await Console.In.ReadLineAsync()) != null && line.Trim() != "drain") { }
-    Console.Error.WriteLine("[ExileApiMcp] a newer build took over: finishing running requests, then exiting");
+    Console.Error.WriteLine("[ExileApiMcp] the supervisor retired this worker (a newer build took over, or it stops): finishing running requests, then exiting");
     app.Lifetime.StopApplication();
 });
 
@@ -57,7 +57,7 @@ static async Task RunHttpAsync(string[] args)
     var port = PortFromArgs(args)
                ?? (int.TryParse(Environment.GetEnvironmentVariable("MCP_HTTP_PORT"), out var envPort) ? envPort : 50910);
 
-    SessionIdentity.Kind = "mcp-http";   // shared by every client of this instance (tools\mcp-call.ps1, the control center)
+    SessionIdentity.Kind = "mcp-http";   // shared by every client of this instance; requests name their agent (Hosting/CallerIdentity.cs)
     var builder = WebApplication.CreateBuilder(args);
     builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, port)); // never 0.0.0.0
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
@@ -88,6 +88,7 @@ static async Task RunHttpAsync(string[] args)
     var app = builder.Build();
     var token = LocalHttpSecurity.LoadOrCreateToken();
     app.UseLocalHttpSecurity(token);
+    app.UseCallerIdentity();   // after the token check: X-Hexile-Agent names the agent a request is for (tools\mcp-call.ps1 sends it)
     app.UseRateLimiter();
     app.MapMcp("/mcp");
     app.MapControlCenter();
@@ -100,7 +101,8 @@ static async Task RunHttpAsync(string[] args)
         DrainOnSupervisorSignal(app);
         ParentWatch.Start(app.Lifetime.StopApplication);
     }
-    AnnounceToBridges(app.Services);
+    // No hello at start: this server is shared (tools\mcp-call.ps1 starts it on demand) and each caller says hello as itself
+    // on its first game call (Hosting/CallerIdentity.cs); announcing the server would show the HUD an agent that is nobody.
     await app.RunAsync();
 }
 

@@ -28,7 +28,7 @@ From the scaffolding root (Windows PowerShell 5.1):
 | Build (typecheck, app, harness) and copy into `../ui/` | `powershell -NoProfile -ExecutionPolicy Bypass -File MCP\ExileApiMcp\ui-src\build.ps1` |
 | Same, then serve the dev harness on http://127.0.0.1:5174/harness.html | `... build.ps1 -Serve` (blocks; run it in the background) |
 | npm without npm, e.g. add a pinned package | `... build.ps1 -Npm "install -E pkg@1.2.3"` |
-| Real host against the real server: ext-apps **basic-host** on http://localhost:8080 | start the server with `run.cmd --http`, then `... ui-src\basic-host.ps1` (`-Stop`, `-Rebuild`) |
+| Real host against the real server: ext-apps **basic-host** on http://localhost:8080 | the shared server on 50910 starts on demand (any `tools\mcp-call.ps1` call in the scaffolding; or your own `run.cmd --http --port N`), then `... ui-src\basic-host.ps1` (`-Stop`, `-Rebuild`) |
 
 After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuilds on every start. **CI rebuilds the UI and fails if any of `ui/player-stats.html`, `ui/data-explorer.html`, `ui/memory-view.html`, `ui/hud-performance.html` or `ui/control-center.html` doesn't match its source**, so commit the rebuilt files with the source change.
 
@@ -87,7 +87,7 @@ After a UI build, restart the MCP server to embed the new HTML. `run.cmd` rebuil
    harness.messages()   // what "Ask Claude" posted with ui/message
    ```
    The explorer's rows carry `data-id` (the walker path) inside the app iframe, e.g. `document.querySelector("iframe").contentDocument.querySelector('[data-id="GameController.Player"] button').click()` expands Player.
-2. **basic-host** (the ext-apps reference host) against `run.cmd --http`: real tools/call round trips, real HUD state. Use it to check sync with the in-game panel: `tools\bridge-query.ps1 -Game poe2 'stats.set_filter|text=life'` shows up in the app within a second.
+2. **basic-host** (the ext-apps reference host) against the HTTP server: real tools/call round trips, real HUD state. Use it to check sync with the in-game panel: `tools\bridge-query.ps1 -Game poe2 'stats.set_filter|text=life'` shows up in the app within a second.
 3. **Claude Desktop, Chat tab**, with `exileapi` in `claude_desktop_config.json` over stdio (see the server README). Ask "show my player stats" or "open the data explorer at GameController.Player". This is the only Claude surface that renders MCP Apps for a local server; Claude Code shows the text summary.
 
 ## How the player-stats app works

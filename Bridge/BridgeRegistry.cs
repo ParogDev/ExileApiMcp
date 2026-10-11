@@ -22,24 +22,67 @@ public sealed class BridgeRegistry : IDisposable
 
     private readonly List<BridgeClient> _bridges = new();
 
+    /// <summary>
+    /// The shared HTTP server's callers (Hosting/CallerIdentity.cs), each with its own bridge connections: every connection
+    /// says session.hello for one session, so this is how the HUD (hud_sessions, the guide card, leases, toasts) tells the
+    /// agents behind one server apart. A caller's connections close after <see cref="CallerIdleClose"/> without a call.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CallerBridges> _callers = new(StringComparer.Ordinal);
+    private sealed class CallerBridges(List<BridgeClient> bridges)
+    {
+        public readonly List<BridgeClient> Bridges = bridges;
+        public long LastUsedTicks = DateTime.UtcNow.Ticks;
+    }
+    public static readonly TimeSpan CallerIdleClose = TimeSpan.FromMinutes(30);
+    private long _nextSweepTicks;
+    private readonly int _port;
+    private readonly List<(string Game, string Dir)> _layout = new();
+
     public BridgeRegistry()
     {
         var port = int.TryParse(Environment.GetEnvironmentVariable("BRIDGE_PORT"), out var p) ? p : 50900;
+        _port = port;
         var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
 
         if (Environment.GetEnvironmentVariable("BRIDGE_DIR") is { Length: > 0 } legacyDir)
+            _layout.Add(("auto", legacyDir));
+        else
         {
-            _bridges.Add(new BridgeClient("auto", legacyDir, port));
-            return;
+            _layout.Add(("poe1", Environment.GetEnvironmentVariable("POE1_BRIDGE_DIR") ?? Path.Combine(docs, "PoeHelper", "claude-bridge")));
+            _layout.Add(("poe2", Environment.GetEnvironmentVariable("POE2_BRIDGE_DIR") ?? Path.Combine(docs, "halp2", "claude-bridge")));
         }
-
-        _bridges.Add(new BridgeClient("poe1",
-            Environment.GetEnvironmentVariable("POE1_BRIDGE_DIR") ?? Path.Combine(docs, "PoeHelper", "claude-bridge"), port));
-        _bridges.Add(new BridgeClient("poe2",
-            Environment.GetEnvironmentVariable("POE2_BRIDGE_DIR") ?? Path.Combine(docs, "halp2", "claude-bridge"), port));
+        foreach (var (game, dir) in _layout) _bridges.Add(new BridgeClient(game, dir, port));
     }
 
-    public IReadOnlyList<BridgeClient> Bridges => _bridges;
+    /// <summary>The bridges for whoever is calling: the caller's own connections on the shared HTTP server when the request
+    /// named one (Hosting/CallerIdentity.cs), else the process's.</summary>
+    public IReadOnlyList<BridgeClient> Bridges => Hosting.CallerIdentity.Current is { } c ? ForCaller(c) : _bridges;
+
+    private List<BridgeClient> ForCaller(Hosting.CallerIdentity c)
+    {
+        SweepIdleCallers();
+        var set = _callers.GetOrAdd(c.Label, _ => new CallerBridges(_layout.Select(x => new BridgeClient(x.Game, x.Dir, _port, c)).ToList()));
+        Interlocked.Exchange(ref set.LastUsedTicks, DateTime.UtcNow.Ticks);
+        return set.Bridges;
+    }
+
+    /// <summary>Closes the connections of callers that made no call for <see cref="CallerIdleClose"/> (at most once a minute):
+    /// the HUD then shows them as gone instead of connected forever. Their next call connects again.</summary>
+    private void SweepIdleCallers()
+    {
+        var now = DateTime.UtcNow.Ticks;
+        var next = Interlocked.Read(ref _nextSweepTicks);
+        if (now < next || Interlocked.CompareExchange(ref _nextSweepTicks, now + TimeSpan.TicksPerMinute, next) != next) return;
+        foreach (var (_, set) in _callers)
+        {
+            if (now - Interlocked.Read(ref set.LastUsedTicks) < CallerIdleClose.Ticks) continue;
+            foreach (var b in set.Bridges.Where(b => b.IsConnected && !b.Busy))
+            {
+                Console.Error.WriteLine($"[Bridge:{b.Game}] closing {b.Caller?.Label}'s connection: no call for {CallerIdleClose.TotalMinutes:0} min");
+                b.Close();
+            }
+        }
+    }
 
     private static readonly TimeSpan StartupGrace = TimeSpan.FromSeconds(4);
 
@@ -65,19 +108,20 @@ public sealed class BridgeRegistry : IDisposable
     /// <summary>Resolve the bridge for a call, or throw an <see cref="McpException"/> the model can act on.</summary>
     public BridgeClient Resolve(string? game)
     {
+        var bridges = Bridges;   // the caller's own connections on the shared HTTP server
         if (!string.IsNullOrWhiteSpace(game))
         {
             var g = game.Trim().ToLowerInvariant();
             if (g is not ("poe1" or "poe2"))
                 throw new McpException($"Unknown game '{game}'. Use 'poe1' or 'poe2'.");
-            return _bridges.FirstOrDefault(b => b.Game == g)
-                   ?? _bridges.FirstOrDefault(b => b.Game == "auto")
+            return bridges.FirstOrDefault(b => b.Game == g)
+                   ?? bridges.FirstOrDefault(b => b.Game == "auto")
                    ?? throw new McpException($"No bridge configured for {g}.");
         }
 
-        if (_bridges.Count == 1) return _bridges[0];
+        if (bridges.Count == 1) return bridges[0];
 
-        var available = _bridges.Where(b => b.LooksAvailable).ToList();
+        var available = bridges.Where(b => b.LooksAvailable).ToList();
         return available.Count switch
         {
             1 => available[0],
@@ -200,5 +244,6 @@ public sealed class BridgeRegistry : IDisposable
     public void Dispose()
     {
         foreach (var b in _bridges) b.Dispose();
+        foreach (var (_, set) in _callers) foreach (var b in set.Bridges) b.Dispose();
     }
 }

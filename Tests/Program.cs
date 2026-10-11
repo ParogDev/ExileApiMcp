@@ -1,6 +1,7 @@
 // Unit checks for the incident board (Incidents/): parsing, raise / respond / resolve / prune, the bridge diagnosis from
 // canned facts and netsh output, deploy orphan judgement, and the store's mutex + atomic writes against a temp folder.
 // No test framework: each Check prints pass/FAIL; the exit code is the number of failures.
+using ExileApiMcp.Hosting;
 using ExileApiMcp.Incidents;
 using Newtonsoft.Json.Linq;
 
@@ -261,6 +262,34 @@ Start Port    End Port
     {
         try { Directory.Delete(dir, true); } catch { }
     }
+}
+
+// ── Per-call identity on the shared HTTP server (Hosting/CallerIdentity.cs) ──
+{
+    Check("caller: no header is no caller", CallerIdentity.FromHeaders(null, null, null) == null && CallerIdentity.FromHeaders("  ", "x", "y") == null);
+    var c = CallerIdentity.FromHeaders(Uri.EscapeDataString("route-act2 ü"), "claude%2Froute-act2", Uri.EscapeDataString(@"C:\w t\x") + "%0A");
+    Check("caller: headers are unescaped and control characters dropped", c is { Label: "route-act2 ü", Branch: "claude/route-act2", Cwd: @"C:\w t\x" }, c?.ToString());
+    Check("caller: label clipped to 40", CallerIdentity.FromHeaders(new string('a', 60), null, null)!.Label.Length == 40);
+    var own = SessionIdentity.Label;
+    string? inside = null, idInside = null; JObject? hello = null;
+    await CallerIdentity.RunAsAsync(c, async () =>
+    {
+        await Task.Yield();   // flows across awaits, as through the MCP pipeline
+        inside = SessionIdentity.Label; idInside = SessionIdentity.Id;
+        hello = SessionIdentity.HelloParams();   // no caller passed: the process's own hello, even inside a request
+    });
+    Check("caller: SessionIdentity answers with the caller inside its request", inside == "route-act2 ü" && idInside == $"route-act2 ü#{SessionIdentity.Pid}", inside);
+    Check("caller: and with its own identity outside", SessionIdentity.Label == own && CallerIdentity.Current == null);
+    Check("caller: base hello stays the process's", hello?["label"]?.ToString() == own);
+    var ch = SessionIdentity.HelloParams(c!);
+    Check("caller: a caller's hello names it", ch["label"]?.ToString() == "route-act2 ü" && ch["id"]?.ToString() == $"route-act2 ü#{SessionIdentity.Pid}" && ch["branch"]?.ToString() == "claude/route-act2");
+    var reg = new ExileApiMcp.Bridge.BridgeRegistry();
+    IReadOnlyList<ExileApiMcp.Bridge.BridgeClient>? a1 = null, a2 = null, b1 = null;
+    await CallerIdentity.RunAsAsync(c, () => { a1 = reg.Bridges; a2 = reg.Bridges; return Task.CompletedTask; });
+    await CallerIdentity.RunAsAsync(CallerIdentity.FromHeaders("other", null, null), () => { b1 = reg.Bridges; return Task.CompletedTask; });
+    Check("caller: each caller gets its own bridge connections, reused across calls",
+        a1 != null && ReferenceEquals(a1, a2) && !ReferenceEquals(a1, b1) && !ReferenceEquals(a1, reg.Bridges) && a1.All(b => b.Caller == c) && reg.Bridges.All(b => b.Caller == null));
+    reg.Dispose();
 }
 
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");

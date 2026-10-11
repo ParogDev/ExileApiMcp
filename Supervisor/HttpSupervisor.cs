@@ -12,6 +12,9 @@ namespace ExileApiMcp.Supervisor;
 public sealed class HttpSupervisor(SupervisorOptions opts) : SupervisorBase(opts)
 {
     private CancellationToken _ct;
+    // --idle-exit: connections open right now (any worker, a blocking observe_wait included) and when the last one closed.
+    private int _open;
+    private long _lastActivityTicks = DateTime.UtcNow.Ticks;
 
     public async Task<int> RunAsync()
     {
@@ -30,8 +33,9 @@ public sealed class HttpSupervisor(SupervisorOptions opts) : SupervisorBase(opts
             Log("no server build starts; exiting");
             return 1;
         }
-        Log($"HTTP on http://127.0.0.1:{Opts.Port}/mcp ({Mode})");
+        Log($"HTTP on http://127.0.0.1:{Opts.Port}/mcp ({Mode})" + (Opts.IdleExit is { } idle ? $"; stops after {idle.TotalMinutes:0.##} min without a connection" : ""));
         _ = FollowDeploymentsAsync(_ct);
+        if (Opts.IdleExit is { } limit) _ = StopWhenIdleAsync(limit, cts);
         try
         {
             while (!_ct.IsCancellationRequested)
@@ -53,7 +57,39 @@ public sealed class HttpSupervisor(SupervisorOptions opts) : SupervisorBase(opts
         return 0;
     }
 
+    /// <summary>
+    /// --idle-exit: stop once no connection has been open for <paramref name="limit"/>. A request in progress holds its
+    /// connection, so a blocking wait (observe_wait, incident_wait, experiment_queue_wait) counts as activity for as long as
+    /// it runs; so does an open control center (its push stream). The next tools\mcp-call.ps1 starts a fresh server, on
+    /// the deployed build.
+    /// </summary>
+    private async Task StopWhenIdleAsync(TimeSpan limit, CancellationTokenSource cts)
+    {
+        var tick = TimeSpan.FromSeconds(Math.Clamp(limit.TotalSeconds / 4, 1, 15));
+        while (!_ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(tick, _ct); } catch (OperationCanceledException) { return; }
+            if (Volatile.Read(ref _open) > 0) continue;
+            var idleFor = DateTime.UtcNow - new DateTime(Interlocked.Read(ref _lastActivityTicks), DateTimeKind.Utc);
+            if (idleFor < limit) continue;
+            Log($"no connection for {idleFor.TotalMinutes:0.#} min (--idle-exit {limit.TotalMinutes:0.##}): stopping; the next mcp-call starts it again");
+            cts.Cancel();
+            return;
+        }
+    }
+
     private async Task PipeAsync(TcpClient client)
+    {
+        Interlocked.Increment(ref _open);
+        try { await PipeToWorkerAsync(client); }
+        finally
+        {
+            Interlocked.Exchange(ref _lastActivityTicks, DateTime.UtcNow.Ticks);
+            Interlocked.Decrement(ref _open);
+        }
+    }
+
+    private async Task PipeToWorkerAsync(TcpClient client)
     {
         using (client)
         {

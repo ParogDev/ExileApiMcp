@@ -29,11 +29,26 @@ public sealed class BridgeClient : IDisposable
     private long _nextId;
     private string? _authToken;
 
-    public BridgeClient(string game, string bridgeDir, int defaultPort)
+    public BridgeClient(string game, string bridgeDir, int defaultPort, Hosting.CallerIdentity? caller = null)
     {
         Game = game;
         BridgeDir = bridgeDir;
         DefaultPort = defaultPort;
+        Caller = caller;
+    }
+
+    /// <summary>The agent this connection speaks for on the shared HTTP server (its own session.hello); null: the process's identity.</summary>
+    public Hosting.CallerIdentity? Caller { get; }
+
+    /// <summary>Requests waiting for an answer on this connection.</summary>
+    public bool Busy => !_pending.IsEmpty;
+
+    /// <summary>Closes the connection (the HUD sees the session leave); the next call connects again.</summary>
+    public void Close()
+    {
+        _connectLock.Wait();
+        try { Disconnect(); }
+        finally { _connectLock.Release(); }
     }
 
     /// <summary>"poe1", "poe2", or "auto" for a legacy single BRIDGE_DIR configuration.</summary>
@@ -79,7 +94,7 @@ public sealed class BridgeClient : IDisposable
         var rev = Hosting.SessionIdentity.Revision;
         if (_helloRev == rev || _helloRev < 0) return;
         _helloRev = rev;
-        try { await SendRequestAsync("session.hello", Hosting.SessionIdentity.HelloParams(), ct); }
+        try { await SendRequestAsync("session.hello", Hosting.SessionIdentity.HelloParams(Caller), ct); }
         catch (BridgeException ex) { Console.Error.WriteLine($"[Bridge:{Game}] session.hello (renamed) not accepted: {ex.Message}"); }
     }
 
@@ -127,9 +142,9 @@ public sealed class BridgeClient : IDisposable
                     try
                     {
                         _helloRev = Hosting.SessionIdentity.Revision;
-                        var hello = await SendRequestAsync("session.hello", Hosting.SessionIdentity.HelloParams(), budget.Token);
+                        var hello = await SendRequestAsync("session.hello", Hosting.SessionIdentity.HelloParams(Caller), budget.Token);
                         if (hello["others"]?.Value<int>() is > 0 and var others)
-                            Console.Error.WriteLine($"[Bridge:{Game}] identified as {Hosting.SessionIdentity.Label}; {others} other agent(s) connected");
+                            Console.Error.WriteLine($"[Bridge:{Game}] identified as {Caller?.Label ?? Hosting.SessionIdentity.Label}; {others} other agent(s) connected");
                     }
                     catch (BridgeException ex) { Console.Error.WriteLine($"[Bridge:{Game}] session.hello not accepted: {ex.Message}"); }
                     return;
