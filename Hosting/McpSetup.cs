@@ -220,7 +220,7 @@ internal static class McpSetup
                 // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
                 // Polls and the experiment tools stay out of it: await_change writes its own lines, and the Memory View's
                 // experiment runner re-reads the record and presets while it follows along.
-                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "experiment_status" or "experiment_step_start" or "experiment_step_cancel" or "experiment_queue_status" or "guide_state" or "bridge_status" or "observe_wait" or "observe_events" or "hud_sessions" or "ask_user" or "ask_user_result")
+                if (name is not ("stats_ui_state" or "guide" or "await_change" or "experiment_summary" or "experiment_presets" or "experiment_status" or "experiment_step_start" or "experiment_step_cancel" or "experiment_queue_status" or "guide_state" or "bridge_status" or "observe_wait" or "observe_events" or "hud_sessions" or "ask_user" or "ask_user_result" or "incidents" or "incident_wait")
                     && request.Services?.GetService(typeof(BridgeRegistry)) is BridgeRegistry bridges)
                     _ = ExileApiMcp.Tools.GuideTools.LogAsync(bridges, null, $"{SessionIdentity.Label}: {name}{CallHint(request.Params?.Arguments)}", "agent", CancellationToken.None);
                 try
