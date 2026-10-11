@@ -85,6 +85,12 @@ static async Task RunHttpAsync(string[] args)
     // Draining after a swap waits for running requests: blocking tools run up to an hour.
     if (supervised) builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromMinutes(65));
 
+    // Under the supervisor, clients connect to its public port; this one is private.
+    var publicPort = int.TryParse(Environment.GetEnvironmentVariable("HEXILE_PUBLIC_PORT"), out var pp) ? pp : port;
+    // The F8 feedback dispatcher lives on the shared server only (one per machine; Dispatch/FeedbackDispatcher.cs).
+    var dispatching = ExileApiMcp.Dispatch.FeedbackDispatcher.Enabled(publicPort);
+    if (dispatching) builder.Services.AddHostedService<ExileApiMcp.Dispatch.FeedbackDispatcher>();
+
     var app = builder.Build();
     var token = LocalHttpSecurity.LoadOrCreateToken();
     app.UseLocalHttpSecurity(token);
@@ -92,9 +98,16 @@ static async Task RunHttpAsync(string[] args)
     app.UseRateLimiter();
     app.MapMcp("/mcp");
     app.MapControlCenter();
+    // An open connection that keeps the supervisor's --idle-exit away: the dispatcher holds one while a HUD is up, so a
+    // press always finds it. Answers after sec (max 600) or as soon as this worker stops (a drain must not wait for it).
+    app.MapGet("/keepalive", async (HttpContext ctx, IHostApplicationLifetime life) =>
+    {
+        var sec = int.TryParse(ctx.Request.Query["sec"], out var s) ? Math.Clamp(s, 1, 600) : 300;
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted, life.ApplicationStopping);
+        try { await Task.Delay(TimeSpan.FromSeconds(sec), cts.Token); } catch (OperationCanceledException) { }
+        return Results.NoContent();
+    });
 
-    // Under the supervisor, clients connect to its public port; this one is private.
-    var publicPort = int.TryParse(Environment.GetEnvironmentVariable("HEXILE_PUBLIC_PORT"), out var pp) ? pp : port;
     Console.Error.WriteLine($"[ExileApiMcp] {McpSetup.Version} HTTP on http://127.0.0.1:{publicPort}/mcp{(publicPort != port ? $" (worker port {port})" : "")} (bearer token: {LocalHttpSecurity.TokenFilePath})");
     if (supervised)
     {

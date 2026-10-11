@@ -72,7 +72,7 @@ public static partial class ObserveTools
                  "on timeout (extra.waiting = true).")]
     public static async Task<CallToolResult> ObserveWait(BridgeRegistry bridges,
         [Description("Sequence number already handled (from the last observe_* result)")] long since = 0,
-        [Description("Wake for these kinds (default: ui-new, area, level). ui-new = an unmapped panel opening for the first time; ui = every panel change; area; level; entity; layer; hud; agent")] string[]? kinds = null,
+        [Description("Wake for these kinds (default: ui-new, area, level). ui-new = an unmapped panel opening for the first time; ui = every panel change; area; level; entity; layer; hud; agent; a kind plugins publish, e.g. feedback (Whats A Route's F8 presses, copied onto the timeline while observing; pubsub_wait works without observing)")] string[]? kinds = null,
         [Description("Wake once at least this many noteworthy events are waiting (default 1)")] int minEvents = 1,
         [Description("Max wait, seconds (5-3600, default 1800)")] int timeoutSec = 1800,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
