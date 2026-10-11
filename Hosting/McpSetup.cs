@@ -1,4 +1,4 @@
-using ExileApiMcp.Bridge;
+﻿using ExileApiMcp.Bridge;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol;
