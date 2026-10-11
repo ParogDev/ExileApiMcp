@@ -43,9 +43,11 @@ public static class InstrumentIncidents
                 return;
             }
             if (s["lastProblem"] is JObject last && Recorded.Contains(last["kind"]?.ToString())
-                && DateTime.TryParse(last["at"]?.ToString(), null, System.Globalization.DateTimeStyles.AdjustToUniversal, out var at) && now - at < TimeSpan.FromMinutes(30))
+                && ProblemAt(last["at"]) is { } at && now - at < TimeSpan.FromMinutes(30))
             {
-                var stamp = last["at"]!.ToString();
+                // Round-trip ISO with sub-second precision: the bridge client parses "at" into a DateTime, whose ToString()
+                // is culture-formatted and drops the fraction (two problems in one second would merge into one record).
+                var stamp = at.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
                 IncidentStore.Update(f =>
                 {
                     if (f.Incidents.Any(i => string.Equals(i.Key, key, StringComparison.OrdinalIgnoreCase) && i.Get("problemAt")?.ToString() == stamp)) return 0;
@@ -60,12 +62,21 @@ public static class InstrumentIncidents
                     IncidentLogic.Resolve(i, Hosting.SessionIdentity.Label, "the bridge restored the original code itself; nothing is left patched", now);
                     return 1;
                 });
-                return;
             }
+            // Nothing left: also close an open leftover incident raised after the last recorded problem (the branch above
+            // returns early when that problem is already on the board, so it must not skip this).
             IncidentStore.ResolveKeys([key], $"the {game} bridge reports nothing left patched");
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Incidents] instrumentation check ({game}) failed: {ex.Message}"); }
     }
+
+    /// <summary>The bridge event's "at" as UTC: a DateTime token (JObject.Parse made one) or an ISO string.</summary>
+    private static DateTime? ProblemAt(JToken? t) => t switch
+    {
+        JValue { Value: DateTime d } => d.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(d, DateTimeKind.Utc) : d.ToUniversalTime(),
+        JValue { Value: DateTimeOffset o } => o.UtcDateTime,
+        _ => DeployIncidents.ParseIso(t),
+    };
 
     /// <summary>Fetch instrument.state and check it (after a measurement, or for hud_plugins). Null when the bridge can't say.</summary>
     public static async Task<JObject?> Fetch(BridgeRegistry bridges, string? game, CancellationToken ct)

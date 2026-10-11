@@ -250,6 +250,9 @@ Start Port    End Port
         Check("instrument: an orphan cleanup is recorded once, already resolved", recorded.Count == 1 && !recorded[0].IsOpen && recorded[0].Detail!.Contains("route-act3"));
         InstrumentIncidents.Check("poe2", State(0, new JObject { ["seq"] = 5, ["at"] = at, ["kind"] = "cut", ["text"] = "reloaded" }));
         Check("instrument: a cut (plugin reloaded) is not an incident", IncidentStore.Read().Incidents.Count(i => i.Key == "instrument:poe2") == 2);
+        InstrumentIncidents.Check("poe2", State(1, orphan));   // leftovers again after the recorded orphan cleanup
+        InstrumentIncidents.Check("poe2", State(0, orphan));   // gone, the last problem already on the board
+        Check("instrument: nothing left resolves a leftover raised after a recorded cleanup", IncidentLogic.OpenByKey(IncidentStore.Read(), "instrument:poe2") == null);
         Check("instrument: end line warns when methods stay patched",
             InstrumentIncidents.EndLine(new JObject { ["stillPatchedCount"] = 1, ["stillPatched"] = new JArray("A.B"), ["endedBy"] = "done" })!.StartsWith("WARNING")
             && InstrumentIncidents.EndLine(new JObject { ["stillPatchedCount"] = 0, ["endedBy"] = "done" }) == null);
