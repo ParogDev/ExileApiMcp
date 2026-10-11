@@ -292,7 +292,7 @@ export class ControlStore {
     const t0 = Date.now();
     try {
       const r = await this.call("route_state", this.gameArgs(), { quiet: true });
-      if (gen !== this.navGen && !this.snap.nav.live) return;
+      if (gen !== this.navGen) return;
       if (r.isError) {
         const d = r.data as RouteError | undefined;
         this.set({ nav: { ...this.snap.nav, loading: false, error: d?.error ? d : { error: "error", message: r.text || "route_state failed" } } });
@@ -302,7 +302,7 @@ export class ControlStore {
       if (!state || typeof state !== "object" || !Array.isArray(state.steps)) throw new Error("route_state returned no route state");
       this.set({ nav: { ...this.snap.nav, state, at: Date.now(), ms: r.ms ?? Date.now() - t0, loading: false, error: undefined, reads: this.snap.nav.reads + 1 } });
     } catch (e) {
-      if (gen !== this.navGen && !this.snap.nav.live) return;
+      if (gen !== this.navGen) return;
       this.set({ nav: { ...this.snap.nav, loading: false, error: { error: isUnreachable(errorText(e)) ? "unreachable" : "error", message: errorText(e) } } });
     }
   }
