@@ -14,36 +14,37 @@ namespace ExileApiMcp.Dispatch;
 /// Whats A Route publishes each F8 press as a "feedback" event through the AI Bridge (AIBridge.Publish; bridge
 /// Shared/PubSub.cs). This service, hosted by the shared HTTP server (127.0.0.1:50910, which follows mcp_deploy and stays
 /// up while a HUD is: see KeepAliveAsync), reads them (pubsub.events, as subscriber "route-dispatcher"), claims each one
-/// exactly once (pubsub.claim stage handle: a second dispatcher, e.g. the draining worker of a swap, gets "claimed"),
-/// says "Claude is on it" on the card (feedback.reply status claimed), writes the handler's brief and starts
-/// `claude -p --worktree route-f8-&lt;seq&gt;` in the main checkout with the scrubbed environment. When the handler exits,
-/// its final message goes to the card (pubsub.claim stage reply first, so it is said once), and its worktree is removed
-/// when it holds nothing.
+/// exactly once (pubsub.claim stage handle, with a ttl so a dispatcher that dies doesn't hold it forever; a second
+/// dispatcher, e.g. the draining worker of a swap, gets "claimed"), says "Claude is on it" on the card (feedback.reply
+/// status claimed), writes the handler's brief and starts `claude -p --worktree route-f8-&lt;seq&gt;` in the main checkout
+/// with the scrubbed environment, detached (outside this worker's process tree, so a swap or the supervisor's stop doesn't
+/// kill it). When the handler exits, its final message goes to the card (pubsub.claim stage reply first, so it is said
+/// once, and not at all when the handler already said done), and its worktree is removed when it holds nothing.
 ///
 /// One handler at a time (they share route.live.json): later presses wait, and the card says so. Every link that can break
 /// is said on the card and raised as incident feedback-dispatch:machine (CLI not found, not logged in, the session
-/// failing to start), never dropped: a press stays unclaimed until a handler can start, and is retried every minute.
-/// State for agents: handlers\dispatcher.json (MCP feedback_dispatcher) and handlers\&lt;seq&gt;\ (brief, output, stderr).
+/// failing to start), never dropped: the press stays queued (unclaimed) and is retried every minute.
+/// State: handlers\dispatcher.json (MCP feedback_dispatcher) and handlers\&lt;seq&gt;\ (brief, output, stderr, state.json);
+/// any worker picks up a running handler from its state.json (Adopt), whoever started it.
 /// </summary>
 public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundService
 {
     public const string Subscriber = "route-dispatcher", IncidentKey = "feedback-dispatch:machine";
     private static readonly TimeSpan PressMaxAge = TimeSpan.FromHours(2), HandlerMaxRun = TimeSpan.FromMinutes(40),
-        RetryEvery = TimeSpan.FromMinutes(1), KeepAliveAfterBridge = TimeSpan.FromMinutes(20);
+        RetryEvery = TimeSpan.FromMinutes(1), KeepAliveAfterBridge = TimeSpan.FromMinutes(20), AdoptEvery = TimeSpan.FromSeconds(10);
 
     private readonly string _game = Environment.GetEnvironmentVariable("HEXILE_DISPATCH_GAME") is { Length: > 0 } g ? g : "poe2";
     private readonly CallerIdentity _as = new("route-dispatcher", null, null);
     /// <summary>Who claims: the claim lapses (ttl) if this server dies before the handler ends; release names the holder.</summary>
     private static readonly string By = $"{Subscriber}@{Environment.ProcessId}";
     private long _cursor;
-    private readonly Dictionary<long, JObject> _presses = new();         // unclaimed or waiting presses by seq
+    private readonly Dictionary<long, JObject> _presses = new();         // presses waiting for a handler, by seq
     private readonly HashSet<long> _toldQueued = new(), _toldFailed = new();
-    private readonly List<JObject> _replies = new();                     // recent feedback.reply events (the last answers, done markers)
+    private readonly List<JObject> _replies = new();                     // recent feedback.reply events (the last answers)
     private readonly List<JObject> _trace = new();                       // recent route + feedback events, for briefs
-    private DateTime _nextEnvCheck = DateTime.MinValue, _bridgeOkAt = DateTime.MinValue;
+    private DateTime _nextEnvCheck = DateTime.MinValue, _nextStart = DateTime.MinValue, _nextAdopt = DateTime.MinValue, _bridgeOkAt = DateTime.MinValue;
     private (string? Exe, bool LoggedIn, string? Why, string? Fix) _env;
     private FeedbackHandlerState? _running;
-    private Process? _proc;
     private string _status = "starting", _why = "";
 
     /// <summary>On the shared HTTP server only (HEXILE_DISPATCH=1 forces it on elsewhere, 0 off): one dispatcher per machine.</summary>
@@ -63,12 +64,11 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     protected override Task ExecuteAsync(CancellationToken stop) => CallerIdentity.RunAsAsync(_as, async () =>
     {
         _ = KeepAliveAsync(stop);
-        Adopt();
         while (!stop.IsCancellationRequested)
         {
             try { await StepAsync(stop); }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
-            catch (Exception ex) { _status = "broken"; _why = $"dispatcher step: {ex.Message}"; Console.Error.WriteLine($"[Dispatch] {_why}"); }
+            catch (Exception ex) { _status = "broken"; _why = $"dispatcher step: {ex.Message.Split('\n')[0]}"; Console.Error.WriteLine($"[Dispatch] {_why}"); }
             WriteStatus();
             try { await Task.Delay(1000, stop); } catch (OperationCanceledException) { break; }
         }
@@ -78,7 +78,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
 
     private async Task StepAsync(CancellationToken ct)
     {
-        await SuperviseAsync(ct);
+        if (_running == null && DateTime.UtcNow >= _nextAdopt) { _nextAdopt = DateTime.UtcNow + AdoptEvery; Adopt(); }
+        if (_running != null) await SuperviseAsync(ct);
         JToken r;
         try
         {
@@ -97,9 +98,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         if (r["error"] != null && r["ok"] == null)
         {
             _status = "broken";
-            _why = r["error"]?.ToString() == "unknown_method" || r["message"]?.ToString()?.Contains("pubsub") == true
-                ? $"the {_game} bridge has no pubsub.events (a build before pub/sub: update Whats An AI Bridge and restart the HUD): {r["message"]}"
-                : $"pubsub.events: {r["error"]}: {r["message"]}";
+            _why = $"the {_game} bridge refused pubsub.events (a build before pub/sub? update Whats An AI Bridge and restart the HUD): {r["error"]}: {r["message"]}";
             await Task.Delay(5000, ct);
             return;
         }
@@ -112,7 +111,6 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             Take(e);
         }
         _status = "listening"; _why = "";
-        // Presses claimed elsewhere (another dispatcher) leave the waiting list on their next read; refresh claims of the waiting.
         if (_running == null) await StartNextAsync(ct);
         else await TellQueuedAsync(ct);
     }
@@ -130,10 +128,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         _trace.Add(e);
         if (_trace.Count > 400) _trace.RemoveAt(0);
         if (kind != FeedbackKit.PressKind) return;
-        var verdict = e["data"]?["Event"]?.ToString();
-        var age = DateTimeOffset.TryParse(e["at"]?.ToString(), out var at) ? DateTimeOffset.UtcNow - at : TimeSpan.Zero;
-        if (verdict == "works" || age > PressMaxAge || e["claims"]?["reply"] != null) return;   // answered
-        if (e["claims"]?["handle"] is JObject h && h["lapsed"]?.Value<bool>() != true) return;              // a live handler has it
+        var age = FeedbackKit.At(e["at"]) is { } at ? DateTimeOffset.UtcNow - at : TimeSpan.Zero;
+        if (e["data"]?["Event"]?.ToString() == "works" || age > PressMaxAge || e["claims"]?["reply"] != null) return;   // nothing to do, too old, answered
+        if (e["claims"]?["handle"] is JObject h && h["lapsed"]?.Value<bool>() != true) return;                         // a live handler has it
         _presses[seq] = e;
     }
 
@@ -141,14 +138,21 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
 
     private async Task StartNextAsync(CancellationToken ct)
     {
-        if (_presses.Count == 0) return;
+        if (_presses.Count == 0 || DateTime.UtcNow < _nextStart) return;
         var seq = _presses.Keys.Min();
         var press = _presses[seq];
         if (!await EnvironmentOkAsync(seq, ct)) return;
 
-        var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject { ["seq"] = seq, ["stage"] = "handle", ["by"] = By, ["ttlSec"] = (HandlerMaxRun + TimeSpan.FromMinutes(10)).TotalSeconds }, ct);
-        _presses.Remove(seq);
-        if (c["ok"]?.Value<bool>() != true) { Console.Error.WriteLine($"[Dispatch] #{seq} not ours: {c["message"] ?? c["error"]}"); return; }
+        var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject
+        {
+            ["seq"] = seq, ["stage"] = "handle", ["by"] = By, ["ttlSec"] = (HandlerMaxRun + TimeSpan.FromMinutes(10)).TotalSeconds,
+        }, ct);
+        if (c["ok"]?.Value<bool>() != true)
+        {
+            _presses.Remove(seq);   // another dispatcher has it, or it left the bridge's memory
+            Console.Error.WriteLine($"[Dispatch] #{seq} not ours: {c["message"] ?? c["error"]}");
+            return;
+        }
         await ReplyAsync(seq, "claimed", $"Claude is on it (#{seq}): a fresh session is reading your note.", ct);
 
         var dir = Path.Combine(HandlersDir, seq.ToString());
@@ -167,34 +171,60 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             File.WriteAllText(mcpConfig, McpConfigJson(seq));
             foreach (var f in new[] { "output.json", "stderr.log" }) File.Delete(Path.Combine(dir, f));
 
-            var psi = new ProcessStartInfo("cmd.exe", FeedbackKit.CmdArguments(_env.Exe!, seq, dir, mcpConfig, [LiveDir, repo]))
-            {
-                WorkingDirectory = repo, UseShellExecute = false, CreateNoWindow = true,
-            };
-            foreach (var k in psi.Environment.Keys.Where(FeedbackKit.Scrub).ToList()) psi.Environment.Remove(k);
-            psi.Environment["HEXILE_AGENT"] = FeedbackKit.Label(seq);
-            psi.Environment["HEXILE_ROUTE_PRESS"] = seq.ToString();
-            _proc = Process.Start(psi) ?? throw new HandlerStartException("cmd.exe did not start", null);
-            state.Pid = _proc.Id;
+            var (pid, startTime) = await StartDetachedAsync(FeedbackKit.CmdArguments(_env.Exe!, seq, dir, mcpConfig, [LiveDir, repo]), repo, seq, ct);
+            state.Pid = pid;
+            state.Extra = new() { ["processStart"] = JsonSerializer.SerializeToElement(startTime) };
             state.Status = "running";
             state.Worktree = Path.Combine(repo, ".claude", "worktrees", FeedbackKit.Label(seq));
             _running = state;
+            _presses.Remove(seq);
             SaveHandler(state);
-            Console.Error.WriteLine($"[Dispatch] #{seq}: handler pid {state.Pid} started ({_env.Exe})");
+            Console.Error.WriteLine($"[Dispatch] #{seq}: handler pid {pid} started ({_env.Exe})");
             IncidentStore.ResolveKeys([IncidentKey], $"a handler started for F8 press #{seq}");
             _toldFailed.Remove(seq);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             var (why, fix) = ex is HandlerStartException h ? (h.Message, h.Fix) : ($"starting the handler failed: {ex.Message}", (string?)null);
             state.Status = "failed"; state.Error = why; state.EndedAt = DateTimeOffset.UtcNow;
             SaveHandler(state);
-            await ReleaseAsync(seq, why, ct);
-            await FailAsync(seq, why, fix, ct);
+            await ReleaseAsync(seq, why, ct);   // the press stays in _presses: retried after RetryEvery
+            _nextStart = DateTime.UtcNow + RetryEvery;
+            if (_toldFailed.Add(seq)) await FailAsync(seq, why + " (it is kept and retried every minute)", fix, ct);
         }
     }
 
     private sealed class HandlerStartException(string message, string? fix) : Exception(message) { public string? Fix { get; } = fix; }
+
+    /// <summary>
+    /// Starts the handler outside this worker's process tree: a PowerShell launcher starts cmd.exe (hidden, ShellExecute) and
+    /// exits, printing the new pid. The supervisor kills a worker's whole tree when it stops it; the handler must outlive
+    /// that, like the shared server outlives the agent that started it (tools\mcp-http-lib.ps1). The launcher inherits the
+    /// scrubbed environment, and so does the handler.
+    /// </summary>
+    private static async Task<(int Pid, DateTime StartTime)> StartDetachedAsync(string cmdArguments, string workDir, long seq, CancellationToken ct)
+    {
+        var script = "$p = Start-Process -FilePath cmd.exe -WindowStyle Hidden -PassThru " +
+                     $"-WorkingDirectory '{workDir.Replace("'", "''")}' -ArgumentList '{cmdArguments.Replace("'", "''")}'; " +
+                     "[Console]::Out.WriteLine(\"$($p.Id) $($p.StartTime.ToUniversalTime().ToString('o'))\")";
+        var psi = new ProcessStartInfo("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " +
+                                                          Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script)))
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = workDir,
+        };
+        foreach (var k in psi.Environment.Keys.Where(FeedbackKit.Scrub).ToList()) psi.Environment.Remove(k);
+        psi.Environment["HEXILE_AGENT"] = FeedbackKit.Label(seq);
+        psi.Environment["HEXILE_ROUTE_PRESS"] = seq.ToString();
+        using var launcher = Process.Start(psi) ?? throw new HandlerStartException("powershell.exe (the handler's launcher) did not start", null);
+        var stdout = launcher.StandardOutput.ReadToEndAsync(ct);
+        var stderr = launcher.StandardError.ReadToEndAsync(ct);
+        try { await launcher.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(30), ct); }
+        catch (TimeoutException) { try { launcher.Kill(true); } catch { } throw new HandlerStartException("the handler's launcher did not finish within 30 s", null); }
+        var line = (await stdout).Trim().Split(' ');
+        if (line.Length < 2 || !int.TryParse(line[0], out var pid) || !DateTime.TryParse(line[1], null, System.Globalization.DateTimeStyles.RoundtripKind, out var started))
+            throw new HandlerStartException($"the handler's launcher failed: {FeedbackKit.Clip(await stderr, 300)}", null);
+        return (pid, started.ToUniversalTime());
+    }
 
     /// <summary>The CLI is there and logged in (checked at most once a minute while broken, every 10 min while fine).</summary>
     private async Task<bool> EnvironmentOkAsync(long seq, CancellationToken ct)
@@ -219,21 +249,28 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)));
         if (exe == null)
             return (null, false, $"the Claude Code CLI was not found (looked in {looked})", "Open the Claude desktop app once (it installs Claude Code there), or set HEXILE_CLAUDE_EXE.");
+        Process? p = null;
         try
         {
             var psi = new ProcessStartInfo(exe, "auth status") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var k in psi.Environment.Keys.Where(FeedbackKit.Scrub).ToList()) psi.Environment.Remove(k);
-            using var p = Process.Start(psi)!;
-            var output = await p.StandardOutput.ReadToEndAsync(ct).WaitAsync(TimeSpan.FromSeconds(30), ct);
+            p = Process.Start(psi)!;
+            var output = p.StandardOutput.ReadToEndAsync(ct);
+            var errors = p.StandardError.ReadToEndAsync(ct);   // read both: a full stderr pipe would block the CLI
             await p.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(30), ct);
-            using var doc = JsonDocument.Parse(output);
+            using var doc = JsonDocument.Parse(await output);
+            _ = await errors;
             if (doc.RootElement.TryGetProperty("loggedIn", out var li) && li.ValueKind == JsonValueKind.True) return (exe, true, null, null);
             return (exe, false, "the Claude Code CLI is not logged in, so it can't start a session on its own",
                 $"Once, in a terminal: \"{exe}\" auth login");
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return (exe, false, $"`claude auth status` failed: {ex.Message}", null);
+            return (exe, false, $"`claude auth status` failed: {(ex is TimeoutException ? "no answer in 30 s" : ex.Message)}", null);
+        }
+        finally
+        {
+            if (p != null) { try { if (!p.HasExited) p.Kill(true); } catch { } p.Dispose(); }
         }
     }
 
@@ -275,7 +312,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
 
     // ── Watching a handler ───────────────────────────────────────────
 
-    /// <summary>A handler a previous worker started (a deploy swapped it, or this server restarted) is watched on.</summary>
+    /// <summary>The newest handler a state.json says is running, whoever started it (an earlier worker of a swap, a server
+    /// that restarted, a draining worker that started one late): watched from here on.</summary>
     private void Adopt()
     {
         try
@@ -283,65 +321,81 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             if (!Directory.Exists(HandlersDir)) return;
             foreach (var f in Directory.EnumerateFiles(HandlersDir, "state.json", SearchOption.AllDirectories))
             {
-                var s = JsonSerializer.Deserialize<FeedbackHandlerState>(File.ReadAllText(f), Dto.Options);
-                if (s?.Status != "running") continue;
-                if (_running == null || s.Seq > _running.Seq) _running = s;
+                FeedbackHandlerState? s;
+                try { s = JsonSerializer.Deserialize<FeedbackHandlerState>(File.ReadAllText(f), Dto.Options); } catch { continue; }
+                if (s is { Status: "running" } && (_running == null || s.Seq > _running.Seq)) _running = s;
             }
-            if (_running?.Pid is int pid)
-            {
-                try { _proc = Process.GetProcessById(pid); } catch { _proc = null; }   // gone: SuperviseAsync reads its output
-                Console.Error.WriteLine($"[Dispatch] watching handler #{_running.Seq} (pid {pid}) started by an earlier server");
-            }
+            if (_running != null) Console.Error.WriteLine($"[Dispatch] watching handler #{_running.Seq} (pid {_running.Pid}), started {_running.StartedAt:HH:mm:ss}");
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] adopting handlers: {ex.Message}"); }
     }
 
+    /// <summary>The handler's process, only when the pid still belongs to it (same start time): Windows reuses pids.</summary>
+    private static Process? HandlerProcess(FeedbackHandlerState h)
+    {
+        if (h.Pid is not int pid) return null;
+        try
+        {
+            var p = Process.GetProcessById(pid);
+            var started = h.Extra != null && h.Extra.TryGetValue("processStart", out var ps) && ps.ValueKind == JsonValueKind.String
+                && DateTime.TryParse(ps.GetString(), null, System.Globalization.DateTimeStyles.RoundtripKind, out var t) ? t.ToUniversalTime() : (DateTime?)null;
+            if (started == null || Math.Abs((p.StartTime.ToUniversalTime() - started.Value).TotalSeconds) > 2 || !p.ProcessName.Equals("cmd", StringComparison.OrdinalIgnoreCase))
+            { p.Dispose(); return null; }
+            if (p.HasExited) { p.Dispose(); return null; }
+            return p;
+        }
+        catch { return null; }
+    }
+
     private async Task SuperviseAsync(CancellationToken ct)
     {
-        var h = _running;
-        if (h == null) return;
-        var alive = _proc is { } p && !SafeHasExited(p);
-        if (alive && h.StartedAt is { } started && DateTimeOffset.UtcNow - started > HandlerMaxRun)
+        var h = _running!;
+        using (var proc = HandlerProcess(h))
         {
-            try { _proc!.Kill(entireProcessTree: true); } catch { }
-            alive = false;
-            h.Error = $"the handler ran longer than {HandlerMaxRun.TotalMinutes:0} min and was stopped";
+            if (proc != null)
+            {
+                if (h.StartedAt is { } started && DateTimeOffset.UtcNow - started > HandlerMaxRun)
+                {
+                    try { proc.Kill(entireProcessTree: true); } catch { }
+                    h.Error = $"the handler ran longer than {HandlerMaxRun.TotalMinutes:0} min and was stopped";
+                }
+                else return;   // still working
+            }
         }
-        if (alive) return;
 
         var output = File.Exists(Path.Combine(h.Dir!, "output.json")) ? File.ReadAllText(Path.Combine(h.Dir!, "output.json")) : "";
         var (result, isError, sessionId, why) = FeedbackKit.ParseOutput(output);
-        h.EndedAt = DateTimeOffset.UtcNow;
-        h.SessionId = sessionId;
-        h.Result = result;
-        if (isError || h.Error != null)
+        var failed = isError || h.Error != null;
+        string? error = null;
+        if (failed)
         {
             var err = File.Exists(Path.Combine(h.Dir!, "stderr.log")) ? FeedbackKit.Clip(File.ReadAllText(Path.Combine(h.Dir!, "stderr.log")), 300) : "";
-            h.Error ??= why + (result != null ? $": {result}" : "") + (err.Length > 0 ? $" (stderr: {err})" : "");
-            h.Status = "failed";
+            error = h.Error ?? why + (result != null ? $": {result}" : "") + (err.Length > 0 ? $" (stderr: {err})" : "");
         }
-        else h.Status = "done";
-        _running = null; _proc = null;
-        SaveHandler(h);
 
-        // Exactly once across dispatchers: the reply stage is claimed before anything is said.
+        // Exactly once across dispatchers: the reply stage is claimed before anything is said. A bridge call that fails
+        // (the HUD restarting) throws out of here with _running kept: the next step tries again.
         var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject { ["seq"] = h.Seq, ["stage"] = "reply", ["by"] = By }, ct);
         if (c["ok"]?.Value<bool>() == true)
         {
-            var handlerSaidDone = _replies.Any(x => x["data"]?["ref"]?.Value<long>() == h.Seq && x["data"]?["status"]?.ToString() is "done" or "failed");
-            if (h.Status == "failed")
-            {
-                await FailAsync(h.Seq, $"its Claude session failed: {h.Error}", $"Details: {h.Dir}", ct);
-            }
+            // Read the replies fresh: the handler may have said done just before it exited (feedback_reply).
+            var (_, rr) = await bridges.CallAsync(_game, "pubsub.events", new JObject { ["since"] = h.Seq, ["kinds"] = new JArray(FeedbackKit.ReplyKind), ["limit"] = 500 }, ct);
+            var handlerSaidDone = (rr["events"] as JArray ?? []).Any(x => x["data"]?["ref"]?.Value<long>() == h.Seq && x["source"]?.ToString() != Subscriber
+                                                                         && x["data"]?["status"]?.ToString() is "done" or "failed");
+            if (failed) await FailAsync(h.Seq, $"its Claude session failed: {error}", $"Details: {h.Dir}", ct);
             else if (!handlerSaidDone)
                 await ReplyAsync(h.Seq, "done", FeedbackKit.Clip(result, 400) is { Length: > 0 } text ? text : $"Done with #{h.Seq}.", ct);
             h.Replied = true;
-            SaveHandler(h);
         }
+        h.EndedAt = DateTimeOffset.UtcNow;
+        h.SessionId = sessionId;
+        h.Result = result;
+        h.Error = error;
+        h.Status = failed ? "failed" : "done";
+        _running = null;
+        SaveHandler(h);
         RemoveWorktree(h);
     }
-
-    private static bool SafeHasExited(Process p) { try { return p.HasExited; } catch { return true; } }
 
     /// <summary>The handler's worktree, when it holds nothing: no changes, no commits beyond origin/main. Otherwise kept.</summary>
     private void RemoveWorktree(FeedbackHandlerState h)
@@ -401,7 +455,6 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     {
         try { await bridges.CallAsync(_game, "pubsub.release", new JObject { ["seq"] = seq, ["stage"] = "handle", ["by"] = By, ["reason"] = reason }, ct); }
         catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine($"[Dispatch] release #{seq}: {ex.Message}"); }
-        _nextEnvCheck = DateTime.UtcNow + RetryEvery;   // the press is unclaimed again: retried after a minute, not every second
     }
 
     private async Task FailAsync(long seq, string why, string? fix, CancellationToken ct)
@@ -414,7 +467,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             {
                 Kind = "custom", Scope = "machine", Key = IncidentKey,
                 Title = "F8 feedback presses can't reach a Claude session",
-                Detail = $"Press #{seq}: {why}. The dispatcher (shared MCP HTTP server) keeps the press and retries every minute.",
+                Detail = $"Press #{seq}: {why}. The dispatcher (shared MCP HTTP server) keeps waiting presses and retries every minute.",
                 Fix = fix,
                 Fields = { ["auto"] = true, ["press"] = seq },
             });
@@ -441,7 +494,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             foreach (var d in Directory.EnumerateDirectories(HandlersDir).OrderByDescending(d => long.TryParse(Path.GetFileName(d), out var n) ? n : 0).Take(5))
             {
                 var f = Path.Combine(d, "state.json");
-                if (File.Exists(f) && JsonSerializer.Deserialize<FeedbackHandlerState>(File.ReadAllText(f), Dto.Options) is { } s) recent.Add(s);
+                try { if (File.Exists(f) && JsonSerializer.Deserialize<FeedbackHandlerState>(File.ReadAllText(f), Dto.Options) is { } s) recent.Add(s); } catch { }
             }
             var state = new FeedbackDispatcherState
             {

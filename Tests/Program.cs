@@ -340,6 +340,17 @@ Start Port    End Port
     var bad = ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("""{"type":"result","is_error":true,"result":"Not logged in","terminal_reason":"api_error"}""");
     Check("output: an error result is a failure with its reason", bad.IsError && bad.Why!.Contains("api_error") && bad.Result == "Not logged in");
     Check("output: empty is a failure", ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("").IsError);
+    var prev = System.Globalization.CultureInfo.CurrentCulture;
+    try
+    {
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+        var dated = JObject.Parse("""{ "at": "2026-10-11T10:05:00.1234567Z" }""");   // Newtonsoft makes it a Date token
+        var at = ExileApiMcp.Dispatch.FeedbackKit.At(dated["at"]);
+        Check("at: a Date token is UTC whatever the culture", at == new DateTimeOffset(2026, 10, 11, 10, 5, 0, TimeSpan.Zero).AddTicks(1234567), at?.ToString("O"));
+        var text = ExileApiMcp.Dispatch.FeedbackKit.At(new JValue("2026-10-11T10:05:00Z"));
+        Check("at: an ISO string is UTC", text == new DateTimeOffset(2026, 10, 11, 10, 5, 0, TimeSpan.Zero), text?.ToString("O"));
+    }
+    finally { System.Globalization.CultureInfo.CurrentCulture = prev; }
     var clipped = ExileApiMcp.Dispatch.FeedbackKit.Clip("First sentence is here. Second sentence goes on and on and on.", 40);
     Check("clip: cuts at a sentence end", clipped == "First sentence is here.", clipped);
 }

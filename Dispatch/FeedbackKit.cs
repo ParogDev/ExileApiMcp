@@ -130,8 +130,19 @@ public static class FeedbackKit
         return sb.ToString();
     }
 
-    private static string Time(JToken? at) =>
-        DateTimeOffset.TryParse(at?.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var t) ? t.UtcDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture) : "?";
+    private static string Time(JToken? at) => At(at) is { } t ? t.UtcDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture) : "?";
+
+    /// <summary>An event's "at" in UTC. Bridge replies are parsed with Newtonsoft's default date handling, so it is usually a
+    /// Date token already (whose ToString() is culture-formatted without an offset): never re-parse that text.</summary>
+    public static DateTimeOffset? At(JToken? at)
+    {
+        if (at?.Type == JTokenType.Date)
+        {
+            var d = at.Value<DateTime>();
+            return new DateTimeOffset(d.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(d, DateTimeKind.Utc) : d.ToUniversalTime());
+        }
+        return at?.Type == JTokenType.String && DateTimeOffset.TryParse(at.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var t) ? t : null;
+    }
 
     public static string Clip(string? s, int max)
     {

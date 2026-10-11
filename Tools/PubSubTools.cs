@@ -55,7 +55,7 @@ public static class PubSubTools
         {
             PubSubEventsResult r;
             try { r = await Events(bridges, game, since, kinds, 500, ct); }
-            catch (McpException) when (DateTime.UtcNow < until) { await Task.Delay(5000, ct); continue; }   // HUD restarting
+            catch (McpException ex) when (ex is not PubSubBrokenException && DateTime.UtcNow < until) { await Task.Delay(5000, ct); continue; }   // HUD restarting
             if (r.Events.Count > 0) return Dto.Result(r, Summary(r));
             if (DateTime.UtcNow >= until)
             {
@@ -131,10 +131,13 @@ public static class PubSubTools
         var p = new JObject { ["since"] = since, ["limit"] = Math.Clamp(limit, 1, 500) };
         if (kinds is { Length: > 0 }) p["kinds"] = new JArray(kinds);
         var (_, r) = await bridges.CallAsync(game, "pubsub.events", p, ct);
-        if (r["error"] != null && r["ok"] == null && r["message"]?.ToString().Contains("Unknown", StringComparison.OrdinalIgnoreCase) == true)
-            throw new McpException($"This bridge build has no pubsub.events ({r["message"]}): update Whats An AI Bridge and restart the HUD.");
+        if (r["error"] != null && r["ok"] == null)
+            throw new PubSubBrokenException($"The bridge refused pubsub.events ({r["error"]}: {r["message"]}): a bridge build before pub/sub? Update Whats An AI Bridge and restart the HUD.");
         return Dto.From<PubSubEventsResult>(r);
     }
+
+    /// <summary>The bridge answered, and refused: a broken link, never retried as "the HUD is restarting".</summary>
+    private sealed class PubSubBrokenException(string message) : McpException(message);
 
     private static CallToolResult Published(JToken r)
     {
