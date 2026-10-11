@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using ExileApiMcp.Bridge;
+using ExileApiMcp.Hud;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -27,10 +28,12 @@ public static class PipelineTraceTools
         [Description("Trace length in ms (500-20000, default 4000)")] int durationMs = 4000,
         [Description("How many of the nearest players to watch (0-32, default 8)")] int entities = 8,
         [Description("Also return per-frame arrays (series: tMs, intervalMs, workMs, pluginsMs, gcPauseMs) for timelines; adds ~5 KB per second traced")] bool series = false,
+        [Description(FocusGate.WaitParamDescription)] int waitForGameSec = FocusGate.DefaultWaitSec,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 20_000);
+        if (await FocusGate.WaitAsync(bridges, game, "pipeline_trace", waitForGameSec, ct) is { } notInFront) return ToolResults.Json(notInFront);
         var t0 = DateTime.UtcNow;
         var (bridge, started) = await bridges.CallAsync(game, "pipeline.trace", new JObject { ["durationMs"] = durationMs, ["entities"] = entities, ["series"] = series }, ct);
         var id = started["id"]?.Value<string>();
@@ -73,10 +76,12 @@ public static class PipelineTraceTools
         [Description("Track entities whose metadata path contains this (e.g. a static chest or NPC as an anchor) instead of the nearest players")] string? path = null,
         [Description("Draw the cyan (fresh) marker from the state this many ms ago (0-100), to align with the game image's own latency")] double delayMs = 0,
         [Description("Up to 3 more delays (ms) drawn as yellow, green and blue markers, so one camera pan measures several delays at once (tools/fidelity reports each)")] double[]? delays = null,
+        [Description(FocusGate.WaitParamDescription)] int waitForGameSec = FocusGate.DefaultWaitSec,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 60_000);
+        if (await FocusGate.WaitAsync(bridges, game, "overlay_accuracy", waitForGameSec, ct) is { } notInFront) return ToolResults.Json(notInFront);
         var (bridge, started) = await bridges.CallAsync(game, "tracker.start", new JObject { ["durationMs"] = durationMs, ["entities"] = entities, ["draw"] = draw, ["path"] = path, ["entityId"] = entityId, ["delayMs"] = delayMs, ["delays"] = delays == null ? null : new JArray(delays) }, ct);
         var id = started["id"]?.Value<string>();
         if (id == null) return ToolResults.Json(started);
@@ -179,10 +184,12 @@ public static class PipelineTraceTools
         [Description("Type full-name substring to profile: required with assembly, optional for a plugin, e.g. EntityListWrapper")] string? filter = null,
         [Description("Method name substring to profile, e.g. Draw or Stats. Profiling the bridge itself (Whats An AI Bridge) needs method or filter; its profiler and trace code is never patched")] string? method = null,
         [Description("Profile length in ms (500-20000, default 4000)")] int durationMs = 4000,
+        [Description(FocusGate.WaitParamDescription)] int waitForGameSec = FocusGate.DefaultWaitSec,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         durationMs = Math.Clamp(durationMs, 500, 20_000);
+        if (await FocusGate.WaitAsync(bridges, game, $"profile_plugin {name}", waitForGameSec, ct) is { } notInFront) return ToolResults.Json(notInFront);
         var t0 = DateTime.UtcNow;
         var (bridge, started) = await bridges.CallAsync(game, "profile.plugin", new JObject { ["name"] = name, ["durationMs"] = durationMs, ["assembly"] = assembly, ["filter"] = filter, ["method"] = method }, ct);
         var id = started["id"]?.Value<string>();

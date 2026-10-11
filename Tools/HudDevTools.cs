@@ -151,6 +151,7 @@ public static partial class HudDevTools
     {
         try
         {
+            if (await ExileApiMcp.Hud.FocusGate.WaitAsync(bridges, game, $"reload_plugin {plugin} perf", ExileApiMcp.Hud.FocusGate.DefaultWaitSec, ct) is { } notInFront) return notInFront;
             var (bridge, started) = await bridges.CallAsync(game, "pipeline.trace", new JObject { ["durationMs"] = 2000, ["entities"] = 0 }, ct);
             var id = started["id"]?.Value<string>();
             if (id == null) return new JObject { ["error"] = started["message"] ?? started["error"] ?? "trace not started" };

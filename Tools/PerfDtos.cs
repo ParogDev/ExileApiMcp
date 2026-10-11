@@ -127,6 +127,8 @@ public sealed class HealthReport
 {
     public DesktopInfo? Desktop { get; set; }
     public PipelineTraceResult? Trace { get; set; }
+    /// <summary>Set instead of trace when the game wasn't in front, so no trace ran (Hud/FocusGate.cs): {error: game_not_in_front, message, waitedSec}.</summary>
+    public JsonElement? Skipped { get; set; }
     public List<string>? Findings { get; set; }
     public List<PerfPlugin>? Plugins { get; set; }
     public List<PerfLint>? Lint { get; set; }
