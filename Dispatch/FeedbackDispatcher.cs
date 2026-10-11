@@ -194,8 +194,11 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             File.WriteAllText(mcpConfig, McpConfigJson(seq));
             var settings = Path.Combine(dir, "settings.json");
             File.WriteAllText(settings, FeedbackKit.SlimSettingsJson());
+            // Inline for the background session; over ~16k chars it would crowd Windows' 32k command line, so it is left
+            // out there and the prompt's pointer to the file (brief.md names it) does the job.
             var briefText = File.Exists(standingBrief) ? File.ReadAllText(standingBrief) : null;
-            var slim = FeedbackKit.SlimArguments(settings, standingBrief, briefText, asFile: false);
+            if (briefText is { Length: > 16000 }) Console.Error.WriteLine($"[Dispatch] #{seq}: the standing brief is {briefText.Length} chars: not inlined");
+            var slim = FeedbackKit.SlimArguments(settings, standingBrief, briefText is { Length: > 16000 } ? null : briefText, asFile: false);
             foreach (var f in new[] { "output.json", "stderr.log" }) File.Delete(Path.Combine(dir, f));
 
             // Visible first: a background session with Remote Control, which the user sees (and can join) in Claude.
@@ -545,8 +548,11 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
 
         var failed = error != null;
         h.StopAt = DateTimeOffset.UtcNow + StopRetry;   // ReapAsync stops it then if the stop below doesn't
-        await FinishAsync(h, t.LastText, failed, error, ct);   // the answer first: the player doesn't wait for the stop
-        await StopSessionAsync(h, ct);
+        // A good answer goes out first (the player doesn't wait for the stop); a failed or over-time session is stopped
+        // first, so the card's "was stopped" is true and nothing keeps working once the next press starts.
+        if (failed) await StopSessionAsync(h, ct);
+        await FinishAsync(h, t.LastText, failed, error, ct);
+        if (!failed) await StopSessionAsync(h, ct);
         SaveHandler(h);
         if (h.Stopped) RemoveWorktree(h);
     }
@@ -674,17 +680,15 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         {
             var dirty = Git(wt, "status --porcelain --ignore-submodules=none").Output.Trim();
             if (dirty.Length > 0) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (uncommitted changes)"); return; }
-            var unpushed = Git(wt, "submodule foreach --quiet --recursive \"git log --oneline --branches --not --remotes\"");
+            // HEAD too: a commit on a detached HEAD (after `submodule update`) is on no branch. A local topic branch whose
+            // remote branch was deleted on merge counts as unpushed: the brief has the handler delete it after the merge.
+            var unpushed = Git(wt, "submodule foreach --quiet --recursive \"git log --oneline HEAD --branches --not --remotes\"");
             if (unpushed.Code != 0 || unpushed.Output.Trim().Length > 0)
             { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (submodule commits on no remote)"); return; }
             // Unmerged work: commits whose changes origin/main doesn't hold. A squash merge leaves the branch's own commits
             // "ahead" though their content is on main: the files they touched are compared with origin/main instead.
+            Git(repo, "fetch -q origin main");   // a merge the handler just made must count as merged (once per handler)
             var ahead = Git(wt, "log --oneline origin/main..HEAD").Output.Trim().Length > 0;
-            if (ahead)
-            {
-                Git(repo, "fetch -q origin main");   // a merge the handler just made must count as merged
-                ahead = Git(wt, "log --oneline origin/main..HEAD").Output.Trim().Length > 0;
-            }
             var merged = !ahead;
             if (ahead && Git(wt, "merge-base origin/main HEAD") is { Code: 0 } mb)
             {
