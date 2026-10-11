@@ -195,7 +195,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
                         FeedbackKit.Prompt(seq, briefPath)), repo, seq, ct);
                     state.Mode = "remote-control";
                 }
-                catch (HandlerStartException ex) { fallback = $"Remote Control could not start: {ex.Message}"; }
+                // Only a clear refusal falls back: when the CLI may have started the session (a timeout, an answer without
+                // an id), a headless run would be a second handler for the same press. That one fails and is retried.
+                catch (BackgroundRefusedException ex) { fallback = $"Remote Control could not start: {ex.Message}"; }
             }
             if (state.Mode == null)
             {
@@ -265,14 +267,22 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     /// </summary>
     private async Task<string> StartBackgroundAsync(IReadOnlyList<string> args, string workDir, long seq, CancellationToken ct)
     {
-        var (code, output) = await RunCliAsync(args, workDir, TimeSpan.FromSeconds(90), ct, seq);
-        return FeedbackKit.ParseBackgrounded(output) is { } id ? id
-            : throw new HandlerStartException($"`claude --bg` exited {code} without a session id: {FeedbackKit.Clip(output, 240)}", null);
+        var (code, output, errors) = await RunCliAsync(args, workDir, TimeSpan.FromSeconds(90), ct, seq);
+        var all = output + "\n" + errors;
+        if (FeedbackKit.ParseBackgrounded(all) is { } id) return id;
+        if (code != 0 && !all.Contains("backgrounded", StringComparison.OrdinalIgnoreCase))
+            throw new BackgroundRefusedException($"`claude --bg` exited {code}: {FeedbackKit.Clip(all, 240)}");
+        throw new HandlerStartException($"`claude --bg` exited {code} without a session id it could read (it may have started one: `claude agents` lists it): {FeedbackKit.Clip(all, 240)}", null);
     }
 
+    /// <summary>The CLI refused to start a background session (so nothing runs): the headless run may take the press.</summary>
+    private sealed class BackgroundRefusedException(string message) : Exception(message);
+
     /// <summary>Runs the CLI with the scrubbed environment (and the handler's label when seq is given) and returns its exit
-    /// code and output (stdout and stderr together). A CLI that hangs is killed after the timeout.</summary>
-    private async Task<(int Code, string Output)> RunCliAsync(IEnumerable<string> args, string? workDir, TimeSpan timeout, CancellationToken ct, long? seq = null)
+    /// code, stdout and stderr. The output is pumped, not read to the end: a background service the CLI starts may inherit
+    /// the pipes and keep them open after the CLI exits. A CLI that hangs is killed after the timeout (itself only, never its
+    /// tree: that could hold the background service and every session in it).</summary>
+    private async Task<(int Code, string Output, string Errors)> RunCliAsync(IEnumerable<string> args, string? workDir, TimeSpan timeout, CancellationToken ct, long? seq = null)
     {
         var psi = new ProcessStartInfo(_env.Exe ?? throw new HandlerStartException("the Claude Code CLI was not found", null))
         {
@@ -284,15 +294,30 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         if (seq is { } s) { psi.Environment["HEXILE_AGENT"] = FeedbackKit.Label(s); psi.Environment["HEXILE_ROUTE_PRESS"] = s.ToString(); }
         using var p = Process.Start(psi) ?? throw new HandlerStartException("the Claude Code CLI did not start", null);
         p.StandardInput.Close();
-        var o = p.StandardOutput.ReadToEndAsync(ct);
-        var e = p.StandardError.ReadToEndAsync(ct);
+        using var stopPumps = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var (o, e) = (new System.Text.StringBuilder(), new System.Text.StringBuilder());
+        var pumps = Task.WhenAll(Pump(p.StandardOutput, o, stopPumps.Token), Pump(p.StandardError, e, stopPumps.Token));
         try { await p.WaitForExitAsync(ct).WaitAsync(timeout, ct); }
         catch (TimeoutException)
         {
-            try { p.Kill(true); } catch { }
+            try { p.Kill(false); } catch { }
+            stopPumps.Cancel();
             throw new HandlerStartException($"`claude {args.FirstOrDefault()}` did not finish within {timeout.TotalSeconds:0} s", null);
         }
-        return (p.ExitCode, (await o) + (await e));
+        await Task.WhenAny(pumps, Task.Delay(TimeSpan.FromSeconds(3), ct));   // the rest of the output, unless an heir holds the pipe
+        stopPumps.Cancel();
+        lock (o) lock (e) return (p.ExitCode, o.ToString(), e.ToString());
+
+        static async Task Pump(StreamReader r, System.Text.StringBuilder into, CancellationToken stop)
+        {
+            var buf = new char[4096];
+            try
+            {
+                int n;
+                while ((n = await r.ReadAsync(buf.AsMemory(), stop)) > 0) lock (into) into.Append(buf, 0, n);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException) { }
+        }
     }
 
     /// <summary>The CLI is there and logged in (checked at most once a minute while broken, every 10 min while fine).</summary>
@@ -453,30 +478,39 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     /// (HEXILE_DISPATCH_LINGER_MIN; pushed back while the user talks to it).</summary>
     private static readonly TimeSpan Linger = TimeSpan.FromMinutes(
         double.TryParse(Environment.GetEnvironmentVariable("HEXILE_DISPATCH_LINGER_MIN"), out var m) && m >= 0 ? m : 10);
-    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(3), ListGrace = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(5), ListGrace = TimeSpan.FromSeconds(45), StopRetry = TimeSpan.FromMinutes(1);
     private DateTime _nextPoll = DateTime.MinValue, _nextReap = DateTime.MinValue;
     private readonly HashSet<long> _toldBlocked = new();
-    private readonly Dictionary<string, string> _transcripts = new();
+    private readonly Dictionary<string, FeedbackKit.TranscriptState> _transcripts = new();
 
     /// <summary>
     /// A visible handler is an interactive session: it doesn't exit when its turn ends. `claude agents --json --all` says
     /// its state (working, blocked on a question, done with its turn) and whether its process is alive; its transcript has
-    /// the claude.ai/code URL and the last answer, which goes to the card once the state is done. The session then stays
-    /// open for Linger (the user can follow up in it) and is stopped by ReapAsync; the next press doesn't wait for that.
+    /// the claude.ai/code URL, the last answer and whether the turn has ended. The answer goes to the card once both say the
+    /// turn is over. The session then stays open for Linger (the user can follow up in it) and is stopped by ReapAsync; the
+    /// next press doesn't wait for that.
     /// </summary>
     private async Task SuperviseBackgroundAsync(FeedbackHandlerState h, CancellationToken ct)
     {
         if (DateTime.UtcNow < _nextPoll) return;
         _nextPoll = DateTime.UtcNow + PollEvery;
-        var agent = await AgentAsync(h.BackgroundId!, ct);
-        if (agent is { SessionId: { } sid } && h.SessionId == null) { h.SessionId = sid; SaveHandler(h); }
-        var (url, last) = Transcript(h.SessionId);
-        if (url != null && h.Url != url)
-        {
-            h.Url = url; SaveHandler(h);
-            Console.Error.WriteLine($"[Dispatch] #{h.Seq}: Remote Control at {url}");
-        }
         var age = h.StartedAt is { } s ? DateTimeOffset.UtcNow - s : TimeSpan.Zero;
+        (string? SessionId, string? State, bool Alive)? agent;
+        try { agent = await AgentAsync(h.BackgroundId!, ct); }
+        catch (CliException ex)
+        {
+            // The CLI didn't answer: not the session's fault. Asked again next poll; only the run limit ends it.
+            Console.Error.WriteLine($"[Dispatch] #{h.Seq}: {ex.Message}");
+            if (age <= HandlerMaxRun) return;
+            agent = null;
+        }
+        if (agent is { SessionId: { } sid } && h.SessionId == null) { h.SessionId = sid; SaveHandler(h); }
+        var t = Transcript(h.SessionId);
+        if (t.Url != null && h.Url != t.Url)
+        {
+            h.Url = t.Url; SaveHandler(h);
+            Console.Error.WriteLine($"[Dispatch] #{h.Seq}: Remote Control at {t.Url}");
+        }
 
         string? error = null;
         if (age > HandlerMaxRun)
@@ -492,20 +526,21 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
                 await ReplyAsync(h.Seq, "working", $"#{h.Seq} waits for an answer: open \"{h.Name}\" in Claude (claude.ai/code or the Claude app).", ct);
             return;
         }
-        else if (agent.Value.State == "done" && (last != null || !agent.Value.Alive)) { }   // its turn ended: the answer is ready
+        else if (agent.Value.State == "done" && (t.TurnEnded || !agent.Value.Alive)) { }   // its turn ended: the answer is written
         else if (!agent.Value.Alive)
             error = $"its session exited before finishing (state {agent.Value.State ?? "unknown"})";
         else return;   // still working
 
         var failed = error != null;
+        h.StopAt = DateTimeOffset.UtcNow + (failed ? TimeSpan.Zero : Linger);
         if (failed) await StopSessionAsync(h, ct);
-        else h.StopAt = DateTimeOffset.UtcNow + Linger;
-        await FinishAsync(h, last, failed, error, ct);
+        await FinishAsync(h, t.LastText, failed, error, ct);
         if (h.Stopped) RemoveWorktree(h);
     }
 
     /// <summary>Finished visible sessions whose linger is over: stopped (the transcript stays), their worktree removed when
-    /// empty. A session the user is talking to (working, or blocked on a question) gets another Linger.</summary>
+    /// empty. A session the user is talking to (working, or blocked on a question) gets another Linger; a stop that didn't
+    /// work is tried again a minute later.</summary>
     private async Task ReapAsync(CancellationToken ct)
     {
         if (DateTime.UtcNow < _nextReap || !Directory.Exists(HandlersDir)) return;
@@ -515,16 +550,20 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             FeedbackHandlerState? h;
             try { h = JsonSerializer.Deserialize<FeedbackHandlerState>(File.ReadAllText(f), Dto.Options); } catch { continue; }
             if (h is not { Mode: "remote-control", Stopped: false, Status: "done" or "failed", StopAt: { } at } || at > DateTimeOffset.UtcNow || h.BackgroundId == null) continue;
-            var agent = await AgentAsync(h.BackgroundId, ct);
+            (string? SessionId, string? State, bool Alive)? agent;
+            try { agent = await AgentAsync(h.BackgroundId, ct); }
+            catch (CliException ex) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: {ex.Message}"); continue; }
             if (agent is { Alive: true, State: "working" or "blocked" })
             {
                 h.StopAt = DateTimeOffset.UtcNow + Linger;
                 SaveHandler(h);
                 continue;
             }
-            await StopSessionAsync(h, ct);
+            if (agent is { Alive: true }) await StopSessionAsync(h, ct);
+            else h.Stopped = true;   // already ended (stopped by the user, or exited)
+            if (!h.Stopped) h.StopAt = DateTimeOffset.UtcNow + StopRetry;
             SaveHandler(h);
-            RemoveWorktree(h);
+            if (h.Stopped) RemoveWorktree(h);
         }
     }
 
@@ -533,47 +572,59 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         if (h.BackgroundId == null || h.Stopped) return;
         try
         {
-            var (code, output) = await RunCliAsync(["stop", h.BackgroundId], null, TimeSpan.FromSeconds(60), ct);
-            Console.Error.WriteLine($"[Dispatch] #{h.Seq}: claude stop {h.BackgroundId}: exit {code} {FeedbackKit.Clip(output, 160)}");
+            var (code, output, errors) = await RunCliAsync(["stop", h.BackgroundId], null, TimeSpan.FromSeconds(60), ct);
+            Console.Error.WriteLine($"[Dispatch] #{h.Seq}: claude stop {h.BackgroundId}: exit {code} {FeedbackKit.Clip(output + " " + errors, 160)}");
             h.Stopped = code == 0 || (await AgentAsync(h.BackgroundId, ct)) is null or { Alive: false };
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: stopping {h.BackgroundId}: {ex.Message}"); }
     }
 
-    /// <summary>The background session as `claude agents --json --all` lists it, or null when it isn't (or the CLI failed:
-    /// the next poll asks again).</summary>
+    /// <summary>The CLI didn't give an answer (failed, timed out, printed something else): ask again later.</summary>
+    private sealed class CliException(string message) : Exception(message);
+
+    /// <summary>The background session as `claude agents --json --all` lists it, or null when it isn't listed. Throws
+    /// CliException when the CLI didn't answer with the list (not the same as "not listed").</summary>
     private async Task<(string? SessionId, string? State, bool Alive)?> AgentAsync(string id, CancellationToken ct)
     {
         try
         {
-            var (_, output) = await RunCliAsync(["agents", "--json", "--all"], null, TimeSpan.FromSeconds(30), ct);
+            var (_, output, _) = await RunCliAsync(["agents", "--json", "--all"], null, TimeSpan.FromSeconds(30), ct);
             return FeedbackKit.ParseAgent(output, id);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine($"[Dispatch] claude agents: {ex.Message}"); return null; }
+        catch (Exception ex) when (ex is HandlerStartException or FormatException or IOException or System.ComponentModel.Win32Exception)
+        {
+            throw new CliException($"claude agents: {ex.Message}");
+        }
     }
 
     /// <summary>The session's transcript, ~/.claude/projects/&lt;dir&gt;/&lt;session-id&gt;.jsonl (the dir is the worktree's
-    /// path, so it is looked up once by file name).</summary>
-    private (string? Url, string? LastText) Transcript(string? sessionId)
+    /// path, so it is looked up by file name), read on from where the last poll stopped.</summary>
+    private FeedbackKit.TranscriptState Transcript(string? sessionId)
     {
-        if (sessionId == null) return (null, null);
+        if (sessionId == null) return new();
+        if (!_transcripts.TryGetValue(sessionId, out var s)) _transcripts[sessionId] = s = new();
         try
         {
-            if (!_transcripts.TryGetValue(sessionId, out var path))
+            if (s.Path == null)
             {
                 var projects = Path.Combine(UserProfile, ".claude", "projects");
-                path = Directory.Exists(projects)
+                s.Path = Directory.Exists(projects)
                     ? Directory.EnumerateDirectories(projects).Select(d => Path.Combine(d, sessionId + ".jsonl")).FirstOrDefault(File.Exists) : null;
-                if (path == null) return (null, null);
-                _transcripts[sessionId] = path;
+                if (s.Path == null) return s;
             }
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var sr = new StreamReader(fs);
-            var lines = new List<string>();
-            while (sr.ReadLine() is { } l) lines.Add(l);
-            return FeedbackKit.ParseTranscript(lines);
+            using var fs = new FileStream(s.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (fs.Length < s.Offset) s.Offset = 0;
+            fs.Seek(s.Offset, SeekOrigin.Begin);
+            var bytes = new byte[fs.Length - s.Offset];
+            var read = 0;
+            while (read < bytes.Length && fs.Read(bytes, read, bytes.Length - read) is var n and > 0) read += n;
+            var end = Array.LastIndexOf(bytes, (byte)'\n', Math.Max(read - 1, 0));   // whole lines only: the last one may be half written
+            if (read == 0 || end < 0) return s;
+            s.Offset += end + 1;
+            FeedbackKit.ParseTranscript(System.Text.Encoding.UTF8.GetString(bytes, 0, end + 1).Split('\n').Select(l => l.TrimEnd('\r')), s);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return (null, null); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return s;
     }
 
     /// <summary>Says the handler's answer on the card (exactly once across dispatchers) and records how it ended.</summary>

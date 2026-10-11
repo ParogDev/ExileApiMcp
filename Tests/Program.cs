@@ -387,9 +387,11 @@ Start Port    End Port
     var live = ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "98b400ca");
     var stopped = ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "c37e5f7f");
     Check("agents: state, session id, alive by pid", live is { SessionId: "98b400ca-5279", State: "done", Alive: true } && stopped is { Alive: false });
-    Check("agents: unlisted or unreadable is null",
-        ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "ffffffff") == null && ExileApiMcp.Dispatch.FeedbackKit.ParseAgent("oops", "98b400ca") == null);
-    var (rcUrl, rcLast) = ExileApiMcp.Dispatch.FeedbackKit.ParseTranscript([
+    Check("agents: unlisted is null", ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "ffffffff") == null);
+    Throws<FormatException>("agents: no list is a CLI failure, not 'unlisted'", () => ExileApiMcp.Dispatch.FeedbackKit.ParseAgent("error: service down", "98b400ca"));
+    var named2 = ExileApiMcp.Dispatch.FeedbackKit.DisplayName(JObject.Parse("""{ "seq": 4, "data": { "Note": "fix  it" } }"""));
+    Check("name: no ellipsis when nothing was cut", named2 == "F8 #4: fix it", named2);
+    var rc = ExileApiMcp.Dispatch.FeedbackKit.ParseTranscript([
         """{"type":"user","message":{"role":"user","content":"go"}}""",
         """{"type":"system","subtype":"bridge_status","content":"/remote-control is active","url":"https://claude.ai/code/session_01Rx"}""",
         """{"type":"assistant","message":{"content":[{"type":"text","text":"First look."},{"type":"tool_use","name":"Read"}]}}""",
@@ -397,7 +399,12 @@ Start Port    End Port
         """{"type":"assistant","message":{"content":[{"type":"text","text":"Fixed the lever step. Pull it now."}]}}""",
         "not json {",
     ]);
-    Check("transcript: Remote Control URL and the last answer", rcUrl == "https://claude.ai/code/session_01Rx" && rcLast == "Fixed the lever step. Pull it now.", $"{rcUrl} | {rcLast}");
+    Check("transcript: Remote Control URL and the last answer, turn not ended yet",
+        rc.Url == "https://claude.ai/code/session_01Rx" && rc.LastText == "Fixed the lever step. Pull it now." && !rc.TurnEnded, $"{rc.Url} | {rc.LastText} | {rc.TurnEnded}");
+    ExileApiMcp.Dispatch.FeedbackKit.ParseTranscript(["""{"type":"system","subtype":"turn_duration","durationMs":6481}"""], rc);
+    Check("transcript: turn_duration ends the turn (fed on)", rc.TurnEnded && rc.LastText == "Fixed the lever step. Pull it now.");
+    ExileApiMcp.Dispatch.FeedbackKit.ParseTranscript(["""{"type":"user","message":{"role":"user","content":"and the next step?"}}"""], rc);
+    Check("transcript: a follow-up opens a new turn", !rc.TurnEnded);
     Check("refusal: an older bridge's bare answer is a broken link",
         ExileApiMcp.Dispatch.FeedbackKit.Refusal(JObject.Parse("""{ "game": "poe2", "query": "pubsub.events", "timestamp": "x" }"""), "pubsub.events")?.Contains("no pubsub.events") == true);
     Check("refusal: ok true and ok false (claimed) are answers, an error object is not",

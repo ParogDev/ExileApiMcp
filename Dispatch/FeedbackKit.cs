@@ -126,23 +126,24 @@ public static class FeedbackKit
         var d = press["data"] as JObject ?? new JObject();
         var seq = press["seq"]?.Value<long>() ?? 0;
         var what = d["Note"] is { Type: JTokenType.String } n && n.ToString().Trim().Length > 0 ? n.ToString() : d["Event"]?.ToString() ?? "feedback";
-        var words = Regex.Replace(what.Trim(), @"\s+", " ").Split(' ');
-        var head = string.Join(' ', words.Take(7));
+        var all = Regex.Replace(what.Trim(), @"\s+", " ");
+        var head = string.Join(' ', all.Split(' ').Take(7));
         if (head.Length > 48) head = head[..48].TrimEnd();
-        if (words.Length > 7 || head.Length < what.Trim().Length) head += "...";
+        if (head.Length < all.Length) head += "...";
         var area = d["AreaName"] is { Type: JTokenType.String } a && a.ToString().Length > 0 ? $" ({a})" : "";
         return Regex.Replace($"F8 #{seq}: {head}{area}", "[\"\r\n]", "'");
     }
 
     /// <summary>The CLI arguments for a visible handler: a background session (`--bg`, managed by the CLI's background
     /// service, outside this server's process tree) with Remote Control on, named, in its own worktree, the prompt as the
-    /// first message. Same tools and MCP config as the headless run.</summary>
+    /// first message. Same tools and MCP config as the headless run. The prompt follows a single-value option: after a
+    /// variadic one (--add-dir, --mcp-config, --allowedTools) the parser would take it as one more value.</summary>
     public static IReadOnlyList<string> BackgroundArguments(long seq, string name, string mcpConfig, IEnumerable<string> addDirs, string prompt)
     {
-        var a = new List<string> { "--bg", "--remote-control", name, "--name", name, "--permission-mode", "auto", "--worktree", Label(seq),
+        var a = new List<string> { "--bg", "--remote-control", name, "--worktree", Label(seq),
             "--mcp-config", mcpConfig, "--strict-mcp-config", "--allowedTools", "mcp__exileapi" };
         foreach (var d in addDirs) { a.Add("--add-dir"); a.Add(d); }
-        a.Add(prompt);
+        a.AddRange(["--permission-mode", "auto", "--name", name, prompt]);
         return a;
     }
 
@@ -152,11 +153,14 @@ public static class FeedbackKit
 
     /// <summary>One background session from `claude agents --json --all`: its session id, its state (working | blocked |
     /// done ...), and whether its process is alive (a stopped or exited one has no pid). Null when it is not listed.</summary>
+    /// Throws FormatException when the output is not that list (the CLI failed: not the same as "not listed").</summary>
     public static (string? SessionId, string? State, bool Alive)? ParseAgent(string json, string id)
     {
+        int from = json.IndexOf('['), to = json.LastIndexOf(']');
+        if (from < 0 || to < from) throw new FormatException($"`claude agents --json` printed no list: {Clip(json, 160)}");
         try
         {
-            using var doc = JsonDocument.Parse(json.Trim() is { Length: > 0 } t ? t[..(t.LastIndexOf(']') + 1)] : "[]");
+            using var doc = JsonDocument.Parse(json[from..(to + 1)]);
             foreach (var e in doc.RootElement.EnumerateArray())
             {
                 if (!e.TryGetProperty("id", out var i) || i.GetString() != id) continue;
@@ -164,38 +168,58 @@ public static class FeedbackKit
                 return (Str("sessionId"), Str("state"), e.TryGetProperty("pid", out var p) && p.ValueKind == JsonValueKind.Number);
             }
         }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentOutOfRangeException) { }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            throw new FormatException($"`claude agents --json` is not the expected list: {ex.Message}");
+        }
         return null;
     }
 
     /// <summary>What a session's transcript (~/.claude/projects/&lt;dir&gt;/&lt;session-id&gt;.jsonl) says: the claude.ai/code
     /// URL Remote Control gave it (a system bridge_status line) and its last answer (the text of the last assistant
-    /// message that has text).</summary>
-    public static (string? Url, string? LastText) ParseTranscript(IEnumerable<string> lines)
+    /// message that has text), and whether its turn has ended (a system turn_duration line after the last user or assistant
+    /// line: the final answer is written by then). Feeds on lines as they come: pass the previous result to continue.</summary>
+    public static TranscriptState ParseTranscript(IEnumerable<string> lines, TranscriptState? previous = null)
     {
-        string? url = null, last = null;
+        var s = previous ?? new TranscriptState();
         foreach (var line in lines)
         {
             if (line.Length == 0 || line[0] != '{') continue;
-            var isAssistant = line.Contains("\"type\":\"assistant\"");
-            if (!isAssistant && !line.Contains("\"bridge_status\"")) continue;
             try
             {
                 using var doc = JsonDocument.Parse(line);
                 var r = doc.RootElement;
-                if (r.TryGetProperty("subtype", out var st) && st.GetString() == "bridge_status"
-                    && r.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String) url = u.GetString();
-                if (isAssistant && r.TryGetProperty("message", out var m) && m.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.Array)
+                var type = r.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+                var subtype = r.TryGetProperty("subtype", out var st) && st.ValueKind == JsonValueKind.String ? st.GetString() : null;
+                if (type == "system" && subtype == "bridge_status" && r.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String) s.Url = u.GetString();
+                else if (type == "system" && subtype == "turn_duration") s.TurnEnded = true;
+                else if (type == "user") s.TurnEnded = false;
+                else if (type == "assistant")
                 {
-                    var text = string.Join("\n", c.EnumerateArray()
-                        .Where(b => b.TryGetProperty("type", out var bt) && bt.GetString() == "text" && b.TryGetProperty("text", out _))
-                        .Select(b => b.GetProperty("text").GetString()));
-                    if (text.Trim().Length > 0) last = text.Trim();
+                    s.TurnEnded = false;
+                    if (r.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.Object && m.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.Array)
+                    {
+                        var text = string.Join("\n", c.EnumerateArray()
+                            .Where(b => b.ValueKind == JsonValueKind.Object && b.TryGetProperty("type", out var bt) && bt.GetString() == "text"
+                                        && b.TryGetProperty("text", out var tx) && tx.ValueKind == JsonValueKind.String)
+                            .Select(b => b.GetProperty("text").GetString()));
+                        if (text.Trim().Length > 0) s.LastText = text.Trim();
+                    }
                 }
             }
             catch (JsonException) { }
         }
-        return (url, last);
+        return s;
+    }
+
+    public sealed class TranscriptState
+    {
+        public string? Url { get; set; }
+        public string? LastText { get; set; }
+        public bool TurnEnded { get; set; }
+        /// <summary>Bytes of the file read so far (the caller's: where to continue).</summary>
+        public long Offset { get; set; }
+        public string? Path { get; set; }
     }
 
     /// <summary>The card line saying where the handler runs: the session's name in Claude, or that it runs headless and why.</summary>
