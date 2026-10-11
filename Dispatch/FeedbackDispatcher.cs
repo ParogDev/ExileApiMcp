@@ -44,6 +44,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     private readonly List<JObject> _trace = new();                       // recent route + feedback events, for briefs
     private DateTime _nextEnvCheck = DateTime.MinValue, _nextStart = DateTime.MinValue, _nextAdopt = DateTime.MinValue, _bridgeOkAt = DateTime.MinValue;
     private (string? Exe, bool LoggedIn, string? Why, string? Fix) _env;
+    /// <summary>The sign-in command for the user's own PowerShell while the CLI is not logged in (refreshed with _env).</summary>
+    private string? _loginCommand;
     private FeedbackHandlerState? _running;
     private string _status = "starting", _why = "";
     private bool _envRaised, _bridgeBrokenRaised;
@@ -241,6 +243,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         return false;
     }
 
+    /// <summary>The user profile folder (not redirected inside the MSIX package, unlike %LOCALAPPDATA% can be).</summary>
+    private static string UserProfile => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
     private static async Task<(string? Exe, bool LoggedIn, string? Why, string? Fix)> CheckEnvironmentAsync(CancellationToken ct)
     {
         string? exe = Environment.GetEnvironmentVariable("HEXILE_CLAUDE_EXE") is { Length: > 0 } x && File.Exists(x) ? x : null;
@@ -263,7 +268,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             _ = await errors;
             if (doc.RootElement.TryGetProperty("loggedIn", out var li) && li.ValueKind == JsonValueKind.True) return (exe, true, null, null);
             return (exe, false, "the Claude Code CLI is not logged in, so it can't start a session on its own",
-                $"Once, in a terminal: \"{exe}\" auth login");
+                $"Once, in PowerShell: {FeedbackKit.LoginCommand(exe, UserProfile)}");
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -470,6 +475,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         {
             _env = (_env.Exe, false, $"checking the Claude Code CLI failed: {ex.Message}", null);
         }
+        _loginCommand = _env.Exe != null && !_env.LoggedIn ? FeedbackKit.LoginCommand(_env.Exe, UserProfile) : null;
         _nextEnvCheck = DateTime.UtcNow + (_env.Why == null ? TimeSpan.FromMinutes(10) : RetryEvery);
         if (_env.Why != null && (!wasBroken || !_envRaised))
         {
@@ -535,7 +541,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             {
                 Status = _status, Why = _why.Length > 0 ? _why : null, Host = SessionIdentity.Kind, Pid = Environment.ProcessId,
                 Version = McpSetup.Version, UpdatedAt = DateTimeOffset.UtcNow, Cursor = _cursor, ClaudeExe = _env.Exe,
-                LoggedIn = _env.Exe == null ? null : _env.LoggedIn, Repo = Repo(), HandlersDir = HandlersDir,
+                LoggedIn = _env.Exe == null ? null : _env.LoggedIn,
+                LoginCommand = _loginCommand,
+                Repo = Repo(), HandlersDir = HandlersDir,
                 Handlers = recent, Waiting = _presses.Keys.OrderBy(k => k).ToList(),
             };
             var tmp = StatusFile + ".tmp";
