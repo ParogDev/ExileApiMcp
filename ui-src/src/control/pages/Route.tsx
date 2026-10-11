@@ -351,6 +351,7 @@ function RouteMap({ size, view, path, player, goalLabel, why }: { size: [number,
   const w = win.w * scale, h = win.h * scale;
   const boxH = Math.max(MAP_MIN_H, Math.ceil(h));
   const X = (x: number) => (x - win.x) * scale, Y = (y: number) => (y - win.y) * scale;
+  const line = pts.map(([x, y]) => `${X(x)},${Y(y)}`).join(" ");
   const step = gridStep(Math.max(win.w, win.h));
   const vlines: number[] = [], hlines: number[] = [];
   for (let x = Math.ceil(win.x / step) * step; x <= win.x + win.w; x += step) if (x > 0 && x < W) vlines.push(x);
@@ -376,8 +377,8 @@ function RouteMap({ size, view, path, player, goalLabel, why }: { size: [number,
           <text x={w - 4} y={10} textAnchor="end" className="fill-fg-3" fontSize={9} style={mono}>x → · y ↓ · {step} cells per line</text>
           {pts.length > 1 && (
             <>
-              <polyline points={pts.map(([x, y]) => `${X(x)},${Y(y)}`).join(" ")} fill="none" stroke="var(--color-surface)" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" opacity={0.7} />
-              <polyline points={pts.map(([x, y]) => `${X(x)},${Y(y)}`).join(" ")} fill="none" stroke="var(--color-ring)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+              <polyline points={line} fill="none" stroke="var(--color-surface)" strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" opacity={0.7} />
+              <polyline points={line} fill="none" stroke="var(--color-ring)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
             </>
           )}
           {goal && (
