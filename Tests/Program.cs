@@ -412,7 +412,8 @@ Start Port    End Port
     var slug = ExileApiMcp.Dispatch.FeedbackSessions.ProjectSlug(@"C:\Users\Parog\Documents\Projects\Path of Hexile\.claude\worktrees\route-f8-21");
     Check("transcript: the project slug replaces every non-alphanumeric character", slug == "C--Users-Parog-Documents-Projects-Path-of-Hexile--claude-worktrees-route-f8-21", slug);
     var tp = ExileApiMcp.Dispatch.FeedbackSessions.TranscriptPath(@"C:\Users\Parog", @"C:\Users\Parog\Documents\Projects\Path of Hexile\.claude\worktrees\route-f8-21\", "0e49");
-    Check("transcript: under ~\\.claude\\projects\\<slug>\\<sessionId>.jsonl", tp == @"C:\Users\Parog\.claude\projects\C--Users-Parog-Documents-Projects-Path-of-Hexile--claude-worktrees-route-f8-21\0e49.jsonl", tp);
+    // CI runs on Linux too: compare with the platform's separator.
+    Check("transcript: under ~\\.claude\\projects\\<slug>\\<sessionId>.jsonl", tp == Path.Combine(@"C:\Users\Parog", ".claude", "projects", "C--Users-Parog-Documents-Projects-Path-of-Hexile--claude-worktrees-route-f8-21", "0e49.jsonl"), tp);
 
     var st = new ExileApiMcp.Tools.FeedbackHandlerState { Seq = 7, Status = "running", Pid = 1, StartedAt = fsNow.AddMinutes(-2), Extra = new() { ["displayName"] = System.Text.Json.JsonSerializer.SerializeToElement("F8 #7: the lever"), ["url"] = System.Text.Json.JsonSerializer.SerializeToElement("https://claude.ai/code/x"), ["mode"] = System.Text.Json.JsonSerializer.SerializeToElement("remote-control"), ["processStart"] = System.Text.Json.JsonSerializer.SerializeToElement("2026-10-11T10:58:00Z") } };
     var ns = new ExileApiMcp.Tools.FeedbackSession { Seq = 7, Status = "" };
@@ -474,7 +475,7 @@ Start Port    End Port
         File.WriteAllText(Path.Combine(tmp, "handlers", "3", "state.json"), """{"seq":3,"status":"done"}""");
         var (folders, count) = ExileApiMcp.Dispatch.FeedbackSessions.FromFolders(Path.Combine(tmp, "handlers"), tmp, fsNow, withFiles: true, limit: 1);
         Check("folders: only the newest `limit` folders are read, the count says how many there are", folders.Count == 1 && count == 2);
-        Check("folders: one session per numbered folder, from state + brief + output, files when asked", folders.Count == 1 && folders[0].Seq == 21 && folders[0].Name == "F8 #21: Mektul" && folders[0].Note!.StartsWith("The forgemaster") && folders[0].CostUsd == 0.5 && folders[0].Brief != null && folders[0].Stderr == null && folders[0].DurationSec == 103 && folders[0].WorktreeExists == false && folders[0].TranscriptExists == false && folders[0].TranscriptPath!.EndsWith(@"C--wt-route-f8-21\0e49.jsonl"), folders.Count > 0 ? $"{folders[0].Name}|{folders[0].DurationSec}|{folders[0].TranscriptPath}" : "none");
+        Check("folders: one session per numbered folder, from state + brief + output, files when asked", folders.Count == 1 && folders[0].Seq == 21 && folders[0].Name == "F8 #21: Mektul" && folders[0].Note!.StartsWith("The forgemaster") && folders[0].CostUsd == 0.5 && folders[0].Brief != null && folders[0].Stderr == null && folders[0].DurationSec == 103 && folders[0].WorktreeExists == false && folders[0].TranscriptExists == false && folders[0].TranscriptPath!.EndsWith(Path.Combine("C--wt-route-f8-21", "0e49.jsonl")), folders.Count > 0 ? $"{folders[0].Name}|{folders[0].DurationSec}|{folders[0].TranscriptPath}" : "none");
         var fp1 = ExileApiMcp.Bridge.FeedbackHub.Fingerprint(Path.Combine(tmp, "handlers"), dispFile);
         File.WriteAllText(dispFile, """{"status":"listening","updatedAt":"2026-10-11T11:00:01+00:00","cursor":5,"waiting":[],"handlers":[]}""");
         var fp2 = ExileApiMcp.Bridge.FeedbackHub.Fingerprint(Path.Combine(tmp, "handlers"), dispFile);
