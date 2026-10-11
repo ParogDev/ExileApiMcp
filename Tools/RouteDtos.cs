@@ -88,5 +88,11 @@ public sealed class RouteTimings
     public double ResolveUs { get; set; }
     /// <summary>Load condition the timings were taken under: valid entities right now.</summary>
     public int Entities { get; set; }
+    /// <summary>Load condition: the non-monster entities the places walk matches (TargetResolver.Places).</summary>
+    public int Places { get; set; }
+    /// <summary>Gathering places and recording sightings (2 Hz, before resolving), smoothed, microseconds.</summary>
+    public double SightingsScanUs { get; set; }
+    /// <summary>Load condition: goal cells the objective resolved to (a Radar tile place can be hundreds).</summary>
+    public int Goals { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

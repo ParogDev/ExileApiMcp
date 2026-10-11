@@ -81,7 +81,8 @@ public static class RouteTools
         if (s.TravelTo != null) sb.Append($"\nTravel to: {s.TravelTo}{(s.TravelMapOpen ? $" (map open, {s.TravelMapStops.Count} stops)" : "")}");
         if (s.ActiveQuests.Count > 0) sb.Append($"\nActive quests: {string.Join(", ", s.ActiveQuests)}");
         var t = s.Timings;
-        sb.Append($"\nTimings under {t.Entities} entities: tick {t.TickUs:0} us, render {t.RenderUs:0} us, replan {t.LastReplanUs:0} us, resolve {t.ResolveUs:0} us; " +
+        sb.Append($"\nTimings under {t.Entities} entities, {t.Places} places, {t.Goals} goal(s): tick {t.TickUs:0} us, render {t.RenderUs:0} us per frame; " +
+                  $"replan {t.LastReplanUs:0} us ({s.PathCells} path cells); sightings scan {t.SightingsScanUs:0} us, resolve {t.ResolveUs:0} us (2 Hz); " +
                   $"grid {t.GridBuildMs:0.#} ms, field {t.FieldBuildMs:0.#} ms ({t.FieldCellsReached} cells reached), edges {t.EdgeBuildMs:0.#} ms ({t.EdgeContours} contours, {s.EdgePieces} pieces)");
         foreach (var n in s.Notes) sb.Append($"\n- {n}");
         return sb.ToString();
