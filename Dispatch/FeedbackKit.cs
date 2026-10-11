@@ -117,6 +117,122 @@ public static class FeedbackKit
 
     private static string Q(string s) => "\"" + s.Replace("\"", "") + "\"";
 
+    // ── Visible handlers: a background session with Remote Control ────
+
+    /// <summary>The handler's display name, as the user sees it in claude.ai/code, the Claude app and `claude agents`:
+    /// "F8 #&lt;seq&gt;: &lt;first words of the note&gt; (&lt;area&gt;)", the verdict when there is no note.</summary>
+    public static string DisplayName(JObject press)
+    {
+        var d = press["data"] as JObject ?? new JObject();
+        var seq = press["seq"]?.Value<long>() ?? 0;
+        var what = d["Note"] is { Type: JTokenType.String } n && n.ToString().Trim().Length > 0 ? n.ToString() : d["Event"]?.ToString() ?? "feedback";
+        var all = Regex.Replace(what.Trim(), @"\s+", " ");
+        var head = string.Join(' ', all.Split(' ').Take(7));
+        if (head.Length > 48) head = head[..48].TrimEnd();
+        if (head.Length < all.Length) head += "...";
+        var area = d["AreaName"] is { Type: JTokenType.String } a && a.ToString().Length > 0 ? $" ({a})" : "";
+        return Regex.Replace($"F8 #{seq}: {head}{area}", "[\"\r\n]", "'");
+    }
+
+    /// <summary>The CLI arguments for a visible handler: a background session (`--bg`, managed by the CLI's background
+    /// service, outside this server's process tree) with Remote Control on, named, in its own worktree, the prompt as the
+    /// first message. Same tools and MCP config as the headless run. The prompt follows a single-value option: after a
+    /// variadic one (--add-dir, --mcp-config, --allowedTools) the parser would take it as one more value.</summary>
+    public static IReadOnlyList<string> BackgroundArguments(long seq, string name, string mcpConfig, IEnumerable<string> addDirs, string prompt)
+    {
+        var a = new List<string> { "--bg", "--remote-control", name, "--worktree", Label(seq),
+            "--mcp-config", mcpConfig, "--strict-mcp-config", "--allowedTools", "mcp__exileapi" };
+        foreach (var d in addDirs) { a.Add("--add-dir"); a.Add(d); }
+        a.AddRange(["--permission-mode", "auto", "--name", name, prompt]);
+        return a;
+    }
+
+    /// <summary>The pid in a refused `git worktree remove` of a worktree the CLI locked ("cannot remove a locked working
+    /// tree, lock reason: claude session route-f8-138 (pid 25444)"), or null when it is another lock.</summary>
+    public static int? StaleLockPid(string gitOutput) =>
+        Regex.Match(gitOutput, @"locked working tree, lock reason: claude session [^\r\n]*\(pid (\d+)\)") is { Success: true } m
+        && int.TryParse(m.Groups[1].Value, out var pid) ? pid : null;
+
+    /// <summary>The short id `claude --bg` prints ("backgrounded · 98b400ca · name"), or null.</summary>
+    public static string? ParseBackgrounded(string stdout) =>
+        Regex.Match(Regex.Replace(stdout, @"\x1b\[[0-9;?]*[A-Za-z]", ""), @"backgrounded\s*\S\s*([0-9a-f]{6,})") is { Success: true } m ? m.Groups[1].Value : null;
+
+    /// <summary>One background session from `claude agents --json --all`: its session id, its state (working | blocked |
+    /// done ...), and whether its process is alive (a stopped or exited one has no pid). Null when it is not listed.</summary>
+    /// Throws FormatException when the output is not that list (the CLI failed: not the same as "not listed").</summary>
+    public static (string? SessionId, string? State, bool Alive)? ParseAgent(string json, string id)
+    {
+        int from = json.IndexOf('['), to = json.LastIndexOf(']');
+        if (from < 0 || to < from) throw new FormatException($"`claude agents --json` printed no list: {Clip(json, 160)}");
+        try
+        {
+            using var doc = JsonDocument.Parse(json[from..(to + 1)]);
+            foreach (var e in doc.RootElement.EnumerateArray())
+            {
+                if (!e.TryGetProperty("id", out var i) || i.GetString() != id) continue;
+                string? Str(string n) => e.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+                return (Str("sessionId"), Str("state"), e.TryGetProperty("pid", out var p) && p.ValueKind == JsonValueKind.Number);
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            throw new FormatException($"`claude agents --json` is not the expected list: {ex.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>What a session's transcript (~/.claude/projects/&lt;dir&gt;/&lt;session-id&gt;.jsonl) says: the claude.ai/code
+    /// URL Remote Control gave it (a system bridge_status line) and its last answer (the text of the last assistant
+    /// message that has text), and whether its turn has ended (a system turn_duration line after the last user or assistant
+    /// line: the final answer is written by then). Feeds on lines as they come: pass the previous result to continue.</summary>
+    public static TranscriptState ParseTranscript(IEnumerable<string> lines, TranscriptState? previous = null)
+    {
+        var s = previous ?? new TranscriptState();
+        foreach (var line in lines)
+        {
+            if (line.Length == 0 || line[0] != '{') continue;
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var r = doc.RootElement;
+                var type = r.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : null;
+                var subtype = r.TryGetProperty("subtype", out var st) && st.ValueKind == JsonValueKind.String ? st.GetString() : null;
+                if (type == "system" && subtype == "bridge_status" && r.TryGetProperty("url", out var u) && u.ValueKind == JsonValueKind.String) s.Url = u.GetString();
+                else if (type == "system" && subtype == "turn_duration") s.TurnEnded = true;
+                else if (type == "user") s.TurnEnded = false;
+                else if (type == "assistant")
+                {
+                    s.TurnEnded = false;
+                    if (r.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.Object && m.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.Array)
+                    {
+                        var text = string.Join("\n", c.EnumerateArray()
+                            .Where(b => b.ValueKind == JsonValueKind.Object && b.TryGetProperty("type", out var bt) && bt.GetString() == "text"
+                                        && b.TryGetProperty("text", out var tx) && tx.ValueKind == JsonValueKind.String)
+                            .Select(b => b.GetProperty("text").GetString()));
+                        if (text.Trim().Length > 0) s.LastText = text.Trim();
+                    }
+                }
+            }
+            catch (JsonException) { }
+        }
+        return s;
+    }
+
+    public sealed class TranscriptState
+    {
+        public string? Url { get; set; }
+        public string? LastText { get; set; }
+        public bool TurnEnded { get; set; }
+        /// <summary>Bytes of the file read so far (the caller's: where to continue).</summary>
+        public long Offset { get; set; }
+        public string? Path { get; set; }
+    }
+
+    /// <summary>The card line saying where the handler runs: the session's name in Claude, or that it runs headless and why.</summary>
+    public static string WhereText(long seq, string mode, string? name, string? fallbackWhy) => mode == "remote-control"
+        ? $"Claude is on #{seq}: watch or join it as \"{name}\" in Claude (Remote Control: claude.ai/code or the Claude app)."
+        : $"Claude is on #{seq} (headless run: {Clip(fallbackWhy, 160)}).";
+
     public static string Prompt(long seq, string briefPath) =>
         $"You handle one F8 press (#{seq}) from the player, who is playing Path of Exile 2 with the Whats A Route plugin. " +
         $"Read {briefPath} now: it has the press, the route state, the recent trace and the standing brief to follow. " +

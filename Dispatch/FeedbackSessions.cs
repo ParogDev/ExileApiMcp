@@ -112,11 +112,13 @@ public static class FeedbackSessions
         s.Status = st.Status.Length > 0 ? st.Status : "starting";
         s.Pid = st.Pid; s.StartedAt = st.StartedAt; s.EndedAt = st.EndedAt; s.Worktree = st.Worktree;
         s.Result = st.Result; s.Error = st.Error; s.SessionId = st.SessionId; s.Replied = st.Replied;
+        // The dispatcher's typed fields (3.71: visible Remote Control sessions), else the likely names in Extra.
+        s.Name = st.Name; s.Url = st.Url; s.Mode = st.Mode;
         if (st.Extra is { Count: > 0 })
         {
-            s.Name = PickString(st.Extra, "name", "displayName", "title", "sessionName");
-            s.Url = PickString(st.Extra, "url", "sessionUrl", "remoteUrl", "link");
-            s.Mode = PickString(st.Extra, "mode", "sessionMode");
+            s.Name ??= PickString(st.Extra, "name", "displayName", "title", "sessionName");
+            s.Url ??= PickString(st.Extra, "url", "sessionUrl", "remoteUrl", "link");
+            s.Mode ??= PickString(st.Extra, "mode", "sessionMode");
             s.Extra = st.Extra.ToDictionary(kv => kv.Key, kv => kv.Value);
         }
     }

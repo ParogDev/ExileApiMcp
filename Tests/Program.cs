@@ -365,6 +365,49 @@ Start Port    End Port
     var bad = ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("""{"type":"result","is_error":true,"result":"Not logged in","terminal_reason":"api_error"}""");
     Check("output: an error result is a failure with its reason", bad.IsError && bad.Why!.Contains("api_error") && bad.Result == "Not logged in");
     Check("output: empty is a failure", ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("").IsError);
+
+    // Visible handlers (background session with Remote Control): name, arguments, the CLI's answers, the transcript.
+    var named = ExileApiMcp.Dispatch.FeedbackKit.DisplayName(JObject.Parse("""{ "seq": 12, "data": { "Event": "note", "Note": "the lever   step never \"ends\" after I pull it twice", "AreaName": "The Molten Vault" } }"""));
+    Check("name: seq, first words of the note, area, no quotes", named == "F8 #12: the lever step never 'ends' after I... (The Molten Vault)", named);
+    var verdict = ExileApiMcp.Dispatch.FeedbackKit.DisplayName(JObject.Parse("""{ "seq": 3, "data": { "Event": "Wrong place" } }"""));
+    Check("name: the verdict without a note", verdict == "F8 #3: Wrong place", verdict);
+    var bgArgs = ExileApiMcp.Dispatch.FeedbackKit.BackgroundArguments(42, "F8 #42: x", @"C:\h\42\mcp.json", [@"C:\live"], "Handle it.");
+    Check("bg: background, Remote Control named, own worktree, prompt last",
+        bgArgs[0] == "--bg" && bgArgs[1] == "--remote-control" && bgArgs[2] == "F8 #42: x" && string.Join(" ", bgArgs).Contains("--worktree route-f8-42")
+        && bgArgs.Contains("--strict-mcp-config") && !bgArgs.Contains("-p") && bgArgs[^1] == "Handle it.", string.Join(" | ", bgArgs));
+    Check("bg: short id from the CLI's answer",
+        ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("Starting background service…\nbackgrounded · 98b400ca · F8 test\n  claude agents") == "98b400ca"
+        && ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("Workspace not trusted.") == null);
+    const string agentsJson = """
+        [ { "pid": 1, "kind": "interactive", "sessionId": "s0", "status": "busy" },
+          { "pid": 26424, "id": "98b400ca", "kind": "background", "sessionId": "98b400ca-5279", "status": "idle", "state": "done" },
+          { "id": "c37e5f7f", "kind": "background", "sessionId": "c37e5f7f-3394", "state": "done" } ]
+        exit 0
+        """;
+    var live = ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "98b400ca");
+    var stopped = ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "c37e5f7f");
+    Check("agents: state, session id, alive by pid", live is { SessionId: "98b400ca-5279", State: "done", Alive: true } && stopped is { Alive: false });
+    Check("worktree: the CLI's lock pid, not another lock's",
+        ExileApiMcp.Dispatch.FeedbackKit.StaleLockPid("fatal: cannot remove a locked working tree, lock reason: claude session route-f8-138 (pid 25444)\nuse 'remove -f -f'") == 25444
+        && ExileApiMcp.Dispatch.FeedbackKit.StaleLockPid("fatal: cannot remove a locked working tree, lock reason: on a USB stick") == null);
+    Check("agents: unlisted is null", ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "ffffffff") == null);
+    Throws<FormatException>("agents: no list is a CLI failure, not 'unlisted'", () => ExileApiMcp.Dispatch.FeedbackKit.ParseAgent("error: service down", "98b400ca"));
+    var named2 = ExileApiMcp.Dispatch.FeedbackKit.DisplayName(JObject.Parse("""{ "seq": 4, "data": { "Note": "fix  it" } }"""));
+    Check("name: no ellipsis when nothing was cut", named2 == "F8 #4: fix it", named2);
+    var rc = ExileApiMcp.Dispatch.FeedbackKit.ParseTranscript([
+        """{"type":"user","message":{"role":"user","content":"go"}}""",
+        """{"type":"system","subtype":"bridge_status","content":"/remote-control is active","url":"https://claude.ai/code/session_01Rx"}""",
+        """{"type":"assistant","message":{"content":[{"type":"text","text":"First look."},{"type":"tool_use","name":"Read"}]}}""",
+        """{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}""",
+        """{"type":"assistant","message":{"content":[{"type":"text","text":"Fixed the lever step. Pull it now."}]}}""",
+        "not json {",
+    ]);
+    Check("transcript: Remote Control URL and the last answer, turn not ended yet",
+        rc.Url == "https://claude.ai/code/session_01Rx" && rc.LastText == "Fixed the lever step. Pull it now." && !rc.TurnEnded, $"{rc.Url} | {rc.LastText} | {rc.TurnEnded}");
+    ExileApiMcp.Dispatch.FeedbackKit.ParseTranscript(["""{"type":"system","subtype":"turn_duration","durationMs":6481}"""], rc);
+    Check("transcript: turn_duration ends the turn (fed on)", rc.TurnEnded && rc.LastText == "Fixed the lever step. Pull it now.");
+    ExileApiMcp.Dispatch.FeedbackKit.ParseTranscript(["""{"type":"user","message":{"role":"user","content":"and the next step?"}}"""], rc);
+    Check("transcript: a follow-up opens a new turn", !rc.TurnEnded);
     Check("refusal: an older bridge's bare answer is a broken link",
         ExileApiMcp.Dispatch.FeedbackKit.Refusal(JObject.Parse("""{ "game": "poe2", "query": "pubsub.events", "timestamp": "x" }"""), "pubsub.events")?.Contains("no pubsub.events") == true);
     Check("refusal: ok true and ok false (claimed) are answers, an error object is not",
@@ -419,6 +462,9 @@ Start Port    End Port
     var ns = new ExileApiMcp.Tools.FeedbackSession { Seq = 7, Status = "" };
     ExileApiMcp.Dispatch.FeedbackSessions.ApplyState(ns, st);
     Check("state: a newer dispatcher's name, url and mode are picked up, and everything passes through", ns.Name == "F8 #7: the lever" && ns.Url == "https://claude.ai/code/x" && ns.Mode == "remote-control" && ns.Extra!.ContainsKey("processStart") && ns.Extra.ContainsKey("displayName"));
+    var typed = new ExileApiMcp.Tools.FeedbackSession { Seq = 8, Status = "" };
+    ExileApiMcp.Dispatch.FeedbackSessions.ApplyState(typed, new ExileApiMcp.Tools.FeedbackHandlerState { Seq = 8, Status = "done", Name = "F8 #8: x", Url = "https://claude.ai/code/y", Mode = "remote-control" });
+    Check("state: the dispatcher's typed name, url and mode", typed.Name == "F8 #8: x" && typed.Url == "https://claude.ai/code/y" && typed.Mode == "remote-control");
     Check("duration: a running handler counts to now, a finished one to its end, an unstarted one has none",
         ExileApiMcp.Dispatch.FeedbackSessions.Duration(fsNow.AddSeconds(-90), null, "running", fsNow) == 90
         && ExileApiMcp.Dispatch.FeedbackSessions.Duration(fsNow.AddSeconds(-90), fsNow.AddSeconds(-30), "done", fsNow) == 60
