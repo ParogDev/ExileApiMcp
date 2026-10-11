@@ -6,11 +6,11 @@
 import type { Toast } from "../sync";
 import { errorText, isUnreachable, type Host, type ListenState, type ToolResult } from "./host";
 import type {
-  BridgeEntry, Catalog, CatalogTool, Game, LayerMapResult, LayersResult, ObserveEvent, ObserveEventsResult, ObserveStatus,
+  BridgeEntry, Catalog, CatalogTool, FeedbackSession, FeedbackSessionsResult, Game, LayerMapResult, LayersResult, ObserveEvent, ObserveEventsResult, ObserveStatus,
   PerfSnapshot, RouteError, RouteState, SeriesResult, SettingChangeResult, SettingNode, SettingsResult, TimelineResult,
 } from "./types";
 
-export type Page = "overview" | "tools" | "settings" | "observer" | "route" | "perf" | "memory" | "explorer" | "stats";
+export type Page = "overview" | "tools" | "settings" | "observer" | "route" | "f8" | "perf" | "memory" | "explorer" | "stats";
 export interface Route { page: Page; id?: string; sub?: string }
 
 export const PAGES: { page: Page; label: string; standaloneOnly?: boolean }[] = [
@@ -19,6 +19,7 @@ export const PAGES: { page: Page; label: string; standaloneOnly?: boolean }[] = 
   { page: "settings", label: "Settings" },
   { page: "observer", label: "Observer" },
   { page: "route", label: "Route" },
+  { page: "f8", label: "F8 sessions" },
   { page: "perf", label: "Performance", standaloneOnly: true },
   { page: "memory", label: "Memory", standaloneOnly: true },
   { page: "explorer", label: "Explorer", standaloneOnly: true },
@@ -100,9 +101,25 @@ export interface RouteNavState {
   reads: number;
 }
 
+/** The F8 sessions page: feedback_sessions, pushed over exile://feedback/sessions standalone, polled every 3 s inside a host. */
+export interface F8State {
+  result?: FeedbackSessionsResult;
+  at?: number;
+  ms?: number;
+  loading: boolean;
+  error?: string;
+  /** Following on (the page is open and Live is on). */
+  live: boolean;
+  /** How updates arrive while live. */
+  via: "push" | "poll" | "off";
+  /** The selected press's brief and stderr (feedback_sessions seq=), keyed by seq. */
+  detail?: { seq: number; loading: boolean; brief?: string | null; stderr?: string | null; error?: string };
+}
+
 export interface Snapshot {
   route: Route;
   nav: RouteNavState;
+  f8: F8State;
   catalog?: Catalog;
   catalogError?: string;
   catalogAt?: number;
@@ -137,10 +154,14 @@ const EMPTY_TIMELINE: TimelineState = { journal: {} };
 /** route_state every second while the Route page is visible; 5 s between retries while it fails. */
 export const ROUTE_POLL_MS = 1000;
 const ROUTE_RETRY_MS = 5000;
+/** feedback_sessions every 3 s while the F8 page is visible and the host can't push; 10 s between retries while it fails. */
+export const F8_POLL_MS = 3000;
+const F8_RETRY_MS = 10_000;
+export const F8_URI = "exile://feedback/sessions";
 
 export class ControlStore {
   private snap: Snapshot = {
-    route: { page: "overview" }, nav: { loading: false, live: false, reads: 0 }, loadingCatalog: false, games: [],
+    route: { page: "overview" }, nav: { loading: false, live: false, reads: 0 }, f8: { loading: false, live: false, via: "off" }, loadingCatalog: false, games: [],
     health: { watching: false, loading: false, via: "off", history: [] },
     observer: { events: [], seq: 0, busy: false },
     timeline: EMPTY_TIMELINE,
@@ -158,6 +179,8 @@ export class ControlStore {
   private gamesTimer?: ReturnType<typeof setTimeout>;
   private navTimer?: ReturnType<typeof setTimeout>;
   private navGen = 0;
+  private f8Timer?: ReturnType<typeof setTimeout>;
+  private f8Gen = 0;
 
   constructor(public readonly host: Host) {}
 
@@ -182,6 +205,7 @@ export class ControlStore {
     void this.pollEvents();
     // The Route page mounts (and switches its poll on) before the shell's effect starts the store: resume it here.
     if (this.snap.nav.live) void this.pollRoute(++this.navGen);
+    if (this.snap.f8.live) this.startF8(++this.f8Gen);
   }
 
   stop() {
@@ -191,6 +215,7 @@ export class ControlStore {
     clearTimeout(this.eventsTimer);
     clearTimeout(this.gamesTimer);
     this.setRouteLive(false);
+    this.setF8Live(false);
     this.unlisten?.();
     this.unlisten = undefined;
     for (const r of this.snap.runs) r.abort?.abort();
@@ -209,7 +234,7 @@ export class ControlStore {
 
   /** Standalone: the route from the hash (#/tools/observe_layers), after the token was taken out. */
   routeFromHash() {
-    const m = /^#\/([a-z]+)(?:\/([^/]+))?(?:\/([^/]+))?/.exec(location.hash);
+    const m = /^#\/([a-z0-9]+)(?:\/([^/]+))?(?:\/([^/]+))?/.exec(location.hash);
     if (!m) return;
     const page = PAGES.find((p) => p.page === m[1])?.page;
     if (page) this.set({ route: { page, id: m[2] ? decodeURIComponent(m[2]) : undefined, sub: m[3] ? decodeURIComponent(m[3]) : undefined } });
@@ -316,6 +341,75 @@ export class ControlStore {
     this.navTimer = setTimeout(() => void this.pollRoute(gen), wait);
   }
 
+  // ── F8 sessions (the feedback dispatcher's presses) ──────────────
+
+  /** Follow feedback_sessions while on: push over exile://feedback/sessions where the host can listen (the server
+   *  watches the dispatcher's files), else a 3 s poll while visible. The F8 page mounts with it on, unmounts with it off. */
+  setF8Live(on: boolean) {
+    if (on === this.snap.f8.live) return;
+    this.f8Gen++;
+    clearTimeout(this.f8Timer);
+    this.set({ f8: { ...this.snap.f8, live: on, via: on ? (this.host.listen ? "push" : "poll") : "off" } });
+    if (this.host.listen) this.resubscribe();
+    if (on) this.startF8(this.f8Gen);
+  }
+
+  private startF8(gen: number) {
+    if (this.host.listen) { void this.refreshF8(); return; }   // then the subscription re-reads on every change
+    void this.pollF8(gen);
+  }
+
+  /** One read now (what the poll and the push do too). seq: also that press's brief and stderr, into `detail`. */
+  async refreshF8(): Promise<void> {
+    if (this.snap.catalog && !this.hasTool("feedback_sessions")) return;
+    const gen = this.f8Gen;
+    this.set({ f8: { ...this.snap.f8, loading: true } });
+    const t0 = Date.now();
+    try {
+      const r = await this.call("feedback_sessions", { limit: 100 }, { quiet: true });
+      if (gen !== this.f8Gen) return;
+      if (r.isError) throw new Error(r.text || "feedback_sessions failed");
+      this.applyF8(r.data as FeedbackSessionsResult, r.ms ?? Date.now() - t0);
+    } catch (e) {
+      if (gen !== this.f8Gen) return;
+      this.set({ f8: { ...this.snap.f8, loading: false, error: errorText(e) } });
+    }
+  }
+
+  private applyF8(result: FeedbackSessionsResult | undefined, ms?: number) {
+    if (!result || !Array.isArray(result.sessions) || !result.dispatcher) throw new Error("feedback_sessions returned no sessions");
+    this.set({ f8: { ...this.snap.f8, result, at: Date.now(), ms, loading: false, error: undefined } });
+  }
+
+  private async pollF8(gen: number) {
+    clearTimeout(this.f8Timer);
+    if (gen !== this.f8Gen || !this.snap.f8.live || !this.running) return;
+    if (!document.hidden && this.snap.catalog) await this.refreshF8();
+    if (gen !== this.f8Gen || !this.snap.f8.live || !this.running) return;
+    this.f8Timer = setTimeout(() => void this.pollF8(gen), this.snap.f8.error ? F8_RETRY_MS : F8_POLL_MS);
+  }
+
+  /** The press shown in the detail pane (#/f8/<seq>); reads its brief and stderr once. */
+  selectF8(seq: number | undefined) {
+    this.go("f8", seq === undefined ? undefined : String(seq));
+    if (seq === undefined || this.snap.f8.detail?.seq === seq) return;
+    void this.loadF8Detail(seq);
+  }
+
+  async loadF8Detail(seq: number) {
+    this.set({ f8: { ...this.snap.f8, detail: { seq, loading: true } } });
+    try {
+      const r = await this.call("feedback_sessions", { seq, merge: false }, { quiet: true });
+      if (this.snap.f8.detail?.seq !== seq) return;
+      if (r.isError) throw new Error(r.text || "feedback_sessions failed");
+      const s = (r.data as FeedbackSessionsResult | undefined)?.sessions?.[0] as FeedbackSession | undefined;
+      this.set({ f8: { ...this.snap.f8, detail: { seq, loading: false, brief: s?.brief ?? null, stderr: s?.stderr ?? null } } });
+    } catch (e) {
+      if (this.snap.f8.detail?.seq !== seq) return;
+      this.set({ f8: { ...this.snap.f8, detail: { seq, loading: false, error: errorText(e) } } });
+    }
+  }
+
   /** Does the server offer this tool? (observe_series may not exist yet on an older server.) */
   hasTool(name: string): boolean { return !!this.snap.catalog?.tools.some((t) => t.name === name); }
 
@@ -331,20 +425,27 @@ export class ControlStore {
   private resubscribe() {
     if (!this.host.listen || !this.running) return;
     const g = this.snap.game;
-    const uris = g ? [`exile://observe/${g}/events`, `exile://observe/${g}/layers`, ...(this.snap.health.watching ? [`exile://perf/${g}/report`] : [])] : [];
+    const uris = [
+      ...(g ? [`exile://observe/${g}/events`, `exile://observe/${g}/layers`, ...(this.snap.health.watching ? [`exile://perf/${g}/report`] : [])] : []),
+      ...(this.snap.f8.live ? [F8_URI] : []),
+    ];
     if (uris.join() === this.subscribed.join()) return;
     this.unlisten?.();
     this.subscribed = uris;
     if (!uris.length) { this.set({ listen: "off" }); return; }
     this.unlisten = this.host.listen(uris, (uri) => void this.onUpdated(uri), (s) => this.set({ listen: s }));
     // What is there now: a subscription only says when something changes.
-    for (const u of uris) if (!u.includes("/perf/")) void this.onUpdated(u);
+    for (const u of uris) if (!u.includes("/perf/") && u !== F8_URI) void this.onUpdated(u);
   }
 
   private async onUpdated(uri: string) {
     if (!this.host.readResource) return;
     try {
-      if (uri.endsWith("/events")) {
+      if (uri === F8_URI) {
+        const t0 = Date.now();
+        const { json } = await this.host.readResource(uri);
+        if (this.snap.f8.live) this.applyF8(json as FeedbackSessionsResult, Date.now() - t0);
+      } else if (uri.endsWith("/events")) {
         // The resource carries the newest 100; the first time, fill the ring from the tool (up to 1000, the bridge's own).
         if (this.snap.observer.seq === 0) await this.catchUpEvents();
         const { json } = await this.host.readResource(uri);

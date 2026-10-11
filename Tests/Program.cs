@@ -387,5 +387,97 @@ Start Port    End Port
     Check("clip: cuts at a sentence end", clipped == "First sentence is here.", clipped);
 }
 
+// ── F8 sessions: the brief's header, the CLI's result, the transcript path, the dispatcher's liveness, the bridge merge (Dispatch/FeedbackSessions.cs) ──
+{
+    var fsNow = new DateTimeOffset(2026, 10, 11, 11, 0, 0, TimeSpan.Zero);
+    var s = new ExileApiMcp.Tools.FeedbackSession { Seq = 21, Status = "done", StartedAt = new DateTimeOffset(2026, 10, 11, 10, 55, 36, TimeSpan.Zero) };
+    const string brief = "# F8 press #21 (10:50:32 UTC)\n\n- Verdict: **note** - the player wrote: \"The forgemaster is \"not\" at the right place\"\n- Area: The Molten Vault (G3_9), step index 0: Mektul, the Forgemaster (target radar:Mektul, The Forgemaster (Reforging Bench))\n- Player grid cell: [1241, 1948]\n";
+    ExileApiMcp.Dispatch.FeedbackSessions.ApplyBrief(s, brief, keepText: false);
+    Check("brief: verdict and note (quotes inside kept)", s.Verdict == "note" && s.Note == "The forgemaster is \"not\" at the right place", s.Note);
+    Check("brief: area, id, label and target (parentheses inside kept)", s.AreaName == "The Molten Vault" && s.Area == "G3_9" && s.Label == "Mektul, the Forgemaster" && s.Target == "radar:Mektul, The Forgemaster (Reforging Bench)", $"{s.AreaName}|{s.Area}|{s.Label}|{s.Target}");
+    Check("brief: the press time is dated from the handler's start", s.PressedAt == new DateTimeOffset(2026, 10, 11, 10, 50, 32, TimeSpan.Zero) && s.Brief == null, s.PressedAt?.ToString("O"));
+    var midnight = new ExileApiMcp.Tools.FeedbackSession { Seq = 5, Status = "done", StartedAt = new DateTimeOffset(2026, 10, 12, 0, 1, 0, TimeSpan.Zero) };
+    ExileApiMcp.Dispatch.FeedbackSessions.ApplyBrief(midnight, "# F8 press #5 (23:58:10 UTC)\n\n- Verdict: **works** (no note)\n- Area: X (G1_1), step index -1:  (target )\n", keepText: true);
+    Check("brief: a press before midnight taken after it keeps its day; empty label and target are null; text kept when asked", midnight.PressedAt == new DateTimeOffset(2026, 10, 11, 23, 58, 10, TimeSpan.Zero) && midnight.Verdict == "works" && midnight.Note == null && midnight.Label == null && midnight.Target == null && midnight.Brief != null, midnight.PressedAt?.ToString("O"));
+
+    var o = new ExileApiMcp.Tools.FeedbackSession { Seq = 21, Status = "done" };
+    ExileApiMcp.Dispatch.FeedbackSessions.ApplyOutput(o, "warning line\n" + """{"duration_api_ms":95536,"session_id":"abc","total_cost_usd":0.9567534,"usage":{"input_tokens":40,"cache_creation_input_tokens":65938,"cache_read_input_tokens":1256547,"output_tokens":8889,"output_tokens_details":{"thinking_tokens":3956}},"modelUsage":{"claude-opus-5-5":{}},"num_turns":26,"result":"Done.","type":"result"}""");
+    Check("output: cost, turns, model, api time, usage", o.CostUsd == 0.9568 && o.Turns == 26 && o.Model == "claude-opus-5-5" && o.ApiMs == 95536 && o.Usage?.CacheReadTokens == 1256547 && o.Usage?.ThinkingTokens == 3956 && o.SessionId == "abc" && o.Result == "Done.");
+    var kept = new ExileApiMcp.Tools.FeedbackSession { Seq = 1, Status = "done", Result = "from state", SessionId = "state-id" };
+    ExileApiMcp.Dispatch.FeedbackSessions.ApplyOutput(kept, """{"result":"from output","session_id":"out-id"}""");
+    Check("output: state.json's result and session id win", kept.Result == "from state" && kept.SessionId == "state-id");
+    ExileApiMcp.Dispatch.FeedbackSessions.ApplyOutput(kept, "not json");
+    Check("output: garbage changes nothing", kept.Result == "from state" && kept.CostUsd == null);
+
+    var slug = ExileApiMcp.Dispatch.FeedbackSessions.ProjectSlug(@"C:\Users\Parog\Documents\Projects\Path of Hexile\.claude\worktrees\route-f8-21");
+    Check("transcript: the project slug replaces every non-alphanumeric character", slug == "C--Users-Parog-Documents-Projects-Path-of-Hexile--claude-worktrees-route-f8-21", slug);
+    var tp = ExileApiMcp.Dispatch.FeedbackSessions.TranscriptPath(@"C:\Users\Parog", @"C:\Users\Parog\Documents\Projects\Path of Hexile\.claude\worktrees\route-f8-21\", "0e49");
+    Check("transcript: under ~\\.claude\\projects\\<slug>\\<sessionId>.jsonl", tp == @"C:\Users\Parog\.claude\projects\C--Users-Parog-Documents-Projects-Path-of-Hexile--claude-worktrees-route-f8-21\0e49.jsonl", tp);
+
+    var st = new ExileApiMcp.Tools.FeedbackHandlerState { Seq = 7, Status = "running", Pid = 1, StartedAt = fsNow.AddMinutes(-2), Extra = new() { ["displayName"] = System.Text.Json.JsonSerializer.SerializeToElement("F8 #7: the lever"), ["url"] = System.Text.Json.JsonSerializer.SerializeToElement("https://claude.ai/code/x"), ["mode"] = System.Text.Json.JsonSerializer.SerializeToElement("remote-control"), ["processStart"] = System.Text.Json.JsonSerializer.SerializeToElement("2026-10-11T10:58:00Z") } };
+    var ns = new ExileApiMcp.Tools.FeedbackSession { Seq = 7, Status = "" };
+    ExileApiMcp.Dispatch.FeedbackSessions.ApplyState(ns, st);
+    Check("state: a newer dispatcher's name, url and mode are picked up, and everything passes through", ns.Name == "F8 #7: the lever" && ns.Url == "https://claude.ai/code/x" && ns.Mode == "remote-control" && ns.Extra!.ContainsKey("processStart") && ns.Extra.ContainsKey("displayName"));
+    Check("duration: a running handler counts to now, a finished one to its end, an unstarted one has none",
+        ExileApiMcp.Dispatch.FeedbackSessions.Duration(fsNow.AddSeconds(-90), null, "running", fsNow) == 90
+        && ExileApiMcp.Dispatch.FeedbackSessions.Duration(fsNow.AddSeconds(-90), fsNow.AddSeconds(-30), "done", fsNow) == 60
+        && ExileApiMcp.Dispatch.FeedbackSessions.Duration(null, null, "queued", fsNow) == null
+        && ExileApiMcp.Dispatch.FeedbackSessions.Duration(fsNow.AddSeconds(-90), null, "failed", fsNow) == null);
+
+    var live = ExileApiMcp.Dispatch.FeedbackSessions.Summarize(new ExileApiMcp.Tools.FeedbackDispatcherState { Status = "listening", UpdatedAt = fsNow.AddSeconds(-2), Waiting = [9, 3], Handlers = [new() { Seq = 8, Status = "running" }] }, fsNow);
+    Check("dispatcher: fresh file = alive, waiting sorted, the running handler named", live.Alive && live.Status == "listening" && live.Waiting.SequenceEqual([3L, 9L]) && live.Running == 8 && live.Fix == null);
+    var stale = ExileApiMcp.Dispatch.FeedbackSessions.Summarize(new ExileApiMcp.Tools.FeedbackDispatcherState { Status = "listening", UpdatedAt = fsNow.AddMinutes(-20) }, fsNow);
+    Check("dispatcher: a stale file = not running, with the fix", !stale.Alive && stale.Status == "not-running" && stale.Why!.Contains("20 min ago") && stale.Fix == ExileApiMcp.Dispatch.FeedbackSessions.NotRunningFix, stale.Why);
+    var signin = ExileApiMcp.Dispatch.FeedbackSessions.Summarize(new ExileApiMcp.Tools.FeedbackDispatcherState { Status = "broken", Why = "not logged in", UpdatedAt = fsNow, LoggedIn = false, LoginCommand = "& \"x\" auth login" }, fsNow);
+    Check("dispatcher: not signed in = broken with the sign-in command as the fix", signin.Alive && signin.Status == "broken" && signin.Fix!.Contains("auth login"));
+    Check("dispatcher: no file = never ran", ExileApiMcp.Dispatch.FeedbackSessions.Dispatcher(Path.Combine(Path.GetTempPath(), "no-such-dispatcher.json"), fsNow).Status == "never-ran");
+
+    var sessions = new List<ExileApiMcp.Tools.FeedbackSession> { new() { Seq = 21, Status = "done", Note = "from the brief", AreaName = "Brief Area" } };
+    var events = new[]
+    {
+        JObject.Parse("""{ "seq": 21, "kind": "feedback", "at": "2026-10-11T10:50:32Z", "data": { "Event": "note", "Note": "from the press", "AreaName": "The Molten Vault", "Area": "G3_9", "Label": "Mektul", "Target": "radar:Mektul" }, "claims": { "handle": { "by": "d" }, "reply": { "by": "d" } } }"""),
+        JObject.Parse("""{ "seq": 30, "kind": "feedback.reply", "at": "2026-10-11T10:54:06Z", "source": "route-dispatcher", "data": { "ref": 21, "status": "queued", "text": "Got #21" } }"""),
+        JObject.Parse("""{ "seq": 37, "kind": "feedback.reply", "at": "2026-10-11T10:55:56Z", "source": "route-f8-21", "data": { "ref": 21, "status": "working", "text": "Looking" } }"""),
+        JObject.Parse("""{ "seq": 40, "kind": "feedback", "at": "2026-10-11T10:58:00Z", "data": { "Event": "note", "Note": "queued one", "AreaName": "A" }, "claims": {} }"""),
+        JObject.Parse("""{ "seq": 41, "kind": "feedback", "at": "2026-10-11T10:59:00Z", "data": { "Event": "works", "AreaName": "A" }, "claims": {} }"""),
+        JObject.Parse("""{ "seq": 2, "kind": "feedback", "at": "2026-10-11T07:00:00Z", "data": { "Event": "note", "Note": "too old" }, "claims": {} }"""),
+        JObject.Parse("""{ "seq": 42, "kind": "feedback", "at": "2026-10-11T10:59:30Z", "data": { "Event": "note", "Note": "someone else answered" }, "claims": { "reply": { "by": "agent" } } }"""),
+        JObject.Parse("""{ "seq": 43, "kind": "feedback.reply", "at": "2026-10-11T10:59:40Z", "source": "route-dispatcher", "data": { "ref": 40, "status": "failed", "text": "Claude could not take #40: not logged in" } }"""),
+    };
+    var (presses, replies) = ExileApiMcp.Dispatch.FeedbackSessions.Merge(sessions, events, [40], fsNow);
+    var s21 = sessions.First(x => x.Seq == 21);
+    Check("merge: the press's own note, area and time win over the brief's", s21.Note == "from the press" && s21.AreaName == "The Molten Vault" && s21.Area == "G3_9" && s21.Label == "Mektul" && s21.PressedAt == new DateTimeOffset(2026, 10, 11, 10, 50, 32, TimeSpan.Zero));
+    Check("merge: replies attached in order with their source", s21.Replies.Count == 2 && s21.Replies[0].Status == "queued" && s21.Replies[1].Source == "route-f8-21");
+    Check("merge: a waiting press and an 'it works' press become sessions; too old and answered elsewhere do not; newest first",
+        sessions.Select(x => x.Seq).SequenceEqual([41L, 40L, 21L]) && sessions[1].Status == "queued" && sessions[0].Status == "works", string.Join(",", sessions.Select(x => $"{x.Seq}:{x.Status}")));
+    Check("merge: a queued press that the dispatcher failed to start shows that failure", sessions[1].Error!.Contains("not logged in") && presses == 5 && replies == 3, sessions[1].Error);
+    ExileApiMcp.Dispatch.FeedbackSessions.AddWaiting(sessions, [99, 21]);
+    Check("waiting: unknown seqs become queued sessions, known ones are left alone", sessions.Count == 4 && sessions[0].Seq == 99 && sessions[0].Status == "queued" && sessions.Count(x => x.Seq == 21) == 1);
+
+    var tmp = Path.Combine(Path.GetTempPath(), "hexile-f8-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        Directory.CreateDirectory(Path.Combine(tmp, "handlers", "21"));
+        Directory.CreateDirectory(Path.Combine(tmp, "handlers", "notes"));   // not a press
+        File.WriteAllText(Path.Combine(tmp, "handlers", "21", "state.json"), """{"seq":21,"status":"done","pid":9004,"startedAt":"2026-10-11T10:55:36+00:00","endedAt":"2026-10-11T10:57:19+00:00","worktree":"C:\\wt\\route-f8-21","dir":"x","result":"Changed it.","sessionId":"0e49","replied":true,"processStart":"2026-10-11T10:55:36Z","name":"F8 #21: Mektul"}""");
+        File.WriteAllText(Path.Combine(tmp, "handlers", "21", "brief.md"), brief);
+        File.WriteAllText(Path.Combine(tmp, "handlers", "21", "output.json"), """{"total_cost_usd":0.5,"num_turns":3,"session_id":"0e49","result":"Changed it."}""");
+        File.WriteAllText(Path.Combine(tmp, "handlers", "21", "stderr.log"), "");
+        var dispFile = Path.Combine(tmp, "handlers", "dispatcher.json");
+        File.WriteAllText(dispFile, """{"status":"listening","updatedAt":"2026-10-11T10:59:59+00:00","waiting":[],"handlers":[]}""");
+        var folders = ExileApiMcp.Dispatch.FeedbackSessions.FromFolders(Path.Combine(tmp, "handlers"), tmp, fsNow, withFiles: true);
+        Check("folders: one session per numbered folder, from state + brief + output, files when asked", folders.Count == 1 && folders[0].Seq == 21 && folders[0].Name == "F8 #21: Mektul" && folders[0].Note!.StartsWith("The forgemaster") && folders[0].CostUsd == 0.5 && folders[0].Brief != null && folders[0].Stderr == null && folders[0].DurationSec == 103 && folders[0].WorktreeExists == false && folders[0].TranscriptExists == false && folders[0].TranscriptPath!.EndsWith(@"C--wt-route-f8-21\0e49.jsonl"), folders.Count > 0 ? $"{folders[0].Name}|{folders[0].DurationSec}|{folders[0].TranscriptPath}" : "none");
+        var fp1 = ExileApiMcp.Bridge.FeedbackHub.Fingerprint(Path.Combine(tmp, "handlers"), dispFile);
+        File.WriteAllText(dispFile, """{"status":"listening","updatedAt":"2026-10-11T11:00:01+00:00","cursor":5,"waiting":[],"handlers":[]}""");
+        var fp2 = ExileApiMcp.Bridge.FeedbackHub.Fingerprint(Path.Combine(tmp, "handlers"), dispFile);
+        File.WriteAllText(dispFile, """{"status":"listening","updatedAt":"2026-10-11T11:00:02+00:00","cursor":6,"waiting":[30],"handlers":[]}""");
+        var fp3 = ExileApiMcp.Bridge.FeedbackHub.Fingerprint(Path.Combine(tmp, "handlers"), dispFile);
+        File.AppendAllText(Path.Combine(tmp, "handlers", "21", "stderr.log"), "x");
+        var fp4 = ExileApiMcp.Bridge.FeedbackHub.Fingerprint(Path.Combine(tmp, "handlers"), dispFile);
+        Check("fingerprint: the dispatcher's once-a-second fields don't change it; a waiting press and a handler's output do", fp1 == fp2 && fp2 != fp3 && fp3 != fp4);
+    }
+    finally { try { Directory.Delete(tmp, true); } catch { } }
+}
+
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures;
