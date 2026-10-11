@@ -375,13 +375,15 @@ Start Port    End Port
     Check("bg: background, Remote Control named, own worktree, prompt last",
         bgArgs[0] == "--bg" && bgArgs[1] == "--remote-control" && bgArgs[2] == "F8 #42: x" && string.Join(" ", bgArgs).Contains("--worktree route-f8-42")
         && bgArgs.Contains("--strict-mcp-config") && !bgArgs.Contains("-p") && bgArgs[^1] == "Handle it.", string.Join(" | ", bgArgs));
-    var slimArgs = ExileApiMcp.Dispatch.FeedbackKit.SlimArguments(@"C:\h\42\settings.json", @"C:\repo\Plugins\Whats A Route\docs\feedback-agent.md", true);
-    var slimBg = ExileApiMcp.Dispatch.FeedbackKit.BackgroundArguments(42, "F8 #42: x", @"C:\h\42\mcp.json", [@"C:\live"], "Handle it.", slimArgs);
+    var slimArgs = ExileApiMcp.Dispatch.FeedbackKit.SlimArguments(@"C:\h\42\settings.json", @"C:\repo\Plugins\Whats A Route\docs\feedback-agent.md", "# Brief\n\"quoted\"", asFile: true);
+    var slimText = ExileApiMcp.Dispatch.FeedbackKit.SlimArguments(@"C:\h\42\settings.json", @"C:\b.md", "# Brief\n\"quoted\"", asFile: false);
+    var slimBg = ExileApiMcp.Dispatch.FeedbackKit.BackgroundArguments(42, "F8 #42: x", @"C:\h\42\mcp.json", [@"C:\live"], "Handle it.", slimText);
     Check("slim: project settings only, no CLAUDE.md or memory, route-fix tools with ToolSearch (MCP stays deferred), brief as system prompt",
         slimArgs.SequenceEqual(["--tools", "Read,Edit,Write,Bash,Grep,Glob,ToolSearch,Skill", "--setting-sources", "project", "--settings", @"C:\h\42\settings.json",
             "--append-system-prompt-file", @"C:\repo\Plugins\Whats A Route\docs\feedback-agent.md"])
-        && ExileApiMcp.Dispatch.FeedbackKit.SlimSettingsJson().Contains("\"claudeMdExcludes\":[\"**/CLAUDE.md\"]") && ExileApiMcp.Dispatch.FeedbackKit.SlimSettingsJson().Contains("\"autoMemoryEnabled\":false")
-        && !ExileApiMcp.Dispatch.FeedbackKit.SlimArguments("s", "b", false).Contains("--append-system-prompt-file"), string.Join(" | ", slimArgs));
+        && slimText[^2] == "--append-system-prompt" && slimText[^1] == "# Brief\n\"quoted\""
+        && ExileApiMcp.Dispatch.FeedbackKit.SlimSettingsJson() == """{"claudeMdExcludes":["**/CLAUDE.md"],"autoMemoryEnabled":false}"""
+        && !ExileApiMcp.Dispatch.FeedbackKit.SlimArguments("s", "b", null, true).Any(x => x.StartsWith("--append")), string.Join(" | ", slimArgs));
     Check("slim bg: the prompt still follows a single-value option",
         slimBg[^1] == "Handle it." && slimBg[^2] == "F8 #42: x" && slimBg[^3] == "--name" && slimBg.Contains("--tools"), string.Join(" | ", slimBg));
     var slimCmd = ExileApiMcp.Dispatch.FeedbackKit.CmdArguments(@"C:\x\claude.exe", 42, @"C:\h\42", @"C:\h\42\mcp.json", [@"C:\live"], slimArgs);

@@ -155,25 +155,28 @@ public static class FeedbackKit
     /// CLI loads every MCP schema up front (measured: 78k tokens instead of 16k).</summary>
     public const string HandlerTools = "Read,Edit,Write,Bash,Grep,Glob,ToolSearch,Skill";
 
-    /// <summary>The settings a handler starts with: no CLAUDE.md (the workspace one is ~10k tokens; the standing brief
-    /// replaces it) and no auto-memory.</summary>
-    public static string SlimSettingsJson() => JsonSerializer.Serialize(new Dictionary<string, object>
+    /// <summary>The settings a handler starts with (the CLI's settings.json keys): no CLAUDE.md (the workspace one is ~10k
+    /// tokens; the standing brief replaces it) and no auto-memory.</summary>
+    public sealed class HandlerSettings
     {
-        ["claudeMdExcludes"] = new[] { "**/CLAUDE.md" },
-        ["autoMemoryEnabled"] = false,
-    });
+        [Newtonsoft.Json.JsonProperty("claudeMdExcludes")] public string[] ClaudeMdExcludes { get; set; } = ["**/CLAUDE.md"];
+        [Newtonsoft.Json.JsonProperty("autoMemoryEnabled")] public bool AutoMemoryEnabled { get; set; }
+    }
+
+    public static string SlimSettingsJson() => Newtonsoft.Json.JsonConvert.SerializeObject(new HandlerSettings());
 
     /// <summary>
     /// The arguments that start a handler slim (measured on CLI 2.1.295, first turn: 48k tokens by default, 18k with
     /// these): only the project's settings (its hooks and permissions: the main-checkout guard and the review gate stay;
     /// no user plugins), the settings above, the tools above, and the standing brief (Whats A Route's
-    /// docs/feedback-agent.md) appended to the system prompt. Variadic --tools comes first, so nothing after it is taken as
-    /// a tool name. The brief is left out when its file is missing (the handler's prompt still names it).
+    /// docs/feedback-agent.md) appended to the system prompt: as text (briefText; the background session, whose argument
+    /// list is passed as is) or as a file (the headless run, whose cmd.exe line can't carry the text). Variadic --tools
+    /// comes first, so nothing after it is taken as a tool name. No brief when its file is missing (the prompt names it).
     /// </summary>
-    public static IReadOnlyList<string> SlimArguments(string settingsFile, string standingBrief, bool briefExists)
+    public static IReadOnlyList<string> SlimArguments(string settingsFile, string standingBrief, string? briefText, bool asFile)
     {
         var a = new List<string> { "--tools", HandlerTools, "--setting-sources", "project", "--settings", settingsFile };
-        if (briefExists) a.AddRange(["--append-system-prompt-file", standingBrief]);
+        if (briefText != null) a.AddRange(asFile ? ["--append-system-prompt-file", standingBrief] : ["--append-system-prompt", briefText]);
         return a;
     }
 
@@ -260,7 +263,7 @@ public static class FeedbackKit
 
     /// <summary>The card line saying where the handler runs: the session's name in Claude, or that it runs headless and why.</summary>
     public static string WhereText(long seq, string mode, string? name, string? fallbackWhy) => mode == "remote-control"
-        ? $"Claude is on #{seq}: watch or join it as \"{name}\" in Claude (Remote Control: claude.ai/code or the Claude app)."
+        ? $"Claude is on #{seq}: watch it as \"{name}\" in Claude (Remote Control: claude.ai/code or the Claude app)."
         : $"Claude is on #{seq} (headless run: {Clip(fallbackWhy, 160)}).";
 
     public static string Prompt(long seq, string briefPath) =>

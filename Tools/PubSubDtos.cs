@@ -107,7 +107,7 @@ public sealed class FeedbackHandlerState
     public string? Url { get; set; }
     /// <summary>headless: why Remote Control was not used.</summary>
     public string? FallbackReason { get; set; }
-    /// <summary>remote-control: when the finished session is stopped (pushed back while the user talks to it).</summary>
+    /// <summary>remote-control: when a stop that didn't work is tried again (the session is stopped as soon as its answer is on the card).</summary>
     public DateTimeOffset? StopAt { get; set; }
     /// <summary>remote-control: the session was stopped (its transcript stays openable).</summary>
     public bool Stopped { get; set; }

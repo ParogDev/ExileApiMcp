@@ -194,7 +194,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             File.WriteAllText(mcpConfig, McpConfigJson(seq));
             var settings = Path.Combine(dir, "settings.json");
             File.WriteAllText(settings, FeedbackKit.SlimSettingsJson());
-            var slim = FeedbackKit.SlimArguments(settings, standingBrief, File.Exists(standingBrief));
+            var briefText = File.Exists(standingBrief) ? File.ReadAllText(standingBrief) : null;
+            var slim = FeedbackKit.SlimArguments(settings, standingBrief, briefText, asFile: false);
             foreach (var f in new[] { "output.json", "stderr.log" }) File.Delete(Path.Combine(dir, f));
 
             // Visible first: a background session with Remote Control, which the user sees (and can join) in Claude.
@@ -215,7 +216,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             }
             if (state.Mode == null)
             {
-                var (pid, startTime) = await StartDetachedAsync(FeedbackKit.CmdArguments(_env.Exe!, seq, dir, mcpConfig, [LiveDir, repo], slim), repo, seq, ct);
+                var (pid, startTime) = await StartDetachedAsync(FeedbackKit.CmdArguments(_env.Exe!, seq, dir, mcpConfig, [LiveDir, repo],
+                    FeedbackKit.SlimArguments(settings, standingBrief, briefText, asFile: true)), repo, seq, ct);
                 state.Pid = pid;
                 state.Extra = new() { ["processStart"] = JsonSerializer.SerializeToElement(startTime) };
                 state.Mode = "headless";
@@ -542,9 +544,10 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         else return;   // still working
 
         var failed = error != null;
+        h.StopAt = DateTimeOffset.UtcNow + StopRetry;   // ReapAsync stops it then if the stop below doesn't
+        await FinishAsync(h, t.LastText, failed, error, ct);   // the answer first: the player doesn't wait for the stop
         await StopSessionAsync(h, ct);
-        h.StopAt = DateTimeOffset.UtcNow + (h.Stopped ? TimeSpan.Zero : StopRetry);   // not stopped: ReapAsync tries again
-        await FinishAsync(h, t.LastText, failed, error, ct);
+        SaveHandler(h);
         if (h.Stopped) RemoveWorktree(h);
     }
 
@@ -659,7 +662,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         SaveHandler(h);
     }
 
-    /// <summary>The handler's worktree, when it holds nothing: no changes, no commits beyond origin/main. Otherwise kept.</summary>
+    /// <summary>The handler's worktree, removed when it holds no unmerged work: no uncommitted changes, no submodule commits
+    /// that are on no remote (the submodules' git data lives in the worktree and goes with it), and no commits whose
+    /// changes origin/main doesn't hold. Otherwise kept for a person to look at.</summary>
     private void RemoveWorktree(FeedbackHandlerState h)
     {
         var wt = h.Worktree;
@@ -667,12 +672,19 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         if (wt == null || repo == null || !Directory.Exists(wt)) return;
         try
         {
-            Git(repo, "fetch -q origin main");   // a merge the handler just made must count as merged
             var dirty = Git(wt, "status --porcelain --ignore-submodules=none").Output.Trim();
             if (dirty.Length > 0) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (uncommitted changes)"); return; }
+            var unpushed = Git(wt, "submodule foreach --quiet --recursive \"git log --oneline --branches --not --remotes\"");
+            if (unpushed.Code != 0 || unpushed.Output.Trim().Length > 0)
+            { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (submodule commits on no remote)"); return; }
             // Unmerged work: commits whose changes origin/main doesn't hold. A squash merge leaves the branch's own commits
             // "ahead" though their content is on main: the files they touched are compared with origin/main instead.
             var ahead = Git(wt, "log --oneline origin/main..HEAD").Output.Trim().Length > 0;
+            if (ahead)
+            {
+                Git(repo, "fetch -q origin main");   // a merge the handler just made must count as merged
+                ahead = Git(wt, "log --oneline origin/main..HEAD").Output.Trim().Length > 0;
+            }
             var merged = !ahead;
             if (ahead && Git(wt, "merge-base origin/main HEAD") is { Code: 0 } mb)
             {
@@ -694,6 +706,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             if (rm.Code != 0) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: git worktree remove refused: {rm.Output.Trim()}"); return; }
             Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} removed");
             if (branch.Length > 0 && branch != "HEAD") Git(repo, $"branch -D \"{branch}\"");   // its work is on origin/main (checked above)
+            // The branch the CLI made for the worktree, when the handler switched away from it: only if it holds nothing.
+            var cliBranch = "worktree-" + FeedbackKit.Label(h.Seq);
+            if (cliBranch != branch && Git(repo, $"merge-base --is-ancestor \"{cliBranch}\" origin/main").Code == 0) Git(repo, $"branch -D \"{cliBranch}\"");
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: removing worktree: {ex.Message}"); }
     }
