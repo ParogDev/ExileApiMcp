@@ -128,7 +128,7 @@ public static class PubSubTools
                    + string.Join("\n", s.Handlers.Select(h => $"#{h.Seq} {h.Status}{(h.Error != null ? $": {h.Error}" : h.Result != null ? $": {FeedbackKit.Clip(h.Result, 160)}" : "")} ({h.Dir})"
                        + (h.Mode == "remote-control"
                            ? $"\n    visible session \"{h.Name}\" (background {h.BackgroundId}, session {h.SessionId ?? "?"}){(h.Url != null ? $" {h.Url}" : " (no Remote Control URL yet)")}"
-                             + (h.Stopped ? ", stopped" : h.StopAt is { } at ? $", open for a follow-up until {at.ToLocalTime():HH:mm}" : "")
+                             + (h.Stopped ? ", stopped" : h.StopAt != null ? ", stop pending (retried every minute)" : "")
                            : h.Mode == "headless" ? $"\n    headless{(h.FallbackReason != null ? $" ({h.FallbackReason})" : "")}{(h.SessionId != null ? $", session {h.SessionId}" : "")}" : "")));
         return Dto.Result(s, text);
     }
