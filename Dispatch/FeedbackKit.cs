@@ -101,7 +101,7 @@ public static class FeedbackKit
 
     /// <summary>cmd.exe arguments that run the CLI with the prompt on stdin and its JSON result and stderr in files, so the
     /// handler keeps running (and its output lands) when the server that started it is swapped for a new build.</summary>
-    public static string CmdArguments(string exe, long seq, string dir, string mcpConfig, IEnumerable<string> addDirs)
+    public static string CmdArguments(string exe, long seq, string dir, string mcpConfig, IEnumerable<string> addDirs, IEnumerable<string>? slim = null)
     {
         var sb = new StringBuilder();
         sb.Append(Q(exe)).Append(" -p --output-format json --permission-mode auto");
@@ -109,6 +109,7 @@ public static class FeedbackKit
         sb.Append(" --name ").Append(Q($"Route F8 #{seq}"));
         sb.Append(" --mcp-config ").Append(Q(mcpConfig)).Append(" --strict-mcp-config --allowedTools mcp__exileapi");
         foreach (var d in addDirs) sb.Append(" --add-dir ").Append(Q(d));
+        foreach (var a in slim ?? []) sb.Append(' ').Append(a.StartsWith("--") ? a : Q(a));
         sb.Append(" < ").Append(Q(Path.Combine(dir, "prompt.txt")));
         sb.Append(" > ").Append(Q(Path.Combine(dir, "output.json")));
         sb.Append(" 2> ").Append(Q(Path.Combine(dir, "stderr.log")));
@@ -138,12 +139,41 @@ public static class FeedbackKit
     /// service, outside this server's process tree) with Remote Control on, named, in its own worktree, the prompt as the
     /// first message. Same tools and MCP config as the headless run. The prompt follows a single-value option: after a
     /// variadic one (--add-dir, --mcp-config, --allowedTools) the parser would take it as one more value.</summary>
-    public static IReadOnlyList<string> BackgroundArguments(long seq, string name, string mcpConfig, IEnumerable<string> addDirs, string prompt)
+    public static IReadOnlyList<string> BackgroundArguments(long seq, string name, string mcpConfig, IEnumerable<string> addDirs, string prompt,
+        IEnumerable<string>? slim = null)
     {
         var a = new List<string> { "--bg", "--remote-control", name, "--worktree", Label(seq),
             "--mcp-config", mcpConfig, "--strict-mcp-config", "--allowedTools", "mcp__exileapi" };
         foreach (var d in addDirs) { a.Add("--add-dir"); a.Add(d); }
+        a.AddRange(slim ?? []);
         a.AddRange(["--permission-mode", "auto", "--name", name, prompt]);
+        return a;
+    }
+
+    /// <summary>The tools a handler gets: what a route fix and its PR flow need (files, shell for git/gh/scripts, the
+    /// code-review skill), plus ToolSearch, which keeps the ~125 exileapi MCP tools deferred (names only). Without it the
+    /// CLI loads every MCP schema up front (measured: 78k tokens instead of 16k).</summary>
+    public const string HandlerTools = "Read,Edit,Write,Bash,Grep,Glob,ToolSearch,Skill";
+
+    /// <summary>The settings a handler starts with: no CLAUDE.md (the workspace one is ~10k tokens; the standing brief
+    /// replaces it) and no auto-memory.</summary>
+    public static string SlimSettingsJson() => JsonSerializer.Serialize(new Dictionary<string, object>
+    {
+        ["claudeMdExcludes"] = new[] { "**/CLAUDE.md" },
+        ["autoMemoryEnabled"] = false,
+    });
+
+    /// <summary>
+    /// The arguments that start a handler slim (measured on CLI 2.1.295, first turn: 48k tokens by default, 18k with
+    /// these): only the project's settings (its hooks and permissions: the main-checkout guard and the review gate stay;
+    /// no user plugins), the settings above, the tools above, and the standing brief (Whats A Route's
+    /// docs/feedback-agent.md) appended to the system prompt. Variadic --tools comes first, so nothing after it is taken as
+    /// a tool name. The brief is left out when its file is missing (the handler's prompt still names it).
+    /// </summary>
+    public static IReadOnlyList<string> SlimArguments(string settingsFile, string standingBrief, bool briefExists)
+    {
+        var a = new List<string> { "--tools", HandlerTools, "--setting-sources", "project", "--settings", settingsFile };
+        if (briefExists) a.AddRange(["--append-system-prompt-file", standingBrief]);
         return a;
     }
 
@@ -235,8 +265,9 @@ public static class FeedbackKit
 
     public static string Prompt(long seq, string briefPath) =>
         $"You handle one F8 press (#{seq}) from the player, who is playing Path of Exile 2 with the Whats A Route plugin. " +
-        $"Read {briefPath} now: it has the press, the route state, the recent trace and the standing brief to follow. " +
-        "Keep your context small and end when the press is handled. Your final message is shown to the player above the route " +
+        $"Read {briefPath} now: it has the press, the route state and the recent trace. Follow the standing brief (in your " +
+        "system prompt). Keep your context small and end when the press is handled: nobody follows up in this session. Your " +
+        "final message is shown to the player above the route " +
         "card: one or two short plain sentences that say what changed and what to do now.";
 
     /// <summary>The handler's brief: the press, what the route was doing, the trace since the previous press, the last
@@ -255,7 +286,7 @@ public static class FeedbackKit
         sb.AppendLine($"- Bridge event #{seq}; feedback.jsonl line #{d["Seq"]}.");
         sb.AppendLine();
         sb.AppendLine("## First");
-        sb.AppendLine($"1. Read the standing brief: `{standingBrief}` (the user's rules, the fix flow, how to reply).");
+        sb.AppendLine($"1. The standing brief (the user's rules, the fix flow, how to reply) is in your system prompt; read `{standingBrief}` only if it is not.");
         sb.AppendLine($"2. Show the player you are on it when it takes more than a minute: MCP `feedback_reply seq={seq} status=working text=\"...\"`.");
         sb.AppendLine($"3. Live route fixes: `{Path.Combine(liveDir, "route.live.json")}` (reloaded within 0.5 s). Another handler or agent may edit it too: read it right before you write, change only your entries.");
         sb.AppendLine("4. End with one or two plain sentences for the player (shown above the route card); they say what to do now.");

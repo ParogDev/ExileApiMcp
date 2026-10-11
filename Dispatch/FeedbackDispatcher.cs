@@ -20,14 +20,14 @@ namespace ExileApiMcp.Dispatch;
 /// this worker's process tree (a swap or the supervisor's stop doesn't kill it), in worktree route-f8-&lt;seq&gt;:
 /// - visible first: `claude --bg --remote-control "F8 #&lt;seq&gt;: &lt;note&gt; (&lt;area&gt;)"`, a background session the user sees
 ///   and can join in claude.ai/code and the Claude app (Remote Control). Its state comes from `claude agents --json`, its
-///   URL and last answer from its transcript. When its turn is done, the answer goes to the card; the session stays open
-///   for a few minutes for a follow-up (Linger), then is stopped (its transcript stays);
+///   URL and last answer from its transcript. Fire and forget: when its turn is done, the answer goes to the card and the
+///   session is stopped (its transcript and Remote Control history stay);
 /// - headless `claude -p` when the background session can't start (the card says which one runs).
-/// The final message goes to the card once (pubsub.claim stage reply first, and not at all when the handler already said
-/// done), and the worktree is removed when it holds nothing.
+/// Both start slim (FeedbackKit.SlimArguments): the standing brief as the system prompt, no CLAUDE.md or memory, only the
+/// tools a route fix needs. The final message goes to the card once (pubsub.claim stage reply first, and not at all when
+/// the handler already said done), and the worktree is removed when it holds no unmerged work.
 ///
-/// One handler at a time (they share route.live.json): later presses wait, and the card says so. A finished visible
-/// session that lingers for a follow-up doesn't hold the next press back. Every link that can break
+/// One handler at a time (they share route.live.json): later presses wait, and the card says so. Every link that can break
 /// is said on the card and raised as incident feedback-dispatch:machine (CLI not found, not logged in, the session
 /// failing to start), never dropped: the press stays queued (unclaimed) and is retried every minute.
 /// State: handlers\dispatcher.json (MCP feedback_dispatcher) and handlers\&lt;seq&gt;\ (brief, output, stderr, state.json);
@@ -187,10 +187,14 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             var previous = _trace.Where(t => t["kind"]?.ToString() == FeedbackKit.PressKind && t["seq"]!.Value<long>() < seq).Select(t => (long?)t["seq"]!.Value<long>()).LastOrDefault();
             var trace = _trace.Where(t => t["kind"]?.ToString() == FeedbackKit.TraceKind && t["seq"]!.Value<long>() < seq && t["seq"]!.Value<long>() > (previous ?? 0)).TakeLast(80).ToList();
             var replies = _replies.Where(x => x["data"]?["status"]?.ToString() == "done").TakeLast(3).ToList();
-            File.WriteAllText(briefPath, FeedbackKit.Brief(press, trace, replies, Path.Combine(repo, "Plugins", "Whats A Route", "docs", "feedback-agent.md"), LiveDir, previous));
+            var standingBrief = Path.Combine(repo, "Plugins", "Whats A Route", "docs", "feedback-agent.md");
+            File.WriteAllText(briefPath, FeedbackKit.Brief(press, trace, replies, standingBrief, LiveDir, previous));
             File.WriteAllText(Path.Combine(dir, "prompt.txt"), FeedbackKit.Prompt(seq, briefPath));
             var mcpConfig = Path.Combine(dir, "mcp.json");
             File.WriteAllText(mcpConfig, McpConfigJson(seq));
+            var settings = Path.Combine(dir, "settings.json");
+            File.WriteAllText(settings, FeedbackKit.SlimSettingsJson());
+            var slim = FeedbackKit.SlimArguments(settings, standingBrief, File.Exists(standingBrief));
             foreach (var f in new[] { "output.json", "stderr.log" }) File.Delete(Path.Combine(dir, f));
 
             // Visible first: a background session with Remote Control, which the user sees (and can join) in Claude.
@@ -202,7 +206,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
                 try
                 {
                     state.BackgroundId = await StartBackgroundAsync(FeedbackKit.BackgroundArguments(seq, state.Name, mcpConfig, [LiveDir, repo],
-                        FeedbackKit.Prompt(seq, briefPath)), repo, seq, ct);
+                        FeedbackKit.Prompt(seq, briefPath), slim), repo, seq, ct);
                     state.Mode = "remote-control";
                 }
                 // Only a clear refusal falls back: when the CLI may have started the session (a timeout, an answer without
@@ -211,7 +215,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             }
             if (state.Mode == null)
             {
-                var (pid, startTime) = await StartDetachedAsync(FeedbackKit.CmdArguments(_env.Exe!, seq, dir, mcpConfig, [LiveDir, repo]), repo, seq, ct);
+                var (pid, startTime) = await StartDetachedAsync(FeedbackKit.CmdArguments(_env.Exe!, seq, dir, mcpConfig, [LiveDir, repo], slim), repo, seq, ct);
                 state.Pid = pid;
                 state.Extra = new() { ["processStart"] = JsonSerializer.SerializeToElement(startTime) };
                 state.Mode = "headless";
@@ -484,10 +488,6 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
 
     // ── Watching a visible (background, Remote Control) handler ──────
 
-    /// <summary>How long a finished visible session stays open for the user to follow up in it before it is stopped
-    /// (HEXILE_DISPATCH_LINGER_MIN; pushed back while the user talks to it).</summary>
-    private static readonly TimeSpan Linger = TimeSpan.FromMinutes(
-        double.TryParse(Environment.GetEnvironmentVariable("HEXILE_DISPATCH_LINGER_MIN"), out var m) && m >= 0 ? m : 10);
     private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(5), ListGrace = TimeSpan.FromSeconds(45), StopRetry = TimeSpan.FromMinutes(1);
     private DateTime _nextPoll = DateTime.MinValue, _nextReap = DateTime.MinValue;
     private readonly HashSet<long> _toldBlocked = new();
@@ -496,9 +496,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     /// <summary>
     /// A visible handler is an interactive session: it doesn't exit when its turn ends. `claude agents --json --all` says
     /// its state (working, blocked on a question, done with its turn) and whether its process is alive; its transcript has
-    /// the claude.ai/code URL, the last answer and whether the turn has ended. The answer goes to the card once both say the
-    /// turn is over. The session then stays open for Linger (the user can follow up in it) and is stopped by ReapAsync; the
-    /// next press doesn't wait for that.
+    /// the claude.ai/code URL, the last answer and whether the turn has ended. Fire and forget: once both say the turn is
+    /// over, the answer goes to the card and the session is stopped (`claude stop`: its transcript and Remote Control
+    /// history stay), then its worktree is removed when it holds no unmerged work.
     /// </summary>
     private async Task SuperviseBackgroundAsync(FeedbackHandlerState h, CancellationToken ct)
     {
@@ -542,15 +542,14 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         else return;   // still working
 
         var failed = error != null;
-        h.StopAt = DateTimeOffset.UtcNow + (failed ? TimeSpan.Zero : Linger);
-        if (failed) await StopSessionAsync(h, ct);
+        await StopSessionAsync(h, ct);
+        h.StopAt = DateTimeOffset.UtcNow + (h.Stopped ? TimeSpan.Zero : StopRetry);   // not stopped: ReapAsync tries again
         await FinishAsync(h, t.LastText, failed, error, ct);
         if (h.Stopped) RemoveWorktree(h);
     }
 
-    /// <summary>Finished visible sessions whose linger is over: stopped (the transcript stays), their worktree removed when
-    /// empty. A session the user is talking to (working, or blocked on a question) gets another Linger; a stop that didn't
-    /// work is tried again a minute later.</summary>
+    /// <summary>Finished visible sessions a stop didn't end (the CLI failed): stopped again a minute later (the transcript
+    /// stays), their worktree removed when it holds no unmerged work.</summary>
     private async Task ReapAsync(CancellationToken ct)
     {
         if (DateTime.UtcNow < _nextReap || !Directory.Exists(HandlersDir)) return;
@@ -563,12 +562,6 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             (string? SessionId, string? State, bool Alive)? agent;
             try { agent = await AgentAsync(h.BackgroundId, ct); }
             catch (CliException ex) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: {ex.Message}"); continue; }
-            if (agent is { Alive: true, State: "working" or "blocked" })
-            {
-                h.StopAt = DateTimeOffset.UtcNow + Linger;
-                SaveHandler(h);
-                continue;
-            }
             if (agent is { Alive: true }) await StopSessionAsync(h, ct);
             else h.Stopped = true;   // already ended (stopped by the user, or exited)
             if (!h.Stopped) h.StopAt = DateTimeOffset.UtcNow + StopRetry;
@@ -653,7 +646,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             else if (!handlerSaidDone)
             {
                 var text = FeedbackKit.Clip(result, h.Mode == "remote-control" ? 340 : 400) is { Length: > 0 } t ? t : $"Done with #{h.Seq}.";
-                if (h.Mode == "remote-control") text += $" (Session \"F8 #{h.Seq}\" in Claude.)";
+                if (h.Mode == "remote-control") text += $" (Transcript: \"F8 #{h.Seq}\" in Claude.)";
                 await ReplyAsync(h.Seq, "done", text, ct);
             }
             h.Replied = true;
@@ -674,21 +667,33 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         if (wt == null || repo == null || !Directory.Exists(wt)) return;
         try
         {
+            Git(repo, "fetch -q origin main");   // a merge the handler just made must count as merged
             var dirty = Git(wt, "status --porcelain --ignore-submodules=none").Output.Trim();
-            var ahead = Git(wt, "log --oneline origin/main..HEAD").Output.Trim();
-            if (dirty.Length > 0 || ahead.Length > 0) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (changes or commits)"); return; }
+            if (dirty.Length > 0) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (uncommitted changes)"); return; }
+            // Unmerged work: commits whose changes origin/main doesn't hold. A squash merge leaves the branch's own commits
+            // "ahead" though their content is on main: the files they touched are compared with origin/main instead.
+            var ahead = Git(wt, "log --oneline origin/main..HEAD").Output.Trim().Length > 0;
+            var merged = !ahead;
+            if (ahead && Git(wt, "merge-base origin/main HEAD") is { Code: 0 } mb)
+            {
+                var files = Git(wt, $"diff --name-only {mb.Output.Trim()} HEAD").Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                merged = files.Length == 0 || Git(wt, "diff --quiet origin/main HEAD -- " + string.Join(' ', files.Select(f => $"\"{f}\""))).Code == 0;
+            }
+            if (!merged) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (commits not on origin/main)"); return; }
             var branch = Git(wt, "rev-parse --abbrev-ref HEAD").Output.Trim();
-            var rm = Git(repo, $"worktree remove \"{wt}\"");
+            // --force: checked clean above, and git refuses a worktree with checked-out submodules without it (a handler
+            // initializes Plugins/Whats A Route). Ignored files (build output) go with it.
+            var rm = Git(repo, $"worktree remove --force \"{wt}\"");
             // The CLI locks a --worktree it creates ("claude session route-f8-<seq> (pid N)") and an ended session can
             // leave the lock behind: unlocked only when that pid no longer runs, then removed.
             if (rm.Code != 0 && FeedbackKit.StaleLockPid(rm.Output) is { } lockPid && !ProcessRuns(lockPid))
             {
                 Git(repo, $"worktree unlock \"{wt}\"");
-                rm = Git(repo, $"worktree remove \"{wt}\"");
+                rm = Git(repo, $"worktree remove --force \"{wt}\"");
             }
             if (rm.Code != 0) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: git worktree remove refused: {rm.Output.Trim()}"); return; }
-            if (branch.Length > 0 && branch != "HEAD" && Git(repo, $"merge-base --is-ancestor \"{branch}\" origin/main").Code == 0)
-                Git(repo, $"branch -D \"{branch}\"");
+            Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} removed");
+            if (branch.Length > 0 && branch != "HEAD") Git(repo, $"branch -D \"{branch}\"");   // its work is on origin/main (checked above)
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: removing worktree: {ex.Message}"); }
     }
