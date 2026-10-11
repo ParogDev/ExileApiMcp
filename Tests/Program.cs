@@ -459,6 +459,9 @@ Start Port    End Port
     var ns = new ExileApiMcp.Tools.FeedbackSession { Seq = 7, Status = "" };
     ExileApiMcp.Dispatch.FeedbackSessions.ApplyState(ns, st);
     Check("state: a newer dispatcher's name, url and mode are picked up, and everything passes through", ns.Name == "F8 #7: the lever" && ns.Url == "https://claude.ai/code/x" && ns.Mode == "remote-control" && ns.Extra!.ContainsKey("processStart") && ns.Extra.ContainsKey("displayName"));
+    var typed = new ExileApiMcp.Tools.FeedbackSession { Seq = 8, Status = "" };
+    ExileApiMcp.Dispatch.FeedbackSessions.ApplyState(typed, new ExileApiMcp.Tools.FeedbackHandlerState { Seq = 8, Status = "done", Name = "F8 #8: x", Url = "https://claude.ai/code/y", Mode = "remote-control" });
+    Check("state: the dispatcher's typed name, url and mode", typed.Name == "F8 #8: x" && typed.Url == "https://claude.ai/code/y" && typed.Mode == "remote-control");
     Check("duration: a running handler counts to now, a finished one to its end, an unstarted one has none",
         ExileApiMcp.Dispatch.FeedbackSessions.Duration(fsNow.AddSeconds(-90), null, "running", fsNow) == 90
         && ExileApiMcp.Dispatch.FeedbackSessions.Duration(fsNow.AddSeconds(-90), fsNow.AddSeconds(-30), "done", fsNow) == 60
