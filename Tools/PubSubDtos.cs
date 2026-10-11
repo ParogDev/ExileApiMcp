@@ -35,8 +35,10 @@ public sealed class PubSubClaim
 public sealed class PubSubEventsResult
 {
     public bool Ok { get; set; }
-    /// <summary>The newest sequence: pass it as since next time.</summary>
+    /// <summary>The newest sequence the bridge handed out.</summary>
     public long Seq { get; set; }
+    /// <summary>Pass this as since next time (the last event returned when the page filled up, else seq).</summary>
+    public long? Next { get; set; }
     /// <summary>The oldest event the bridge still keeps in memory.</summary>
     public long? Oldest { get; set; }
     public List<PubSubEvent> Events { get; set; } = [];

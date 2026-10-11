@@ -147,7 +147,7 @@ public static class PubSubTools
 
     private static string Summary(PubSubEventsResult r)
     {
-        if (r.Events.Count == 0) return $"No events (newest #{r.Seq}).";
+        if (r.Events.Count == 0) return $"No events (next since={r.Next ?? r.Seq}).";
         var lines = r.Events.Select(e =>
         {
             var d = e.Data is { ValueKind: JsonValueKind.Object } o ? o : default;
@@ -161,6 +161,6 @@ public static class PubSubTools
             var claims = e.Claims is { Count: > 0 } c ? $" [claimed: {string.Join(", ", c.Select(kv => $"{kv.Key} by {kv.Value.By}"))}]" : "";
             return $"#{e.Seq} {e.At:HH:mm:ss} {e.Kind}: {what}{claims}";
         });
-        return string.Join("\n", lines) + $"\n(newest #{r.Seq})";
+        return string.Join("\n", lines) + $"\n(next since={r.Next ?? r.Seq})";
     }
 }
