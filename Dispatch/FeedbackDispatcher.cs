@@ -33,6 +33,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
 
     private readonly string _game = Environment.GetEnvironmentVariable("HEXILE_DISPATCH_GAME") is { Length: > 0 } g ? g : "poe2";
     private readonly CallerIdentity _as = new("route-dispatcher", null, null);
+    /// <summary>Who claims: the claim lapses (ttl) if this server dies before the handler ends; release names the holder.</summary>
+    private static readonly string By = $"{Subscriber}@{Environment.ProcessId}";
     private long _cursor;
     private readonly Dictionary<long, JObject> _presses = new();         // unclaimed or waiting presses by seq
     private readonly HashSet<long> _toldQueued = new(), _toldFailed = new();
@@ -130,7 +132,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         if (kind != FeedbackKit.PressKind) return;
         var verdict = e["data"]?["Event"]?.ToString();
         var age = DateTimeOffset.TryParse(e["at"]?.ToString(), out var at) ? DateTimeOffset.UtcNow - at : TimeSpan.Zero;
-        if (verdict == "works" || age > PressMaxAge || e["claims"]?["handle"] != null) return;
+        if (verdict == "works" || age > PressMaxAge || e["claims"]?["reply"] != null) return;   // answered
+        if (e["claims"]?["handle"] is JObject h && h["lapsed"]?.Value<bool>() != true) return;              // a live handler has it
         _presses[seq] = e;
     }
 
@@ -143,7 +146,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         var press = _presses[seq];
         if (!await EnvironmentOkAsync(seq, ct)) return;
 
-        var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject { ["seq"] = seq, ["stage"] = "handle", ["by"] = $"{Subscriber}@{Environment.ProcessId}" }, ct);
+        var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject { ["seq"] = seq, ["stage"] = "handle", ["by"] = By, ["ttlSec"] = (HandlerMaxRun + TimeSpan.FromMinutes(10)).TotalSeconds }, ct);
         _presses.Remove(seq);
         if (c["ok"]?.Value<bool>() != true) { Console.Error.WriteLine($"[Dispatch] #{seq} not ours: {c["message"] ?? c["error"]}"); return; }
         await ReplyAsync(seq, "claimed", $"Claude is on it (#{seq}): a fresh session is reading your note.", ct);
@@ -322,7 +325,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         SaveHandler(h);
 
         // Exactly once across dispatchers: the reply stage is claimed before anything is said.
-        var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject { ["seq"] = h.Seq, ["stage"] = "reply", ["by"] = $"{Subscriber}@{Environment.ProcessId}" }, ct);
+        var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject { ["seq"] = h.Seq, ["stage"] = "reply", ["by"] = By }, ct);
         if (c["ok"]?.Value<bool>() == true)
         {
             var handlerSaidDone = _replies.Any(x => x["data"]?["ref"]?.Value<long>() == h.Seq && x["data"]?["status"]?.ToString() is "done" or "failed");
@@ -396,7 +399,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
 
     private async Task ReleaseAsync(long seq, string reason, CancellationToken ct)
     {
-        try { await bridges.CallAsync(_game, "pubsub.release", new JObject { ["seq"] = seq, ["stage"] = "handle", ["reason"] = reason }, ct); }
+        try { await bridges.CallAsync(_game, "pubsub.release", new JObject { ["seq"] = seq, ["stage"] = "handle", ["by"] = By, ["reason"] = reason }, ct); }
         catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine($"[Dispatch] release #{seq}: {ex.Message}"); }
         _nextEnvCheck = DateTime.UtcNow + RetryEvery;   // the press is unclaimed again: retried after a minute, not every second
     }
