@@ -171,6 +171,17 @@ public static class FeedbackKit
         catch (JsonException ex) { return (null, true, null, $"output.json is not the CLI's JSON result: {ex.Message}"); }
     }
 
+    /// <summary>
+    /// Why a bridge reply to a pubsub.* method is not an answer, or null when it is (an object with ok: true). A bridge build
+    /// before pub/sub answers unknown methods with a bare {game, query, timestamp}: no ok, no error.
+    /// </summary>
+    public static string? Refusal(JToken? reply, string method) => reply switch
+    {
+        JObject o when o["ok"]?.Type == JTokenType.Boolean && o["ok"]!.Value<bool>() => null,
+        JObject o when o["error"] != null && o["ok"] == null => $"{method} refused: {o["error"]}: {o["message"]}",
+        JObject o when o["ok"] != null => null,   // ok: false is an answer (claimed, not_yours...): the caller reads it
+        _ => $"this bridge build has no {method} (it answered {Clip(reply?.ToString(Newtonsoft.Json.Formatting.None), 120)}): a build before pub/sub. Update Whats An AI Bridge and restart the HUD",
+    };
     /// <summary>The card line for a failure: what broke and what fixes it.</summary>
     public static string FailText(long seq, string why, string? fix) => Clip($"Claude could not take #{seq}: {why}." + (fix != null ? $" {fix}" : ""), 400);
 }

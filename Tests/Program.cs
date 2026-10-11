@@ -340,6 +340,13 @@ Start Port    End Port
     var bad = ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("""{"type":"result","is_error":true,"result":"Not logged in","terminal_reason":"api_error"}""");
     Check("output: an error result is a failure with its reason", bad.IsError && bad.Why!.Contains("api_error") && bad.Result == "Not logged in");
     Check("output: empty is a failure", ExileApiMcp.Dispatch.FeedbackKit.ParseOutput("").IsError);
+    Check("refusal: an older bridge's bare answer is a broken link",
+        ExileApiMcp.Dispatch.FeedbackKit.Refusal(JObject.Parse("""{ "game": "poe2", "query": "pubsub.events", "timestamp": "x" }"""), "pubsub.events")?.Contains("no pubsub.events") == true);
+    Check("refusal: ok true and ok false (claimed) are answers, an error object is not",
+        ExileApiMcp.Dispatch.FeedbackKit.Refusal(JObject.Parse("""{ "ok": true }"""), "m") == null
+        && ExileApiMcp.Dispatch.FeedbackKit.Refusal(JObject.Parse("""{ "ok": false, "error": "claimed" }"""), "m") == null
+        && ExileApiMcp.Dispatch.FeedbackKit.Refusal(JObject.Parse("""{ "error": "bad_kind", "message": "x" }"""), "m")?.Contains("bad_kind") == true
+        && ExileApiMcp.Dispatch.FeedbackKit.Refusal(new JArray(), "m") != null);
     var prev = System.Globalization.CultureInfo.CurrentCulture;
     try
     {

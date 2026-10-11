@@ -131,8 +131,8 @@ public static class PubSubTools
         var p = new JObject { ["since"] = since, ["limit"] = Math.Clamp(limit, 1, 500) };
         if (kinds is { Length: > 0 }) p["kinds"] = new JArray(kinds);
         var (_, r) = await bridges.CallAsync(game, "pubsub.events", p, ct);
-        if (r["error"] != null && r["ok"] == null)
-            throw new PubSubBrokenException($"The bridge refused pubsub.events ({r["error"]}: {r["message"]}): a bridge build before pub/sub? Update Whats An AI Bridge and restart the HUD.");
+        if (FeedbackKit.Refusal(r, "pubsub.events") is { } refusal) throw new PubSubBrokenException(refusal + ".");
+
         return Dto.From<PubSubEventsResult>(r);
     }
 
@@ -141,6 +141,8 @@ public static class PubSubTools
 
     private static CallToolResult Published(JToken r)
     {
+        if (FeedbackKit.Refusal(r, "pubsub.publish") is { } refusal) throw new McpException(refusal + ".");
+
         var typed = Dto.From<PubSubPublishResult>(r);
         return Dto.Result(typed, $"Published #{typed.Seq} ({typed.Kind}); {typed.Subscribers.Count} agent listener(s) on that kind.");
     }
