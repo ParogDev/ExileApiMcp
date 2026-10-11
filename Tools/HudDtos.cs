@@ -251,6 +251,10 @@ public sealed class HudPluginSource
     public string? ChangedSinceCompile { get; set; }
     /// <summary>An active deploy_plugin deploy: who, from where, what, and what restore returns to.</summary>
     public string? Deployed { get; set; }
+    /// <summary>The deploy's incident id on the board (key deploy:&lt;folder&gt;).</summary>
+    public string? DeployIncident { get; set; }
+    /// <summary>Set when the deploy's session is gone or silent 10 min (or nobody holds it): any session may restore or deploy over it.</summary>
+    public string? OrphanedDeploy { get; set; }
     public string? Note { get; set; }
     public string? Error { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
@@ -269,6 +273,8 @@ public sealed class HudPluginsInstall
 public sealed class HudPluginsResult
 {
     public List<HudPluginsInstall> Huds { get; set; } = [];
+    /// <summary>Open deploy incidents (deploy_plugin leases, and orphaned deploys the main-checkout scan found).</summary>
+    public List<IncidentView>? Incidents { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 

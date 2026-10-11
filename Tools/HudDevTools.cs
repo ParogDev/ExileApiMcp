@@ -62,7 +62,13 @@ public static partial class HudDevTools
                 ["plugins"] = plugins,
             });
         }
-        return Typed<HudPluginsResult>(new JObject { ["huds"] = result });
+        var top = new JObject { ["huds"] = result };
+        // Deploys on the incident board (with orphaned ones the scan found: a main-checkout submodule detached off origin/main).
+        Incidents.DeployIncidents.Scan();
+        var deploys = Incidents.IncidentStore.Read().Incidents.Where(i => i.IsOpen && i.Kind == "deploy").ToList();
+        if (deploys.Count > 0)
+            top["incidents"] = JArray.Parse(System.Text.Json.JsonSerializer.Serialize(IncidentTools.Views(deploys), Dto.Options));
+        return Typed<HudPluginsResult>(top);
     }
 
     [McpServerTool(Name = "hud_log", Title = "HUD log (latest run)", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
@@ -359,6 +365,15 @@ public static partial class HudDevTools
             o["note"] = "This junction points into a worktree, not the main checkout.";
         if (PluginGit.ReadState(target) is { } d)
             o["deployed"] = $"deploy_plugin by {d.By} from {d.From} at {d.At:u}: {(d.DeployedSha.Length >= 7 ? d.DeployedSha[..7] : d.DeployedSha)} {d.Subject} (restore returns to {d.BeforeBranch ?? d.BeforeSha[..Math.Min(7, d.BeforeSha.Length)]})";
+        // The deploy's lease on the incident board, and whether its session is gone (Incidents/DeployIncidents.cs).
+        var lease = Incidents.DeployIncidents.Owner(Path.GetFileName(target.TrimEnd('\\')));
+        if (lease.Incident != null)
+        {
+            o["deployIncident"] = lease.Incident.Id;
+            if (lease.Orphaned) o["orphanedDeploy"] = $"ORPHANED: {lease.Why}. Any session may restore it (deploy_plugin action=restore) or deploy over it without force.";
+        }
+        else if (o["deployed"] != null)
+            o["orphanedDeploy"] = "ORPHANED: no session holds this deploy on the incident board. Any session may restore it (deploy_plugin action=restore) or deploy over it.";
         return o;
     }
 

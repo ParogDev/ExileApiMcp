@@ -22,6 +22,8 @@ public sealed class SessionsView
     /// <summary>Who holds the in-game card (the attention queue's floor), when someone does.</summary>
     public AttentionFloorInfo? Floor { get; set; }
     public long? AttentionSeq { get; set; }
+    /// <summary>Open incidents on the machine-wide board (this server adds them; the bridge doesn't know the board), with each session's response.</summary>
+    public List<IncidentView>? Incidents { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -123,5 +125,7 @@ public sealed class RestartResult
     /// <summary>Seconds until the new HUD's bridge answered again (null: not back within the wait).</summary>
     public double? BackAfterSec { get; set; }
     public string? Note { get; set; }
+    /// <summary>The restart's incident on the board (hud-restart, or bridge-down for a stop), raised when the HUD started stopping.</summary>
+    public IncidentView? Incident { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

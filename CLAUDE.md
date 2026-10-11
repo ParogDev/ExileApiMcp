@@ -21,6 +21,8 @@ MCP server (C# SDK 2.2, spec 2026-07-28) exposing live PoE1/PoE2 HUD state throu
 | `ui-src/` | The app's TypeScript/React source, dev harness and basic-host container. Built in Docker by `ui-src/build.ps1`. **Read `ui-src/README.md` before touching the UI** |
 | `run.cmd` | Launcher used by `.mcp.json` and Claude Desktop: builds, then runs a private copy so `bin\` is never locked; starts the supervisor |
 | `Supervisor/` | Its own small project: the process clients launch. Runs the server as a worker and swaps it for a newly deployed build without restarting the session or cutting a call. **Read `Supervisor/README.md`** |
+| `Incidents/`, `Tools/IncidentTools.cs` | The machine-wide incident board (`%LOCALAPPDATA%\Hexile\incidents.json`, contract shared with the scaffolding's `tools\incident-lib.ps1`): store, bridge diagnosis, automatic raise/resolve, deploy leases, background monitor |
+| `Tests/` | Unit checks without a framework: `dotnet run --project Tests` (CI runs it). Set `HEXILE_INCIDENT_DIR` to a temp folder in anything that writes the board: never the live one |
 | `deploy.ps1`, `Tools/ServerTools.cs`, `Hosting/ServerBuild.cs` | Deploying a build (`%LOCALAPPDATA%\ExileApiMcp\current.json`), `mcp_deploy` / `mcp_status`, and the build info each server sends the HUD |
 
 ## Rules
