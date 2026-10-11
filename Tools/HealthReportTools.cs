@@ -27,20 +27,30 @@ public static class HealthReportTools
     public static async Task<CallToolResult> HudHealthReport(BridgeRegistry bridges,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         [Description("Also return the trace's per-frame series (trace.series) for a frame timeline")] bool series = false,
+        [Description(FocusGate.WaitParamDescription)] int waitForGameSec = FocusGate.DefaultWaitSec,
         CancellationToken ct = default)
     {
-        var (o, text) = await Build(bridges, game, series, ct);
+        var (o, text) = await Build(bridges, game, series, ct, waitForGameSec);
         return Dto.Result(Dto.From<HealthReport>(o), text);
     }
 
     /// <summary>The report as JSON (the HealthReport contract) and text: the tools and PerfHub share it.</summary>
-    internal static async Task<(JObject report, string text)> Build(BridgeRegistry bridges, string? game, bool series, CancellationToken ct)
+    /// <param name="waitForGameSec">How long the trace waits for the game to come to the front (FocusGate); 0 skips it at once, silently (PerfHub's cadence).</param>
+    internal static async Task<(JObject report, string text)> Build(BridgeRegistry bridges, string? game, bool series, CancellationToken ct, int waitForGameSec = 0)
     {
         var sb = new StringBuilder();
         var o = new JObject();
         var desk = DesktopState.Read();
         o["desktop"] = desk;
         sb.AppendLine(desk["warning"] is { } w ? $"Screen: {w}" : "Screen: display on, game in front.");
+
+        // A trace with the game behind another window measures a hidden overlay: check first instead of tracing and warning after.
+        if (await FocusGate.WaitAsync(bridges, game, "hud_health_report", waitForGameSec, ct) is { } notInFront)
+        {
+            o["skipped"] = notInFront;
+            sb.AppendLine($"Trace: skipped. {notInFront["message"]}");
+            return (o, sb.ToString());
+        }
 
         JToken r;
         var t0 = DateTime.UtcNow;
@@ -173,7 +183,7 @@ public static class HealthReportTools
                  "the same text as hud_health_report. Needs 'Allow HUD Instrumentation'.")]
     public static Task<CallToolResult> ShowHudPerformance(BridgeRegistry bridges,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null, CancellationToken ct = default)
-        => HudHealthReport(bridges, game, series: true, ct);
+        => HudHealthReport(bridges, game, series: true, waitForGameSec: 0, ct);   // the panel opens at once; its live cadence traces once the game is in front
 
     private static string Key(string s) => new(s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 
