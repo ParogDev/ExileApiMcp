@@ -315,6 +315,31 @@ Start Port    End Port
         Check("cli: newest version wins (by version, not by name)", exe == Path.Combine(cc, "2.1.295", "bb", "claude.exe"), exe);
         var (none, lookedNone) = ExileApiMcp.Dispatch.FeedbackKit.FindCli([Path.Combine(root, "nowhere")]);
         Check("cli: none found names where it looked", none == null && lookedNone.Contains("nowhere"));
+
+        // The sign-in command: the inside path (%APPDATA%, MSIX-virtualized) becomes the package's LocalCache path, as the
+        // user's own PowerShell sees it, written with $env:LOCALAPPDATA and the & a quoted path needs.
+        var profile = Path.Combine(root, "Profile");
+        var local = ExileApiMcp.Dispatch.FeedbackKit.RealLocalAppData(profile);
+        Directory.CreateDirectory(Path.Combine(local, "Packages", "Claude_aaaa", "LocalCache", "Roaming", "Claude", "claude-code", "2.1.293", "aa"));
+        var pkgCc = Path.Combine(local, "Packages", "Claude_pzs8sxrjxfjjc", "LocalCache", "Roaming", "Claude", "claude-code");
+        Directory.CreateDirectory(Path.Combine(pkgCc, "2.1.295", "bb"));
+        File.WriteAllText(Path.Combine(pkgCc, "2.1.295", "bb", "claude.exe"), "");
+        var login = ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(exe!, profile, local);
+        Check("login: the package path outside the MSIX, same version and hash, in PowerShell form",
+            login == "& \"$env:LOCALAPPDATA" + Path.DirectorySeparatorChar   // CI runs on Linux: the separator is the platform's
+                + Path.Combine("Packages", "Claude_pzs8sxrjxfjjc", "LocalCache", "Roaming", "Claude", "claude-code", "2.1.295", "bb", "claude.exe") + "\" auth login", login);
+        Check("login: a path already in the package stays (as $env:LOCALAPPDATA)",
+            ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(Path.Combine(pkgCc, "2.1.295", "bb", "claude.exe"), profile, local + "\\") == login);
+        var redirected = ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(exe!, profile, @"D:\Elsewhere\Local");
+        Check("login: %LOCALAPPDATA% redirected elsewhere: the literal path, not $env:LOCALAPPDATA",
+            redirected == $"& \"{Path.Combine(pkgCc, "2.1.295", "bb", "claude.exe").Replace("$", "`$")}\" auth login", redirected);
+        var noPkg = ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(Path.Combine(cc, "2.1.293", "aa", "claude.exe"), profile, local);
+        Check("login: no package folder holds that version: the inside path as the fallback",
+            noPkg == $"& \"{Path.Combine(cc, "2.1.293", "aa", "claude.exe")}\" auth login", noPkg);
+        Check("login: a HEXILE_CLAUDE_EXE elsewhere is used as is",
+            ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(@"D:\tools\claude.exe", profile, local) == "& \"D:\\tools\\claude.exe\" auth login");
+        Check("login: $ and ` in a literal path are escaped for PowerShell's double quotes",
+            ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(@"D:\t$dev\a`b\claude.exe", profile, local) == "& \"D:\\t`$dev\\a``b\\claude.exe\" auth login");
     }
     finally { try { Directory.Delete(root, true); } catch { } }
 

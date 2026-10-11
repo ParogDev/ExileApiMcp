@@ -45,6 +45,51 @@ public static class FeedbackKit
         return (best?.exe, string.Join("; ", looked));
     }
 
+    /// <summary>The real %LOCALAPPDATA% (the user profile's AppData\Local): inside the MSIX package the variable and the known
+    /// folder can be redirected, the profile directory is not.</summary>
+    public static string RealLocalAppData(string userProfile) => Path.Combine(userProfile, "AppData", "Local");
+
+    /// <summary>The same claude.exe as a user's own shell sees it. %APPDATA%\Claude\claude-code\&lt;ver&gt;\&lt;hash&gt;\claude.exe
+    /// exists only for processes inside the Claude desktop app's MSIX package; outside it the file is at
+    /// &lt;LocalAppData&gt;\Packages\Claude_&lt;publisher&gt;\LocalCache\Roaming\Claude\claude-code\&lt;ver&gt;\&lt;hash&gt;\claude.exe. Returns the
+    /// package copy that holds the same version and hash, the exe itself when it already is outside (a package path or
+    /// HEXILE_CLAUDE_EXE elsewhere), or null when no package folder holds it.</summary>
+    public static string? OutsidePath(string exe, string realLocalAppData)
+    {
+        var parts = exe.Split('\\', '/');
+        var cc = Array.FindLastIndex(parts, p => p.Equals("claude-code", StringComparison.OrdinalIgnoreCase));
+        if (cc < 1 || !parts[cc - 1].Equals("Claude", StringComparison.OrdinalIgnoreCase)) return exe;   // not the desktop app's layout
+        var packages = Path.Combine(realLocalAppData, "Packages");
+        if (exe.StartsWith(packages + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return exe;
+        var rel = Path.Combine(parts[(cc + 1)..]);
+        try
+        {
+            if (!Directory.Exists(packages)) return null;
+            // Several Claude_* folders (a stale one left by an old install): the most recently written copy of that exe.
+            return Directory.EnumerateDirectories(packages, "Claude_*")
+                .Select(pkg => Path.Combine(pkg, "LocalCache", "Roaming", "Claude", "claude-code", rel))
+                .Where(File.Exists)
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>The sign-in command for the user's own PowerShell: the outside path when found, else the path as the
+    /// dispatcher sees it (the fallback). Written with $env:LOCALAPPDATA when it lies under the real LocalAppData and the
+    /// variable names that same folder (envLocalAppData: the variable's value; a redirected one gets the literal path).
+    /// PowerShell needs &amp; before a quoted path; $ and ` in the literal part are escaped for its double quotes.</summary>
+    public static string LoginCommand(string exe, string userProfile, string? envLocalAppData)
+    {
+        var local = RealLocalAppData(userProfile);
+        var path = OutsidePath(exe, local) ?? exe;
+        var prefix = "";
+        if (path.StartsWith(local + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(envLocalAppData?.TrimEnd('\\'), local, StringComparison.OrdinalIgnoreCase))
+            (prefix, path) = ("$env:LOCALAPPDATA", path[local.Length..]);
+        return $"& \"{prefix}{path.Replace("`", "``").Replace("$", "`$").Replace("\"", "`\"")}\" auth login";
+    }
+
     /// <summary>Variables a handler must not inherit: the starting session's Claude Code identity and auth plumbing, and
     /// the MCP server's own settings (the handler reaches the shared server over HTTP with its own label).</summary>
     public static bool Scrub(string name) =>

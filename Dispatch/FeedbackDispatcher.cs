@@ -43,7 +43,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     private readonly List<JObject> _replies = new();                     // recent feedback.reply events (the last answers)
     private readonly List<JObject> _trace = new();                       // recent route + feedback events, for briefs
     private DateTime _nextEnvCheck = DateTime.MinValue, _nextStart = DateTime.MinValue, _nextAdopt = DateTime.MinValue, _bridgeOkAt = DateTime.MinValue;
-    private (string? Exe, bool LoggedIn, string? Why, string? Fix) _env;
+    private (string? Exe, bool LoggedIn, string? Why, string? Fix, string? Login) _env;
     private FeedbackHandlerState? _running;
     private string _status = "starting", _why = "";
     private bool _envRaised, _bridgeBrokenRaised;
@@ -241,7 +241,10 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         return false;
     }
 
-    private static async Task<(string? Exe, bool LoggedIn, string? Why, string? Fix)> CheckEnvironmentAsync(CancellationToken ct)
+    /// <summary>The user profile folder (not redirected inside the MSIX package, unlike %LOCALAPPDATA% can be).</summary>
+    private static string UserProfile => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+    private static async Task<(string? Exe, bool LoggedIn, string? Why, string? Fix, string? Login)> CheckEnvironmentAsync(CancellationToken ct)
     {
         string? exe = Environment.GetEnvironmentVariable("HEXILE_CLAUDE_EXE") is { Length: > 0 } x && File.Exists(x) ? x : null;
         string looked = "HEXILE_CLAUDE_EXE";
@@ -249,7 +252,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             (exe, looked) = FeedbackKit.FindCli(FeedbackKit.CliRoots(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)));
         if (exe == null)
-            return (null, false, $"the Claude Code CLI was not found (looked in {looked})", "Open the Claude desktop app once (it installs Claude Code there), or set HEXILE_CLAUDE_EXE.");
+            return (null, false, $"the Claude Code CLI was not found (looked in {looked})", "Open the Claude desktop app once (it installs Claude Code there), or set HEXILE_CLAUDE_EXE.", null);
         Process? p = null;
         try
         {
@@ -261,13 +264,14 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             await p.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(30), ct);
             using var doc = JsonDocument.Parse(await output);
             _ = await errors;
-            if (doc.RootElement.TryGetProperty("loggedIn", out var li) && li.ValueKind == JsonValueKind.True) return (exe, true, null, null);
+            if (doc.RootElement.TryGetProperty("loggedIn", out var li) && li.ValueKind == JsonValueKind.True) return (exe, true, null, null, null);
+            var login = FeedbackKit.LoginCommand(exe, UserProfile, Environment.GetEnvironmentVariable("LOCALAPPDATA"));
             return (exe, false, "the Claude Code CLI is not logged in, so it can't start a session on its own",
-                $"Once, in a terminal: \"{exe}\" auth login");
+                $"Once, in PowerShell: {login}", login);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return (exe, false, $"`claude auth status` failed: {(ex is TimeoutException ? "no answer in 30 s" : ex.Message)}", null);
+            return (exe, false, $"`claude auth status` failed: {(ex is TimeoutException ? "no answer in 30 s" : ex.Message)}", null, null);
         }
         finally
         {
@@ -468,7 +472,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
         try { _env = await CheckEnvironmentAsync(ct); }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _env = (_env.Exe, false, $"checking the Claude Code CLI failed: {ex.Message}", null);
+            _env = (_env.Exe, false, $"checking the Claude Code CLI failed: {ex.Message}", null, null);
         }
         _nextEnvCheck = DateTime.UtcNow + (_env.Why == null ? TimeSpan.FromMinutes(10) : RetryEvery);
         if (_env.Why != null && (!wasBroken || !_envRaised))
@@ -489,7 +493,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
     {
         try
         {
-            if (onlyIfNew && IncidentLogic.OpenByKey(IncidentStore.Read(), IncidentKey) != null) return true;
+            // An open one with another fix (an older build's) is updated, so the board never keeps a stale fix.
+            if (onlyIfNew && IncidentLogic.OpenByKey(IncidentStore.Read(), IncidentKey) is { } open && open.Fix == fix) return true;
             var draft = new IncidentDraft
             {
                 Kind = "custom", Scope = "machine", Key = IncidentKey, Title = "F8 feedback presses can't reach a Claude session",
@@ -535,7 +540,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges) : BackgroundServi
             {
                 Status = _status, Why = _why.Length > 0 ? _why : null, Host = SessionIdentity.Kind, Pid = Environment.ProcessId,
                 Version = McpSetup.Version, UpdatedAt = DateTimeOffset.UtcNow, Cursor = _cursor, ClaudeExe = _env.Exe,
-                LoggedIn = _env.Exe == null ? null : _env.LoggedIn, Repo = Repo(), HandlersDir = HandlersDir,
+                LoggedIn = _env.Exe == null ? null : _env.LoggedIn,
+                LoginCommand = _env.Login,
+                Repo = Repo(), HandlersDir = HandlersDir,
                 Handlers = recent, Waiting = _presses.Keys.OrderBy(k => k).ToList(),
             };
             var tmp = StatusFile + ".tmp";
