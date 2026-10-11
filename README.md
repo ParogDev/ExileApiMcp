@@ -71,10 +71,18 @@ Claude Desktop renders MCP Apps for local servers configured this way. Servers a
 
 ### HTTP (local agents, MCP Inspector, ext-apps basic-host)
 
+In the Hexile scaffolding the shared server on 50910 starts on demand: `tools\mcp-call.ps1` (and `mcp-smoke.ps1`,
+`control-center.ps1`) start it when nothing answers, detached from the caller and owned by no session, and it exits after
+20 minutes without a request (`Supervisor/README.md`). Don't start or stop it yourself. Each request names its agent in an
+`X-Hexile-Agent` header (`X-Hexile-Branch` and `X-Hexile-Cwd` optional, all URI-escaped): the HUD then shows that agent in
+`hud_sessions`, on the guide card and in the agent log, with its own bridge connection (`Hosting/CallerIdentity.cs`).
+Requests without it are the server's own identity (`HEXILE_AGENT`, "control center" for the shared one).
+
+For your own server (MCP development, or outside the scaffolding):
 ```
-run.cmd --http [--port 50910]
+run.cmd --http [--port 50931] [--idle-exit <minutes>]
 ```
-- Listens on `http://127.0.0.1:50910/mcp` only.
+- Listens on `http://127.0.0.1:<port>/mcp` only.
 - Requires `Authorization: Bearer <token>`. The token is created on first run in `%LOCALAPPDATA%\ExileApiMcp\http-token.txt`; set `MCP_HTTP_TOKEN` to use your own.
 - For Claude Code:
   ```json

@@ -92,6 +92,18 @@ try {
             Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
             exit 3
         }
+        # The supervisor too: the shared HTTP server on 50910 (started on demand by tools\mcp-call.ps1) runs the deployed
+        # build's supervisor, never a session's checkout. Older commits without one still deploy (the launcher falls back).
+        $supProj = Join-Path $src 'Supervisor\ExileApiMcp.Supervisor.csproj'
+        if (Test-Path $supProj) {
+            $out = & dotnet build $supProj -c Release -nologo -v q -o (Join-Path $tmp 'supervisor') 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Output "ERROR: supervisor build failed:"
+                $out | Where-Object { $_ -match 'error' } | Select-Object -First 15 | ForEach-Object { Write-Output "  $_" }
+                Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+                exit 3
+            }
+        }
         @{ version = $version; sha = $sha; builtAt = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json | Set-Content (Join-Path $tmp 'build.json') -Encoding ASCII
         if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
         Move-Item $tmp $dir

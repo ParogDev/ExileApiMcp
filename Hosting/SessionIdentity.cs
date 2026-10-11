@@ -15,21 +15,38 @@ namespace ExileApiMcp.Hosting;
 public static class SessionIdentity
 {
     private static readonly bool FromEnv = Environment.GetEnvironmentVariable("HEXILE_AGENT") is { Length: > 0 };
-    public static string Cwd { get; private set; } = Environment.CurrentDirectory;
-    public static string? Branch { get; private set; } = ReadBranch(Environment.CurrentDirectory);
-    public static string Label { get; private set; } = MakeLabel(Branch, Environment.CurrentDirectory);
+    // The process's own identity. On the shared HTTP server a request that names its caller (Hosting/CallerIdentity.cs)
+    // answers with the caller's instead, so whatever reads Label / Id / Branch / Cwd while handling it names that agent.
+    private static string _cwd = Environment.CurrentDirectory;
+    private static string? _branch = ReadBranch(_cwd);
+    private static string _label = MakeLabel(_branch, _cwd);
+    public static string Cwd => CallerIdentity.Current is { } c ? c.Cwd ?? _cwd : _cwd;
+    public static string? Branch => CallerIdentity.Current is { } c ? c.Branch : _branch;
+    public static string Label => CallerIdentity.Current?.Label ?? _label;
     /// <summary>The session's process: the supervisor (Supervisor/README.md) when there is one, so a swap to a newly deployed
     /// build stays the same session to the HUD; else this process.</summary>
     public static readonly int Pid = int.TryParse(Environment.GetEnvironmentVariable("HEXILE_SESSION_PID"), out var sp) && sp > 0 ? sp : Environment.ProcessId;
-    /// <summary>Stable for the life of the session; a reconnect after a HUD restart or a server swap re-identifies as the same session.</summary>
-    public static readonly string Id = $"{Label}#{Pid}";
+    private static readonly string _id = $"{_label}#{Pid}";
+    /// <summary>Stable for the life of the session; a reconnect after a HUD restart or a server swap re-identifies as the same session.
+    /// A caller of the shared HTTP server is its own session: its label at this server's pid.</summary>
+    public static string Id => CallerIdentity.Current is { } c ? IdOf(c) : _id;
+    /// <summary>A caller's session id: its label and checkout, not this server's pid, so the same agent stays the same session
+    /// to the HUD when the shared server stops after being idle and the next call starts a new one (its leases and guide card
+    /// carry over like after a hot swap), and two checkouts on the same branch stay two sessions.</summary>
+    public static string IdOf(CallerIdentity c) => $"{c.Label}#http-{Hash8(c.Cwd?.Replace('/', '\\').TrimEnd('\\') ?? c.Label)}";
+
+    private static string Hash8(string s)
+    {
+        var h = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(s.ToLowerInvariant()));
+        return Convert.ToHexString(h, 0, 4).ToLowerInvariant();
+    }
     public static string Kind { get; set; } = "mcp";
     /// <summary>Bumped when the identity changes (AdoptRoots); bridge connections re-send session.hello.</summary>
     public static int Revision { get; private set; }
     /// <summary>The project folder learned from the client's roots, when the cwd had none.</summary>
     public static string? ProjectRoot { get; private set; }
     /// <summary>True until a project is known (env, cwd branch or roots): the call filter asks the client for its roots once.</summary>
-    public static bool NeedsRoots => !FromEnv && Branch == null && ProjectRoot == null && !_rootsAsked;
+    public static bool NeedsRoots => !FromEnv && CallerIdentity.Current == null && _branch == null && ProjectRoot == null && !_rootsAsked;
     private static bool _rootsAsked;
 
     private static string MakeLabel(string? branch, string cwd) => Clip(Environment.GetEnvironmentVariable("HEXILE_AGENT") is { Length: > 0 } env ? env
@@ -49,11 +66,11 @@ public static class SessionIdentity
             var path = uri.LocalPath;
             if (!Directory.Exists(path) || ReadBranch(path) is not { } branch) continue;
             ProjectRoot = path;
-            Cwd = path;
-            Branch = branch;
-            Label = MakeLabel(branch, path);
+            _cwd = path;
+            _branch = branch;
+            _label = MakeLabel(branch, path);
             Revision++;
-            Console.Error.WriteLine($"[Session] identified by the client's root {path}: {Label}");
+            Console.Error.WriteLine($"[Session] identified by the client's root {path}: {_label}");
             return true;
         }
         return false;
@@ -75,11 +92,32 @@ public static class SessionIdentity
         return null;
     }
 
-    public static Newtonsoft.Json.Linq.JObject HelloParams() => new()
+    /// <summary>
+    /// The checkout the session edits, for deploy_plugin: on the shared HTTP server the caller's own (its cwd header), else
+    /// <see cref="RepoRoot"/>. Machine-wide scripts (restart-hud.ps1, deploy.ps1) keep coming from RepoRoot, the main checkout
+    /// HEXILE_REPO names, never from a caller's worktree.
+    /// </summary>
+    public static string? WorkingRepoRoot()
     {
-        ["id"] = Id, ["label"] = Label, ["branch"] = Branch, ["cwd"] = Cwd, ["pid"] = Pid, ["kind"] = Kind,
-        ["mcp"] = ServerBuild.HelloInfo(),
-    };
+        if (CallerIdentity.Current?.Cwd is { } callerCwd && Directory.Exists(callerCwd))
+            for (var dir = new DirectoryInfo(callerCwd); dir != null; dir = dir.Parent)
+                if (File.Exists(Path.Combine(dir.FullName, "tools", "restart-hud.ps1"))) return dir.FullName;
+        return RepoRoot();
+    }
+
+    /// <summary>session.hello for a bridge connection: the process's identity, or <paramref name="caller"/>'s for the
+    /// connections the shared HTTP server keeps per caller (Bridge/BridgeRegistry.cs).</summary>
+    public static Newtonsoft.Json.Linq.JObject HelloParams(CallerIdentity? caller = null) => caller == null
+        ? new()
+        {
+            ["id"] = _id, ["label"] = _label, ["branch"] = _branch, ["cwd"] = _cwd, ["pid"] = Pid, ["kind"] = Kind,
+            ["mcp"] = ServerBuild.HelloInfo(),
+        }
+        : new()
+        {
+            ["id"] = IdOf(caller), ["label"] = caller.Label, ["branch"] = caller.Branch, ["cwd"] = caller.Cwd ?? _cwd, ["pid"] = Pid, ["kind"] = Kind,
+            ["mcp"] = ServerBuild.HelloInfo(),
+        };
 
     /// <summary>The git branch of a folder (worktree-aware), for naming another session's checkout.</summary>
     public static string? BranchOf(string dir) => ReadBranch(dir);

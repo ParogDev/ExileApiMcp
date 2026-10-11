@@ -3,12 +3,16 @@ using System.Text.Json.Nodes;
 
 namespace ExileApiMcp.Supervisor;
 
-/// <summary>Command line: --fallback &lt;dir&gt; (the local build), --http [--port N]; everything else goes to the worker.</summary>
-public sealed record SupervisorOptions(string FallbackDir, bool Http, int Port, bool Pinned, IReadOnlyList<string> WorkerArgs)
+/// <summary>
+/// Command line: --fallback &lt;dir&gt; (the local build), --http [--port N] [--idle-exit &lt;minutes&gt;]; everything else goes to
+/// the worker. --idle-exit (http only): stop once no connection has been open for that long. The shared server on 50910 is
+/// started that way by tools\mcp-call.ps1 when nothing answers: it belongs to no session and goes away by itself.
+/// </summary>
+public sealed record SupervisorOptions(string FallbackDir, bool Http, int Port, bool Pinned, IReadOnlyList<string> WorkerArgs, TimeSpan? IdleExit = null)
 {
     public static SupervisorOptions Parse(string[] args)
     {
-        string? fallback = null; var http = false; int? port = null; var rest = new List<string>();
+        string? fallback = null; var http = false; int? port = null; TimeSpan? idle = null; var rest = new List<string>();
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -16,13 +20,18 @@ public sealed record SupervisorOptions(string FallbackDir, bool Http, int Port, 
                 case "--fallback" when i + 1 < args.Length: fallback = args[++i]; break;
                 case "--http": http = true; break;
                 case "--port" when i + 1 < args.Length && int.TryParse(args[i + 1], out var p): port = p; i++; break;
+                case "--idle-exit" when i + 1 < args.Length:
+                    if (!double.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var m) || m <= 0)
+                        throw new ArgumentException($"--idle-exit takes minutes > 0, got '{args[i + 1]}'");
+                    idle = TimeSpan.FromMinutes(m); i++; break;
                 default: rest.Add(args[i]); break;
             }
         }
         if (fallback == null) throw new ArgumentException("--fallback <dir with ExileApiMcp.dll> is required (run.cmd passes it)");
+        if (idle != null && !http) throw new ArgumentException("--idle-exit applies to --http only");
         port ??= int.TryParse(Environment.GetEnvironmentVariable("MCP_HTTP_PORT"), out var envPort) ? envPort : 50910;
         var pinned = Environment.GetEnvironmentVariable("HEXILE_MCP_LOCAL") is "1" or "true";
-        return new SupervisorOptions(Path.GetFullPath(fallback), http, port.Value, pinned, rest);
+        return new SupervisorOptions(Path.GetFullPath(fallback), http, port.Value, pinned, rest, idle);
     }
 }
 
@@ -158,6 +167,7 @@ public abstract class SupervisorBase(SupervisorOptions opts)
                 {
                     ["pid"] = Environment.ProcessId, ["transport"] = Opts.Http ? "http" : "stdio", ["port"] = Opts.Http ? Opts.Port : null,
                     ["mode"] = Mode, ["cwd"] = Environment.CurrentDirectory, ["startedAt"] = _startedAt.ToString("O"),
+                    ["idleExitMin"] = Opts.IdleExit?.TotalMinutes,
                     ["workers"] = new JsonArray(Workers.Select(w => (JsonNode)Info(w)).ToArray()),
                     ["lastSwap"] = _lastSwap?.DeepClone(),
                 };

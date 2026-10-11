@@ -12,13 +12,21 @@ namespace ExileApiMcp.Supervisor;
 public sealed class HttpSupervisor(SupervisorOptions opts) : SupervisorBase(opts)
 {
     private CancellationToken _ct;
+    // --idle-exit: connections open right now (any worker, a blocking observe_wait included) and when the last one closed.
+    // Counted under _idleLock at accept, so the idle decision and a new connection can't cross: once _stopping is set the
+    // listener is closed (new callers get connection refused, and mcp-call starts a fresh server).
+    private int _open;
+    private long _lastActivityTicks = DateTime.UtcNow.Ticks;
+    private readonly object _idleLock = new();
+    private bool _stopping;
+    private TcpListener? _listener;
 
     public async Task<int> RunAsync()
     {
         using var cts = new CancellationTokenSource();
         _ct = cts.Token;
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
-        var listener = new TcpListener(IPAddress.Loopback, Opts.Port);
+        var listener = _listener = new TcpListener(IPAddress.Loopback, Opts.Port);
         try { listener.Start(); }
         catch (SocketException ex)
         {
@@ -30,17 +38,24 @@ public sealed class HttpSupervisor(SupervisorOptions opts) : SupervisorBase(opts
             Log("no server build starts; exiting");
             return 1;
         }
-        Log($"HTTP on http://127.0.0.1:{Opts.Port}/mcp ({Mode})");
+        Log($"HTTP on http://127.0.0.1:{Opts.Port}/mcp ({Mode})" + (Opts.IdleExit is { } idle ? $"; stops after {idle.TotalMinutes:0.##} min without a connection" : ""));
         _ = FollowDeploymentsAsync(_ct);
+        if (Opts.IdleExit is { } limit) _ = StopWhenIdleAsync(limit, cts);
         try
         {
             while (!_ct.IsCancellationRequested)
             {
                 var client = await listener.AcceptTcpClientAsync(_ct);
+                lock (_idleLock)
+                {
+                    if (_stopping) { client.Dispose(); break; }
+                    _open++;
+                }
                 _ = Task.Run(() => PipeAsync(client));
             }
         }
         catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is SocketException or ObjectDisposedException && _stopping) { }   // closed by the idle stop
         finally
         {
             listener.Stop();
@@ -53,7 +68,44 @@ public sealed class HttpSupervisor(SupervisorOptions opts) : SupervisorBase(opts
         return 0;
     }
 
+    /// <summary>
+    /// --idle-exit: stop once no connection has been open for <paramref name="limit"/>. A request in progress holds its
+    /// connection, so a blocking wait (observe_wait, incident_wait, experiment_queue_wait) counts as activity for as long as
+    /// it runs; so does an open control center (its push stream). The next tools\mcp-call.ps1 starts a fresh server, on
+    /// the deployed build.
+    /// </summary>
+    private async Task StopWhenIdleAsync(TimeSpan limit, CancellationTokenSource cts)
+    {
+        var tick = TimeSpan.FromSeconds(Math.Clamp(limit.TotalSeconds / 4, 1, 15));
+        while (!_ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(tick, _ct); } catch (OperationCanceledException) { return; }
+            TimeSpan idleFor;
+            lock (_idleLock)
+            {
+                if (_open > 0) continue;
+                idleFor = DateTime.UtcNow - new DateTime(_lastActivityTicks, DateTimeKind.Utc);
+                if (idleFor < limit) continue;
+                _stopping = true;
+                _listener?.Stop();   // from here on, callers get connection refused (mcp-call then starts a new server)
+            }
+            Log($"no connection for {idleFor.TotalMinutes:0.#} min (--idle-exit {limit.TotalMinutes:0.##}): stopping; the next mcp-call starts it again");
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }   // RunAsync may already be done (the listener closed above)
+            return;
+        }
+    }
+
+    /// <summary>Pipes one accepted connection (already counted in _open by the accept loop).</summary>
     private async Task PipeAsync(TcpClient client)
+    {
+        try { await PipeToWorkerAsync(client); }
+        finally
+        {
+            lock (_idleLock) { _lastActivityTicks = DateTime.UtcNow.Ticks; _open--; }
+        }
+    }
+
+    private async Task PipeToWorkerAsync(TcpClient client)
     {
         using (client)
         {
