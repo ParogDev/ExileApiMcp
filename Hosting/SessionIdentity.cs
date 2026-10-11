@@ -33,7 +33,7 @@ public static class SessionIdentity
     /// <summary>A caller's session id: its label and checkout, not this server's pid, so the same agent stays the same session
     /// to the HUD when the shared server stops after being idle and the next call starts a new one (its leases and guide card
     /// carry over like after a hot swap), and two checkouts on the same branch stay two sessions.</summary>
-    public static string IdOf(CallerIdentity c) => $"{c.Label}#http-{Hash8(c.Cwd ?? c.Label)}";
+    public static string IdOf(CallerIdentity c) => $"{c.Label}#http-{Hash8(c.Cwd?.Replace('/', '\\').TrimEnd('\\') ?? c.Label)}";
 
     private static string Hash8(string s)
     {
@@ -83,11 +83,6 @@ public static class SessionIdentity
     /// HEXILE_REPO (run.cmd sets it to its own checkout), else walk up from the cwd.</summary>
     public static string? RepoRoot()
     {
-        // A caller of the shared HTTP server works in its own checkout (deploy_plugin deploys from there), not the main one
-        // HEXILE_REPO names for the server itself.
-        if (CallerIdentity.Current?.Cwd is { } callerCwd && Directory.Exists(callerCwd))
-            for (var dir = new DirectoryInfo(callerCwd); dir != null; dir = dir.Parent)
-                if (File.Exists(Path.Combine(dir.FullName, "tools", "restart-hud.ps1"))) return dir.FullName;
         for (var dir = ProjectRoot == null ? null : new DirectoryInfo(ProjectRoot); dir != null; dir = dir.Parent)
             if (File.Exists(Path.Combine(dir.FullName, "tools", "restart-hud.ps1"))) return dir.FullName;
         if (Environment.GetEnvironmentVariable("HEXILE_REPO") is { Length: > 0 } env && File.Exists(Path.Combine(env, "tools", "restart-hud.ps1")))
@@ -95,6 +90,19 @@ public static class SessionIdentity
         for (var dir = new DirectoryInfo(Cwd); dir != null; dir = dir.Parent)
             if (File.Exists(Path.Combine(dir.FullName, "tools", "restart-hud.ps1"))) return dir.FullName;
         return null;
+    }
+
+    /// <summary>
+    /// The checkout the session edits, for deploy_plugin: on the shared HTTP server the caller's own (its cwd header), else
+    /// <see cref="RepoRoot"/>. Machine-wide scripts (restart-hud.ps1, deploy.ps1) keep coming from RepoRoot, the main checkout
+    /// HEXILE_REPO names, never from a caller's worktree.
+    /// </summary>
+    public static string? WorkingRepoRoot()
+    {
+        if (CallerIdentity.Current?.Cwd is { } callerCwd && Directory.Exists(callerCwd))
+            for (var dir = new DirectoryInfo(callerCwd); dir != null; dir = dir.Parent)
+                if (File.Exists(Path.Combine(dir.FullName, "tools", "restart-hud.ps1"))) return dir.FullName;
+        return RepoRoot();
     }
 
     /// <summary>session.hello for a bridge connection: the process's identity, or <paramref name="caller"/>'s for the

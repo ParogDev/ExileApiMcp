@@ -51,7 +51,7 @@ public static class DeployTools
         var r = new DeployResult { Action = act };
 
         // ── Where things are: this session's checkout, the main checkout, the HUD junctions ──
-        var here = SessionIdentity.RepoRoot() ?? throw new McpException("Not running in the scaffolding repo (tools\\restart-hud.ps1 not found from the cwd; HEXILE_REPO unset).");
+        var here = SessionIdentity.WorkingRepoRoot() ?? throw new McpException("Not running in the scaffolding repo (tools\\restart-hud.ps1 not found from the cwd; HEXILE_REPO unset).");
         var common = PluginGit.Run(here, "rev-parse", "--path-format=absolute", "--git-common-dir");
         if (!common.Ok) throw new McpException($"git rev-parse --git-common-dir in {here}: {common.Err}");
         var mainRoot = Path.GetDirectoryName(common.Line.Replace('/', '\\').TrimEnd('\\'))!;
@@ -92,8 +92,9 @@ public static class DeployTools
         string? takeover = null;
         if (act != "status" && state != null && state.By != SessionIdentity.Label)
         {
-            // The pid alone is not the session on the shared HTTP server: every caller there has its pid (Hosting/CallerIdentity.cs).
-            var mine = owner.Incident?.OwnerPid == SessionIdentity.Pid && owner.Incident.RaisedBy == SessionIdentity.Label;
+            // On the shared HTTP server every caller has its pid (Hosting/CallerIdentity.cs): there, a deploy another label
+            // raised is not this caller's, pid or not. A stdio session is its pid (its label may change, AdoptRoots).
+            var mine = owner.Incident?.OwnerPid == SessionIdentity.Pid && (SessionIdentity.Kind != "mcp-http" || owner.Incident.RaisedBy == SessionIdentity.Label);
             if (owner.Incident == null)
             {
                 if (!force)

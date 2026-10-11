@@ -294,7 +294,7 @@ Start Port    End Port
     await CallerIdentity.RunAsAsync(CallerIdentity.FromHeaders("main", "main", @"C:\elsewhere"), () => { m2 = reg.Bridges; return Task.CompletedTask; });
     Check("caller: same label, other checkout: its own session", !ReferenceEquals(m1, m2)
         && SessionIdentity.IdOf(CallerIdentity.FromHeaders("main", null, @"C:\repo")!) != SessionIdentity.IdOf(CallerIdentity.FromHeaders("main", null, @"C:\elsewhere")!));
-    Check("caller: the id doesn't depend on the server's pid (stable across an idle restart)", !SessionIdentity.IdOf(c!).Contains(SessionIdentity.Pid.ToString()));
+    Check("caller: the id doesn't depend on the server's pid (stable across an idle restart)", System.Text.RegularExpressions.Regex.IsMatch(SessionIdentity.IdOf(c!), "^route-act2 ü#http-[0-9a-f]{8}$") && SessionIdentity.IdOf(c!) == SessionIdentity.IdOf(CallerIdentity.FromHeaders(c!.Label, null, c.Cwd + "\\")!));
     reg.Dispose();
 }
 

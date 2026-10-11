@@ -90,7 +90,7 @@ public sealed class HttpSupervisor(SupervisorOptions opts) : SupervisorBase(opts
                 _listener?.Stop();   // from here on, callers get connection refused (mcp-call then starts a new server)
             }
             Log($"no connection for {idleFor.TotalMinutes:0.#} min (--idle-exit {limit.TotalMinutes:0.##}): stopping; the next mcp-call starts it again");
-            cts.Cancel();
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }   // RunAsync may already be done (the listener closed above)
             return;
         }
     }
