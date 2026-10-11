@@ -278,17 +278,23 @@ Start Port    End Port
         inside = SessionIdentity.Label; idInside = SessionIdentity.Id;
         hello = SessionIdentity.HelloParams();   // no caller passed: the process's own hello, even inside a request
     });
-    Check("caller: SessionIdentity answers with the caller inside its request", inside == "route-act2 ü" && idInside == $"route-act2 ü#{SessionIdentity.Pid}", inside);
+    Check("caller: SessionIdentity answers with the caller inside its request", inside == "route-act2 ü" && idInside == SessionIdentity.IdOf(c!) && idInside!.StartsWith("route-act2 ü#http-"), inside);
     Check("caller: and with its own identity outside", SessionIdentity.Label == own && CallerIdentity.Current == null);
     Check("caller: base hello stays the process's", hello?["label"]?.ToString() == own);
     var ch = SessionIdentity.HelloParams(c!);
-    Check("caller: a caller's hello names it", ch["label"]?.ToString() == "route-act2 ü" && ch["id"]?.ToString() == $"route-act2 ü#{SessionIdentity.Pid}" && ch["branch"]?.ToString() == "claude/route-act2");
+    Check("caller: a caller's hello names it", ch["label"]?.ToString() == "route-act2 ü" && ch["id"]?.ToString() == SessionIdentity.IdOf(c!) && ch["branch"]?.ToString() == "claude/route-act2");
     var reg = new ExileApiMcp.Bridge.BridgeRegistry();
     IReadOnlyList<ExileApiMcp.Bridge.BridgeClient>? a1 = null, a2 = null, b1 = null;
     await CallerIdentity.RunAsAsync(c, () => { a1 = reg.Bridges; a2 = reg.Bridges; return Task.CompletedTask; });
     await CallerIdentity.RunAsAsync(CallerIdentity.FromHeaders("other", null, null), () => { b1 = reg.Bridges; return Task.CompletedTask; });
     Check("caller: each caller gets its own bridge connections, reused across calls",
         a1 != null && ReferenceEquals(a1, a2) && !ReferenceEquals(a1, b1) && !ReferenceEquals(a1, reg.Bridges) && a1.All(b => b.Caller == c) && reg.Bridges.All(b => b.Caller == null));
+    IReadOnlyList<ExileApiMcp.Bridge.BridgeClient>? m1 = null, m2 = null;
+    await CallerIdentity.RunAsAsync(CallerIdentity.FromHeaders("main", "main", @"C:\repo"), () => { m1 = reg.Bridges; return Task.CompletedTask; });
+    await CallerIdentity.RunAsAsync(CallerIdentity.FromHeaders("main", "main", @"C:\elsewhere"), () => { m2 = reg.Bridges; return Task.CompletedTask; });
+    Check("caller: same label, other checkout: its own session", !ReferenceEquals(m1, m2)
+        && SessionIdentity.IdOf(CallerIdentity.FromHeaders("main", null, @"C:\repo")!) != SessionIdentity.IdOf(CallerIdentity.FromHeaders("main", null, @"C:\elsewhere")!));
+    Check("caller: the id doesn't depend on the server's pid (stable across an idle restart)", !SessionIdentity.IdOf(c!).Contains(SessionIdentity.Pid.ToString()));
     reg.Dispose();
 }
 

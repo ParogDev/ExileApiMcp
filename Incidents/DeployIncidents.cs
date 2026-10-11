@@ -92,9 +92,12 @@ public static class DeployIncidents
 
     public static void Restored(string folder, string note) => IncidentStore.ResolveKeys([Key(folder)], note);
 
-    /// <summary>The ids of the open deploy incidents this process owns (the monitor beats for them).</summary>
+    /// <summary>The ids of the open deploy incidents this process owns (the monitor beats for them). On the shared HTTP server
+    /// every caller's deploy carries this pid and the caller's label, while the monitor runs as no caller: it beats them all
+    /// for as long as the server runs (once it stops after being idle, they are orphaned like any dead session's).</summary>
     public static List<string> Mine(IncidentFile f) =>
-        f.Incidents.Where(i => i.IsOpen && i.Kind == "deploy" && i.OwnerPid == SessionIdentity.Pid && i.RaisedBy == SessionIdentity.Label).Select(i => i.Id).ToList();
+        f.Incidents.Where(i => i.IsOpen && i.Kind == "deploy" && i.OwnerPid == SessionIdentity.Pid
+                               && (SessionIdentity.Kind == "mcp-http" || i.RaisedBy == SessionIdentity.Label)).Select(i => i.Id).ToList();
 
     // ── The scan: main-checkout submodules detached off origin/main with no deploy on the board ──
 

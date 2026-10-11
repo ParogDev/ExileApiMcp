@@ -1,3 +1,4 @@
+using ExileApiMcp.Hosting;
 using ModelContextProtocol;
 using Newtonsoft.Json.Linq;
 
@@ -61,7 +62,7 @@ public sealed class BridgeRegistry : IDisposable
     private List<BridgeClient> ForCaller(Hosting.CallerIdentity c)
     {
         SweepIdleCallers();
-        var set = _callers.GetOrAdd(c.Label, _ => new CallerBridges(_layout.Select(x => new BridgeClient(x.Game, x.Dir, _port, c)).ToList()));
+        var set = _callers.GetOrAdd(SessionIdentity.IdOf(c), _ => new CallerBridges(_layout.Select(x => new BridgeClient(x.Game, x.Dir, _port, c)).ToList()));
         Interlocked.Exchange(ref set.LastUsedTicks, DateTime.UtcNow.Ticks);
         return set.Bridges;
     }

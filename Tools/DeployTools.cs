@@ -92,7 +92,8 @@ public static class DeployTools
         string? takeover = null;
         if (act != "status" && state != null && state.By != SessionIdentity.Label)
         {
-            var mine = owner.Incident?.OwnerPid == SessionIdentity.Pid;
+            // The pid alone is not the session on the shared HTTP server: every caller there has its pid (Hosting/CallerIdentity.cs).
+            var mine = owner.Incident?.OwnerPid == SessionIdentity.Pid && owner.Incident.RaisedBy == SessionIdentity.Label;
             if (owner.Incident == null)
             {
                 if (!force)

@@ -30,7 +30,16 @@ public static class SessionIdentity
     /// <summary>Stable for the life of the session; a reconnect after a HUD restart or a server swap re-identifies as the same session.
     /// A caller of the shared HTTP server is its own session: its label at this server's pid.</summary>
     public static string Id => CallerIdentity.Current is { } c ? IdOf(c) : _id;
-    public static string IdOf(CallerIdentity c) => $"{c.Label}#{Pid}";
+    /// <summary>A caller's session id: its label and checkout, not this server's pid, so the same agent stays the same session
+    /// to the HUD when the shared server stops after being idle and the next call starts a new one (its leases and guide card
+    /// carry over like after a hot swap), and two checkouts on the same branch stay two sessions.</summary>
+    public static string IdOf(CallerIdentity c) => $"{c.Label}#http-{Hash8(c.Cwd ?? c.Label)}";
+
+    private static string Hash8(string s)
+    {
+        var h = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(s.ToLowerInvariant()));
+        return Convert.ToHexString(h, 0, 4).ToLowerInvariant();
+    }
     public static string Kind { get; set; } = "mcp";
     /// <summary>Bumped when the identity changes (AdoptRoots); bridge connections re-send session.hello.</summary>
     public static int Revision { get; private set; }
@@ -74,6 +83,11 @@ public static class SessionIdentity
     /// HEXILE_REPO (run.cmd sets it to its own checkout), else walk up from the cwd.</summary>
     public static string? RepoRoot()
     {
+        // A caller of the shared HTTP server works in its own checkout (deploy_plugin deploys from there), not the main one
+        // HEXILE_REPO names for the server itself.
+        if (CallerIdentity.Current?.Cwd is { } callerCwd && Directory.Exists(callerCwd))
+            for (var dir = new DirectoryInfo(callerCwd); dir != null; dir = dir.Parent)
+                if (File.Exists(Path.Combine(dir.FullName, "tools", "restart-hud.ps1"))) return dir.FullName;
         for (var dir = ProjectRoot == null ? null : new DirectoryInfo(ProjectRoot); dir != null; dir = dir.Parent)
             if (File.Exists(Path.Combine(dir.FullName, "tools", "restart-hud.ps1"))) return dir.FullName;
         if (Environment.GetEnvironmentVariable("HEXILE_REPO") is { Length: > 0 } env && File.Exists(Path.Combine(env, "tools", "restart-hud.ps1")))

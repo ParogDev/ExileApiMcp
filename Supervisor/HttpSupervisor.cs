@@ -13,15 +13,20 @@ public sealed class HttpSupervisor(SupervisorOptions opts) : SupervisorBase(opts
 {
     private CancellationToken _ct;
     // --idle-exit: connections open right now (any worker, a blocking observe_wait included) and when the last one closed.
+    // Counted under _idleLock at accept, so the idle decision and a new connection can't cross: once _stopping is set the
+    // listener is closed (new callers get connection refused, and mcp-call starts a fresh server).
     private int _open;
     private long _lastActivityTicks = DateTime.UtcNow.Ticks;
+    private readonly object _idleLock = new();
+    private bool _stopping;
+    private TcpListener? _listener;
 
     public async Task<int> RunAsync()
     {
         using var cts = new CancellationTokenSource();
         _ct = cts.Token;
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
-        var listener = new TcpListener(IPAddress.Loopback, Opts.Port);
+        var listener = _listener = new TcpListener(IPAddress.Loopback, Opts.Port);
         try { listener.Start(); }
         catch (SocketException ex)
         {
@@ -41,10 +46,16 @@ public sealed class HttpSupervisor(SupervisorOptions opts) : SupervisorBase(opts
             while (!_ct.IsCancellationRequested)
             {
                 var client = await listener.AcceptTcpClientAsync(_ct);
+                lock (_idleLock)
+                {
+                    if (_stopping) { client.Dispose(); break; }
+                    _open++;
+                }
                 _ = Task.Run(() => PipeAsync(client));
             }
         }
         catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is SocketException or ObjectDisposedException && _stopping) { }   // closed by the idle stop
         finally
         {
             listener.Stop();
@@ -69,23 +80,28 @@ public sealed class HttpSupervisor(SupervisorOptions opts) : SupervisorBase(opts
         while (!_ct.IsCancellationRequested)
         {
             try { await Task.Delay(tick, _ct); } catch (OperationCanceledException) { return; }
-            if (Volatile.Read(ref _open) > 0) continue;
-            var idleFor = DateTime.UtcNow - new DateTime(Interlocked.Read(ref _lastActivityTicks), DateTimeKind.Utc);
-            if (idleFor < limit) continue;
+            TimeSpan idleFor;
+            lock (_idleLock)
+            {
+                if (_open > 0) continue;
+                idleFor = DateTime.UtcNow - new DateTime(_lastActivityTicks, DateTimeKind.Utc);
+                if (idleFor < limit) continue;
+                _stopping = true;
+                _listener?.Stop();   // from here on, callers get connection refused (mcp-call then starts a new server)
+            }
             Log($"no connection for {idleFor.TotalMinutes:0.#} min (--idle-exit {limit.TotalMinutes:0.##}): stopping; the next mcp-call starts it again");
             cts.Cancel();
             return;
         }
     }
 
+    /// <summary>Pipes one accepted connection (already counted in _open by the accept loop).</summary>
     private async Task PipeAsync(TcpClient client)
     {
-        Interlocked.Increment(ref _open);
         try { await PipeToWorkerAsync(client); }
         finally
         {
-            Interlocked.Exchange(ref _lastActivityTicks, DateTime.UtcNow.Ticks);
-            Interlocked.Decrement(ref _open);
+            lock (_idleLock) { _lastActivityTicks = DateTime.UtcNow.Ticks; _open--; }
         }
     }
 
