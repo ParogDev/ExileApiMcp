@@ -326,7 +326,8 @@ Start Port    End Port
         File.WriteAllText(Path.Combine(pkgCc, "2.1.295", "bb", "claude.exe"), "");
         var login = ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(exe!, profile, local);
         Check("login: the package path outside the MSIX, same version and hash, in PowerShell form",
-            login == "& \"$env:LOCALAPPDATA\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\claude-code\\2.1.295\\bb\\claude.exe\" auth login", login);
+            login == "& \"$env:LOCALAPPDATA" + Path.DirectorySeparatorChar   // CI runs on Linux: the separator is the platform's
+                + Path.Combine("Packages", "Claude_pzs8sxrjxfjjc", "LocalCache", "Roaming", "Claude", "claude-code", "2.1.295", "bb", "claude.exe") + "\" auth login", login);
         Check("login: a path already in the package stays (as $env:LOCALAPPDATA)",
             ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(Path.Combine(pkgCc, "2.1.295", "bb", "claude.exe"), profile, local + "\\") == login);
         var redirected = ExileApiMcp.Dispatch.FeedbackKit.LoginCommand(exe!, profile, @"D:\Elsewhere\Local");
