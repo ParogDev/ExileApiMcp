@@ -54,14 +54,14 @@ public static class AgentStatusTools
         if (item == null)
         {
             if (r["error"] != null) throw new McpException($"work.set refused: {r["error"]}: {r["message"]}");
-            throw new McpException($"This bridge build has no work.set (it answered {FeedbackKit.Clip(r.ToString(Newtonsoft.Json.Formatting.None), 120)}): " +
+            throw new McpException($"This bridge build has no work.set (it answered {F8.Fit(r.ToString(Newtonsoft.Json.Formatting.None), 120)}): " +
                                    "update Whats An AI Bridge and restart the HUD (hud_restart).");
         }
         var result = new AgentStatusResult { Ok = true, Item = Dto.From<AgentWork>(item) };
         return Dto.Result(result, $"Your board row: {WorkLine(result.Item)}");
     }
 
-    private static string? Clip(string? s, int max) => FeedbackKit.Clip(s, max) is { Length: > 0 } c ? c : null;
+    private static string? Clip(string? s, int max) => F8.Fit(s, max) is { Length: > 0 } c ? c : null;
 
     /// <summary>One work item as a short line: "F8 #12 Wrong place - Fixing (waits on Ci): text".</summary>
     internal static string WorkLine(AgentWork? w)
@@ -71,7 +71,7 @@ public static class AgentStatusTools
         var line = $"{what} - {w.Stage ?? "?"}";
         if (w.WaitingOn is { } wo && wo != "None") line += $" (waits on {wo}{(wo == "Player" && w.Ask != null ? $": {w.Ask}" : "")})";
         if (w.Pr is { } pr) line += $" [PR #{pr.Number}{(pr.Checks != null ? " " + pr.Checks : "")}]";
-        if (w.Text != null) line += $": {FeedbackKit.Clip(w.Text, 120)}";
+        if (w.Text != null) line += $": {F8.Fit(w.Text, 120)}";
         return line;
     }
 }

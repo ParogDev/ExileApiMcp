@@ -22,6 +22,9 @@ public static class F8
 
     public static readonly string[] Finals = ["Done", "Failed", "Dropped"];
 
+    /// <summary>FeedbackKit.Clip held to the limit itself (C11: Clip may add "..." past it); "" for nothing.</summary>
+    public static string Fit(string? s, int max) => FeedbackKit.Clip(s, max) is var c && c.Length <= max ? c : FeedbackKit.Clip(s, max - 3);
+
     /// <summary>The canonical stage name for any casing ("livefix" -> "LiveFix"), or null when it is not a stage.</summary>
     public static string? Stage(string? s) => s == null ? null : Array.Find(Stages, x => x.Equals(s.Trim(), StringComparison.OrdinalIgnoreCase));
 
@@ -132,15 +135,15 @@ public static class F8
         string? waitingOn = null, string? status = null, DateTime? at = null)
     {
         var s = Stage(stage) ?? throw new ArgumentException($"'{stage}' is not a stage ({string.Join(" | ", Stages)})");
-        var t = FeedbackKit.Clip(text, 400) is { Length: > 0 } x ? x : DefaultText(s, seq);
+        var t = F8.Fit(text, 400) is { Length: > 0 } x ? x : DefaultText(s, seq);
         var st = status ?? LegacyStatus(s);
         return new F8ReplyData
         {
             RefLegacy = seq, StatusLegacy = st, TextLegacy = t,
             Ref = seq, Status = st, Text = t, Stage = s,
             WaitingOn = WaitingOn(waitingOn),
-            Detail = FeedbackKit.Clip(detail, 400) is { Length: > 0 } d ? d : null,
-            Ask = FeedbackKit.Clip(ask, 120) is { Length: > 0 } a ? a : null,
+            Detail = F8.Fit(detail, 400) is { Length: > 0 } d ? d : null,
+            Ask = F8.Fit(ask, 120) is { Length: > 0 } a ? a : null,
             Pr = pr, At = at ?? DateTime.UtcNow,
         };
     }
@@ -205,7 +208,7 @@ public static class F8
         if (Reopens(d))
         {
             sb.AppendLine($"**This reopens #{PressRef(d)}: the player says it is STILL WRONG after that fix.**");
-            sb.AppendLine(reopenedAnswer != null ? $"#{PressRef(d)} answered: \"{FeedbackKit.Clip(reopenedAnswer, 400)}\"" : $"(#{PressRef(d)}'s answer is not on record: feedback_sessions has it.)");
+            sb.AppendLine(reopenedAnswer != null ? $"#{PressRef(d)} answered: \"{F8.Fit(reopenedAnswer, 400)}\"" : $"(#{PressRef(d)}'s answer is not on record: feedback_sessions has it.)");
             sb.AppendLine("Start from that fix: what it changed, and why the step is still wrong.");
             sb.AppendLine();
         }
@@ -244,7 +247,7 @@ public static class F8
                 "watch-next" => "- Player will show you what they do next (a capture follows).",
                 _ => $"- Hint: {h}",
             });
-        if (Str(d, "WatchFor") is { } wf) sb.AppendLine($"Where to look, in the player's words: \"{FeedbackKit.Clip(wf, 200)}\"");
+        if (Str(d, "WatchFor") is { } wf) sb.AppendLine($"Where to look, in the player's words: \"{F8.Fit(wf, 200)}\"");
         if (d["WatchNext"]?.Value<bool>() == true || hints.Contains("watch-next"))
             sb.AppendLine($"**A feedback.capture event with Ref={seq} follows within 90 s** (what the player does next): wait for it with " +
                           $"`pubsub_wait kinds=[\"feedback.capture\"] since={seq} timeoutSec=90` before you conclude.");
@@ -294,8 +297,8 @@ public static class AgentRouteKit
             out_.Add(new AgentRouteStepArg
             {
                 Target = target,
-                Label = FeedbackKit.Clip(s.Label, 40),
-                Note = FeedbackKit.Clip(s.Note, 120) is { Length: > 0 } note ? note : null,
+                Label = F8.Fit(s.Label, 40),
+                Note = F8.Fit(s.Note, 120) is { Length: > 0 } note ? note : null,
                 Done = new AgentRouteDoneRule { Kind = kind, Value = value, Within = s.Done?.Within is { } w ? Math.Clamp(w, 1, 200) : null },
                 Highlight = s.Highlight is { ValueKind: System.Text.Json.JsonValueKind.Object } h ? h : null,
                 WithinCells = s.WithinCells is { } wc ? Math.Clamp(wc, 1, 200) : null,
@@ -303,7 +306,7 @@ public static class AgentRouteKit
         }
         return new AgentRouteCommand
         {
-            Op = "set", Id = id, Ref = @ref, Title = FeedbackKit.Clip(title, 40), Reason = FeedbackKit.Clip(reason, 120),
+            Op = "set", Id = id, Ref = @ref, Title = F8.Fit(title, 40), Reason = F8.Fit(reason, 120),
             TtlSec = Math.Clamp(ttlSec ?? DefaultTtl, MinTtl, MaxTtl), HandBack = hb, Steps = out_,
         };
     }

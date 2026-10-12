@@ -122,6 +122,8 @@ public sealed class FeedbackReply
     public DateTimeOffset? At { get; set; }
     /// <summary>claimed | queued | working | done | failed</summary>
     public string? Status { get; set; }
+    /// <summary>The F8 stage it moved the press to (Investigating, Fixing, LiveFix, Verifying, Done...); null from replies before stages.</summary>
+    public string? Stage { get; set; }
     public string? Text { get; set; }
     /// <summary>route-dispatcher, or the handler's label (route-f8-&lt;seq&gt;) when it spoke itself.</summary>
     public string? Source { get; set; }

@@ -33,6 +33,10 @@ namespace ExileApiMcp.Dispatch;
 /// One handler at a time (they share route.live.json): later presses wait, and the card says so. Every link that can break
 /// is said on the card and raised as incident feedback-dispatch:machine (CLI not found, not logged in, the session
 /// failing to start), never dropped: the press stays queued (unclaimed) and is retried every minute.
+/// Every reply carries the press's F8 stage (Dispatch/F8.cs): Queued, Claimed, Reading, Merging / Deploying where it lands
+/// a fix, Verifying (a fixed press is watched up to 3 min for route progress, handlers\&lt;seq&gt;\verify.json), Done, Failed,
+/// Dropped. A works-only press and the compose panel's "Works now" are answered at once without a session (NotesAsync);
+/// "Still wrong" is a new press whose brief leads with the old answer, the old one Dropped.
 /// State: handlers\dispatcher.json (MCP feedback_dispatcher) and handlers\&lt;seq&gt;\ (brief, output, stderr, state.json);
 /// any worker picks up a running handler from its state.json (Adopt), whoever started it.
 /// </summary>
@@ -136,6 +140,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             Take(e);
         }
         (_status, _why) = _env.Why != null ? ("broken", EnvText()) : ("listening", "");
+        if (_notes.Count > 0) await NotesAsync(ct);
+        await VerifyAsync(ct);
         if (_running == null) await StartNextAsync(ct);
         else await TellQueuedAsync(ct);
     }
@@ -154,9 +160,135 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         if (_trace.Count > 400) _trace.RemoveAt(0);
         if (kind != FeedbackKit.PressKind) return;
         var age = FeedbackKit.At(e["at"]) is { } at ? DateTimeOffset.UtcNow - at : TimeSpan.Zero;
-        if (e["data"]?["Event"]?.ToString() == "works" || age > PressMaxAge || e["claims"]?["reply"] != null) return;   // nothing to do, too old, answered
+        if (age > PressMaxAge || e["claims"]?["reply"] != null) return;                                                // too old, answered
+        var d = e["data"] as JObject ?? new JObject();
+        // C7 and the verify row's "Works now": recorded and answered at once (NotesAsync), no session. They stay in the
+        // trace, so the next handler's brief shows them.
+        if (F8.WorksOnly(d) || F8.ConfirmsRef(d)) { if (age < NoteMaxAge) _notes[seq] = e; return; }
         if (e["claims"]?["handle"] is JObject h && h["lapsed"]?.Value<bool>() != true) return;                         // a live handler has it
         _presses[seq] = e;
+    }
+
+    // ── Presses that need no session (C7, the verify row) ────────────
+
+    private readonly Dictionary<long, JObject> _notes = new();
+    /// <summary>A note older than this (read again by a new worker, from before notes were answered) is left alone.</summary>
+    private static readonly TimeSpan NoteMaxAge = TimeSpan.FromMinutes(10);
+
+    /// <summary>A "works here" press, or "Works now" about an earlier fix: answered Done at once (exactly once across
+    /// dispatchers: the reply stage is claimed first); "Works now" also ends the press it is about ("confirmed by you").</summary>
+    private async Task NotesAsync(CancellationToken ct)
+    {
+        foreach (var (seq, e) in _notes.ToList())
+        {
+            // A bridge call that throws leaves the note for the next step.
+            var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject { ["seq"] = seq, ["stage"] = "reply", ["by"] = By }, ct);
+            _notes.Remove(seq);
+            if (c["ok"]?.Value<bool>() != true) continue;   // another dispatcher answered it
+            var d = e["data"] as JObject ?? new JObject();
+            if (F8.ConfirmsRef(d) && F8.PressRef(d) is { } about)
+            {
+                EndVerify(about);
+                await ReplyAsync(about, "Done", $"#{about}: confirmed by you. Thanks!", ct);
+                await ReplyAsync(seq, "Done", $"Noted: #{about}'s fix works.", ct);
+                Console.Error.WriteLine($"[Dispatch] #{seq}: the player confirmed #{about}'s fix");
+            }
+            else
+            {
+                await ReplyAsync(seq, "Done", "Noted: works here", ct);
+                Console.Error.WriteLine($"[Dispatch] #{seq}: works here (noted, no session)");
+            }
+        }
+    }
+
+    // ── Verifying a fix (C6) ─────────────────────────────────────────
+
+    private static readonly TimeSpan VerifyFor = TimeSpan.FromMinutes(3);
+    private DateTime _nextVerify = DateTime.MinValue;
+
+    /// <summary>handlers\&lt;seq&gt;\verify.json: a press in Verifying (stateless: any worker carries the watch on).</summary>
+    private sealed class VerifyState
+    {
+        public long Seq { get; set; }
+        /// <summary>Route trace events after this bridge sequence count as progress.</summary>
+        public long Since { get; set; }
+        public DateTimeOffset Until { get; set; }
+        public string? Answer { get; set; }
+    }
+
+    private static string VerifyFile(long seq) => Path.Combine(HandlersDir, seq.ToString(), "verify.json");
+
+    private void StartVerify(long seq, string answer)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(VerifyFile(seq))!);
+            File.WriteAllText(VerifyFile(seq), JsonSerializer.Serialize(new VerifyState { Seq = seq, Since = _cursor, Until = DateTimeOffset.UtcNow + VerifyFor, Answer = answer }, Dto.Options));
+        }
+        catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] #{seq}: writing verify.json: {ex.Message}"); }
+    }
+
+    /// <summary>The player answered (Works now / Still wrong) or the watch ended: no more watching.</summary>
+    private static void EndVerify(long seq)
+    {
+        try { File.Delete(VerifyFile(seq)); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>A press whose handler ended with a fix: its replies reached Fixing or later, or the route reloaded its live
+    /// fixes while it ran (Whats A Route's route-reloaded / live-reloaded trace), or the sync brought a change into the HUD.</summary>
+    private bool HadFix(FeedbackHandlerState h, IEnumerable<JObject> replies) =>
+        replies.Any(r => F8.Rank(F8.ReplyStage(r["data"])) is var k && k >= F8.Rank("Fixing") && k <= F8.Rank("Deploying"))
+        || _trace.Any(t => t["seq"]!.Value<long>() > h.Seq && t["kind"]?.ToString() == FeedbackKit.TraceKind
+                           && t["data"]?["Event"]?.ToString() is "route-reloaded" or "live-reloaded")
+        || h.Sync?.Contains("reloaded clean", StringComparison.Ordinal) == true;   // MainSync: "<plugin> a -> b, reloaded clean"
+
+    /// <summary>Presses in Verifying: Done "confirmed" once the route trace shows progress (an objective or quest event after
+    /// the fix), else Done "unconfirmed" after 3 min. Exactly once across dispatchers (claim stage verify).</summary>
+    private async Task VerifyAsync(CancellationToken ct)
+    {
+        if (DateTime.UtcNow < _nextVerify || !Directory.Exists(HandlersDir)) return;
+        _nextVerify = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+        foreach (var dir in Directory.EnumerateDirectories(HandlersDir))
+        {
+            var f = Path.Combine(dir, "verify.json");
+            if (!File.Exists(f)) continue;
+            VerifyState? v;
+            try { v = JsonSerializer.Deserialize<VerifyState>(File.ReadAllText(f), Dto.Options); } catch { continue; }
+            if (v == null) continue;
+            var moved = _trace.FirstOrDefault(t => t["seq"]!.Value<long>() > v.Since && t["kind"]?.ToString() == FeedbackKit.TraceKind
+                                                   && t["data"]?["Event"]?.ToString() is "objective" or "quest");
+            if (moved == null && DateTimeOffset.UtcNow < v.Until) continue;
+            var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject { ["seq"] = v.Seq, ["stage"] = "verify", ["by"] = By }, ct);
+            EndVerify(v.Seq);
+            if (c["ok"]?.Value<bool>() != true) continue;   // another dispatcher ended it
+            if (moved != null)
+            {
+                var what = moved["data"]?["Label"]?.ToString() is { Length: > 0 } l ? $" (now: {l})" : "";
+                await ReplyAsync(v.Seq, "Done", $"#{v.Seq} confirmed: you moved past it{what}.", ct, detail: v.Answer);
+            }
+            else await ReplyAsync(v.Seq, "Done", $"#{v.Seq} unconfirmed: press F8 if it is still wrong.", ct, detail: v.Answer);
+            Console.Error.WriteLine($"[Dispatch] #{v.Seq}: verification {(moved != null ? $"confirmed by trace #{moved["seq"]}" : "timed out")}");
+        }
+    }
+
+    /// <summary>A press's last answer: its handler's final message, else the last text replied to it.</summary>
+    private string? AnswerOf(long seq)
+    {
+        try
+        {
+            var f = Path.Combine(HandlersDir, seq.ToString(), "state.json");
+            if (File.Exists(f) && JsonSerializer.Deserialize<FeedbackHandlerState>(File.ReadAllText(f), Dto.Options)?.Result is { Length: > 0 } r) return r;
+        }
+        catch { }
+        return _replies.LastOrDefault(x => F8.ReplyRef(x["data"]) == seq) is { } last ? F8.ReplyText(last["data"]) : null;
+    }
+
+    /// <summary>Where press <paramref name="seq"/> stands (for a line that must not move it): its current stage when it is
+    /// not final, else Reading.</summary>
+    private async Task<string> StageNowAsync(long seq, CancellationToken ct)
+    {
+        try { return await F8Replies.CurrentStageAsync(bridges, _game, seq, ct) is { } s && !F8.IsFinal(s) && F8.Rank(s) >= F8.Rank("Reading") ? s : "Reading"; }
+        catch (ModelContextProtocol.McpException) { return "Reading"; }
     }
 
     // ── Starting a handler ───────────────────────────────────────────
@@ -178,7 +310,15 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             Console.Error.WriteLine($"[Dispatch] #{seq} not ours: {c["message"] ?? c["error"]}");
             return;
         }
-        await ReplyAsync(seq, "claimed", $"Claude is on it (#{seq}): a fresh session is reading your note.", ct);
+        await ReplyAsync(seq, "Claimed", $"Claude is on it (#{seq}): a fresh session is reading your note.", ct);
+        // "Still wrong" about an earlier fix: that press ends here (Dropped), and this one's brief leads with its answer.
+        string? reopenedAnswer = null;
+        if (press["data"] is JObject pd && F8.Reopens(pd) && F8.PressRef(pd) is { } reopened)
+        {
+            reopenedAnswer = AnswerOf(reopened);
+            EndVerify(reopened);
+            await ReplyAsync(reopened, "Dropped", $"#{reopened}: still wrong, reopened as #{seq}.", ct, detail: $"reopened as #{seq}");
+        }
 
         var dir = Path.Combine(HandlersDir, seq.ToString());
         var state = new FeedbackHandlerState { Seq = seq, Status = "starting", StartedAt = DateTimeOffset.UtcNow, Dir = dir };
@@ -189,9 +329,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             var briefPath = Path.Combine(dir, "brief.md");
             var previous = _trace.Where(t => t["kind"]?.ToString() == FeedbackKit.PressKind && t["seq"]!.Value<long>() < seq).Select(t => (long?)t["seq"]!.Value<long>()).LastOrDefault();
             var trace = _trace.Where(t => t["kind"]?.ToString() == FeedbackKit.TraceKind && t["seq"]!.Value<long>() < seq && t["seq"]!.Value<long>() > (previous ?? 0)).TakeLast(80).ToList();
-            var replies = _replies.Where(x => x["data"]?["status"]?.ToString() == "done").TakeLast(3).ToList();
+            var replies = _replies.Where(x => F8.ReplyStage(x["data"]) == "Done").TakeLast(3).ToList();
             var standingBrief = Path.Combine(repo, "Plugins", "Whats A Route", "docs", "feedback-agent.md");
-            File.WriteAllText(briefPath, FeedbackKit.Brief(press, trace, replies, standingBrief, LiveDir, previous));
+            File.WriteAllText(briefPath, FeedbackKit.Brief(press, trace, replies, standingBrief, LiveDir, previous, reopenedAnswer));
             File.WriteAllText(Path.Combine(dir, "prompt.txt"), FeedbackKit.Prompt(seq, briefPath));
             var mcpConfig = Path.Combine(dir, "mcp.json");
             File.WriteAllText(mcpConfig, McpConfigJson(seq, Path.Combine(repo, ".claude", "worktrees", FeedbackKit.Label(seq))));
@@ -235,7 +375,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             _presses.Remove(seq);
             SaveHandler(state);
             Console.Error.WriteLine($"[Dispatch] #{seq}: handler started, {state.Mode} ({(state.BackgroundId != null ? $"background session {state.BackgroundId}" : $"pid {state.Pid}")}, {_env.Exe})");
-            await ReplyAsync(seq, "working", FeedbackKit.WhereText(seq, state.Mode, state.Name, state.FallbackReason), ct);
+            await ReplyAsync(seq, "Reading", FeedbackKit.WhereText(seq, state.Mode, state.Name, state.FallbackReason), ct, onlyForward: true);
             IncidentStore.ResolveKeys([IncidentKey], $"a handler started for F8 press #{seq}");
             _toldFailed.Remove(seq);
         }
@@ -246,7 +386,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             SaveHandler(state);
             await ReleaseAsync(seq, why, ct);   // the press stays in _presses: retried after RetryEvery
             _nextStart = DateTime.UtcNow + RetryEvery;
-            if (_toldFailed.Add(seq)) await FailAsync(seq, why + " (it is kept and retried every minute)", fix, ct);
+            if (_toldFailed.Add(seq)) await FailAsync(seq, why + " (it is kept and retried every minute)", fix, false, ct);
         }
     }
 
@@ -368,7 +508,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         if (DateTime.UtcNow >= _nextEnvCheck) await RefreshEnvironmentAsync(ct);
         if (_env.Why == null) return true;
         _status = "broken"; _why = EnvText();
-        if (_toldFailed.Add(seq)) await FailAsync(seq, _env.Why + " (it is kept and handled once that is fixed)", _env.Fix, ct);
+        if (_toldFailed.Add(seq)) await FailAsync(seq, _env.Why + " (it is kept and handled once that is fixed)", _env.Fix, false, ct);
         return false;
     }
 
@@ -585,7 +725,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         else if (agent.Value.State == "blocked" && agent.Value.Alive)
         {
             if (_toldBlocked.Add(h.Seq))
-                await ReplyAsync(h.Seq, "working", $"#{h.Seq} waits for an answer: open \"{h.Name}\" in Claude (claude.ai/code or the Claude app).", ct);
+                await ReplyAsync(h.Seq, await StageNowAsync(h.Seq, ct), $"#{h.Seq} waits for an answer: open \"{h.Name}\" in Claude (claude.ai/code or the Claude app).", ct,
+                    detail: "the handler session asked a question in Claude, not in game");
             return;
         }
         else if (agent.Value.State == "done" && (t.TurnEnded || !agent.Value.Alive || DoneFor(h.Seq) > DoneGrace)) { }   // its turn ended: the answer is written
@@ -708,14 +849,21 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         {
             // Read the replies fresh: the handler may have said done just before it exited (feedback_reply).
             var (_, rr) = await bridges.CallAsync(_game, "pubsub.events", new JObject { ["since"] = h.Seq, ["kinds"] = new JArray(FeedbackKit.ReplyKind), ["limit"] = 500 }, ct);
-            var handlerSaidDone = (rr["events"] as JArray ?? []).Any(x => x["data"]?["ref"]?.Value<long>() == h.Seq && x["source"]?.ToString() != Subscriber
-                                                                         && x["data"]?["status"]?.ToString() is "done" or "failed");
-            if (failed) await FailAsync(h.Seq, $"its Claude session failed: {error}", h.Url != null ? $"Its transcript: {h.Url}" : $"Details: {h.Dir}", ct);
+            var handlerSaidDone = (rr["events"] as JArray ?? []).Any(x => F8.ReplyRef(x["data"]) == h.Seq && x["source"]?.ToString() != Subscriber
+                                                                         && F8.IsFinal(F8.ReplyStage(x["data"])));
+            if (failed) await FailAsync(h.Seq, $"its Claude session failed: {error}", h.Url != null ? $"Its transcript: {h.Url}" : $"Details: {h.Dir}", true, ct);
             else if (!handlerSaidDone)
             {
                 var text = FeedbackKit.Clip(result, h.Mode == "remote-control" ? 340 : 400) is { Length: > 0 } t ? t : $"Done with #{h.Seq}.";
                 if (h.Mode == "remote-control") text += $" (Transcript: \"F8 #{h.Seq}\" in Claude.)";
-                await ReplyAsync(h.Seq, "done", text, ct);
+                // C6: a press that got a fix is watched for up to 3 min (VerifyAsync) before it ends; the answer shows meanwhile.
+                var replies = (rr["events"] as JArray ?? []).OfType<JObject>().Where(x => F8.ReplyRef(x["data"]) == h.Seq).ToList();
+                if (HadFix(h, replies))
+                {
+                    StartVerify(h.Seq, text);
+                    await ReplyAsync(h.Seq, "Verifying", text, ct, detail: "Watching the route for the step to move on (3 min). F8 > Works now / Still wrong says it sooner.");
+                }
+                else await ReplyAsync(h.Seq, "Done", text, ct);
             }
             h.Replied = true;
         }
@@ -880,13 +1028,14 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             // Leave it, or an answer that isn't one of the choices: never read as Close (that deletes the fix's branch).
             u.Status = "kept"; u.Outcome = answer == UnmergedFix.Leave ? "the player chose to leave it" : $"unknown answer '{answer}': left as it is";
             SaveHandler(h);
-            await ReplyAsync(h.Seq, "done", $"#{h.Seq}: left as it is ({u.Repo} {what}); its worktree stays.", ct);
+            await ReplyAsync(h.Seq, "Done", $"#{h.Seq}: left as it is ({u.Repo} {what}); its worktree stays.", ct);
             return;
         }
         var merging = answer == UnmergedFix.Merge;
         u.Status = merging ? "merging" : "closing";
         SaveHandler(h);
-        if (merging) await ReplyAsync(h.Seq, "working", $"#{h.Seq}: merging {what} once its checks pass, then into the HUD.", ct);
+        if (merging) await ReplyAsync(h.Seq, "Merging", $"#{h.Seq}: merging {what} once its checks pass, then into the HUD.", ct, waitingOn: "Ci",
+            pr: u.Pr is { } prn ? new F8PrRef { Repo = u.Repo, Number = prn, Url = u.Repo != null ? $"https://github.com/{u.Repo}/pull/{prn}" : null, Checks = "pending" } : null);
         (_status, _why) = (u.Status, $"{(merging ? "merging" : "closing")} #{h.Seq}'s fix ({u.Repo} {what}), as the player chose on the card");
         var (failed, text) = await WithBeatAsync(() => Task.FromResult(merging ? UnmergedFix.DoMerge(h.Seq, h.Worktree!, u) : UnmergedFix.DoClose(h.Seq, h.Worktree!, u)), ct);
         u.Outcome = text;
@@ -895,7 +1044,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         {
             u.Status = "failed";
             SaveHandler(h);
-            await ReplyAsync(h.Seq, "failed", $"#{h.Seq}: {text}. The worktree is kept: {h.Worktree}", ct);
+            await ReplyAsync(h.Seq, "Failed", $"#{h.Seq}: {text}. The worktree is kept: {h.Worktree}", ct);
             return;
         }
         u.Status = merging ? "merged" : "closed";
@@ -903,12 +1052,13 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         if (merging)
         {
             // The merged fix into the HUD, as after a handler that merged itself.
+            await ReplyAsync(h.Seq, "Deploying", $"#{h.Seq}: {text}; bringing it into the HUD.", ct);
             var sync = await WithBeatAsync(() => MainSync.RunAsync(bridges, _game, HudSourceRepo()!, ct), ct);
             h.Sync = sync.Summary; h.SyncFailed = sync.Failed; h.SyncFix = sync.Fix;
             SaveHandler(h);
-            await ReplyAsync(h.Seq, sync.Failed ? "failed" : "done", sync.Failed ? $"#{h.Seq}: {text}; " + MainSync.FailText(h.Seq, sync) : $"#{h.Seq}: {text}; {sync.Summary}.", ct);
+            await ReplyAsync(h.Seq, sync.Failed ? "Failed" : "Done", sync.Failed ? $"#{h.Seq}: {text}; " + MainSync.FailText(h.Seq, sync) : $"#{h.Seq}: {text}; {sync.Summary}.", ct);
         }
-        else await ReplyAsync(h.Seq, "done", $"#{h.Seq}: {text}.", ct);
+        else await ReplyAsync(h.Seq, "Done", $"#{h.Seq}: {text}.", ct);
         RemoveWorktree(h, discard: !merging);
     }
 
@@ -957,6 +1107,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     {
         if (h.Sync != null) return h.SyncFailed == true ? new MainSync.Outcome(true, h.Sync, h.Sync, h.SyncFix) : null;
         if (HudSourceRepo() is not { } repo) { h.Sync = "skipped: the HUD source (Whats A Route's junction target) and the main scaffolding checkout are unknown"; SaveHandler(h); return null; }
+        // A handler that went through review (a PR) has a merged fix to land: the press shows Deploying meanwhile.
+        if (h.Error == null && await StageNowAsync(h.Seq, ct) is var now && F8.Rank(now) >= F8.Rank("Reviewing"))
+            await ReplyAsync(h.Seq, "Deploying", $"#{h.Seq}: bringing the merged fix into the HUD.", ct, onlyForward: true);
         MainSync.Outcome o;
         // The sync can take minutes (fetch, pull, a compile): the status file keeps being written meanwhile, or
         // feedback_dispatcher would call this dispatcher not running.
@@ -985,7 +1138,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     private async Task TellSyncFailedAsync(FeedbackHandlerState h, MainSync.Outcome? failed, CancellationToken ct)
     {
         if (failed == null || !h.Replied) return;
-        await ReplyAsync(h.Seq, "failed", MainSync.FailText(h.Seq, failed), ct);
+        await ReplyAsync(h.Seq, "Failed", MainSync.FailText(h.Seq, failed), ct);
     }
 
     // ── Replies, failures, status ────────────────────────────────────
@@ -995,19 +1148,20 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         foreach (var seq in _presses.Keys.Where(s => !_toldQueued.Contains(s)).ToList())
         {
             _toldQueued.Add(seq);
-            await ReplyAsync(seq, "queued", $"Got #{seq}: Claude finishes #{_running?.Seq} first, then takes it.", ct);
+            await ReplyAsync(seq, "Queued", $"Got #{seq}: Claude finishes #{_running?.Seq} first, then takes it.", ct, waitingOn: "Session");
         }
     }
 
-    private async Task ReplyAsync(long seq, string status, string text, CancellationToken ct)
+    /// <summary>Publishes press <paramref name="seq"/>'s stage (feedback.reply, legacy status derived unless given).
+    /// onlyForward: only when it moves the press forward from where its replies stand (a stage the handler or the inference
+    /// already passed is not said again).</summary>
+    private async Task ReplyAsync(long seq, string stage, string text, CancellationToken ct, string? detail = null, string? waitingOn = null,
+        string? status = null, F8PrRef? pr = null, bool onlyForward = false)
     {
         try
         {
-            await bridges.CallAsync(_game, "pubsub.publish", new JObject
-            {
-                ["kind"] = FeedbackKit.ReplyKind, ["source"] = Subscriber,
-                ["data"] = new JObject { ["ref"] = seq, ["status"] = status, ["text"] = text },
-            }, ct);
+            if (onlyForward && F8.Advance(await F8Replies.CurrentStageAsync(bridges, _game, seq, ct), stage) == null) return;
+            await F8Replies.PublishAsync(bridges, _game, F8.Reply(seq, stage, text, detail, null, pr, waitingOn, status), Subscriber, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine($"[Dispatch] reply to #{seq} failed: {ex.Message}"); }
     }
@@ -1064,10 +1218,14 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] raising {IncidentKey}: {ex.Message}"); return false; }
     }
 
-    private async Task FailAsync(long seq, string why, string? fix, CancellationToken ct)
+    /// <summary>final: the press ends Failed. Otherwise it is kept and retried: it stays Queued, the card says the failure
+    /// (legacy status failed) and the work strip has the why.</summary>
+    private async Task FailAsync(long seq, string why, string? fix, bool final, CancellationToken ct)
     {
         Console.Error.WriteLine($"[Dispatch] #{seq}: {why}");
-        await ReplyAsync(seq, "failed", FeedbackKit.FailText(seq, why, fix), ct);
+        var text = FeedbackKit.FailText(seq, why, fix);
+        if (final) await ReplyAsync(seq, "Failed", text, ct);
+        else await ReplyAsync(seq, "Queued", text, ct, detail: why, waitingOn: "Session", status: "failed");
         RaiseIncident(why, fix, seq);
     }
 
