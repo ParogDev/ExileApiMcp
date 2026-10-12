@@ -26,8 +26,9 @@ namespace ExileApiMcp.Dispatch;
 /// Both start slim (FeedbackKit.SlimArguments): the standing brief as the system prompt, no CLAUDE.md or memory, only the
 /// tools a route fix needs. The final message goes to the card once (pubsub.claim stage reply first, and not at all when
 /// the handler already said done), and the worktree is removed when it holds no unmerged work. Before that answer, the
-/// handler's merged fix is brought into the HUD (MainSync: pull the main checkout, update Whats A Route, reload_plugin):
-/// handlers stop at "merged", since Claude Code's worktree isolation refuses every command aimed at the main checkout.
+/// handler's merged fix is brought into the HUD (MainSync: pull the HUD source, i.e. Whats A Route's junction target,
+/// hud-live or the main checkout; update Whats A Route; reload_plugin): handlers stop at "merged", since Claude Code's
+/// worktree isolation refuses every command aimed outside their worktree.
 ///
 /// One handler at a time (they share route.live.json): later presses wait, and the card says so. Every link that can break
 /// is said on the card and raised as incident feedback-dispatch:machine (CLI not found, not logged in, the session
@@ -900,7 +901,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         if (merging)
         {
             // The merged fix into the HUD, as after a handler that merged itself.
-            var sync = await WithBeatAsync(() => MainSync.RunAsync(bridges, _game, Repo()!, ct), ct);
+            var sync = await WithBeatAsync(() => MainSync.RunAsync(bridges, _game, HudSourceRepo()!, ct), ct);
             h.Sync = sync.Summary; h.SyncFailed = sync.Failed; h.SyncFix = sync.Fix;
             SaveHandler(h);
             await ReplyAsync(h.Seq, sync.Failed ? "failed" : "done", sync.Failed ? $"#{h.Seq}: {text}; " + MainSync.FailText(h.Seq, sync) : $"#{h.Seq}: {text}; {sync.Summary}.", ct);
