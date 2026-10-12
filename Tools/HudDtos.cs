@@ -375,6 +375,10 @@ public sealed class HudLintPlugin
 {
     public string Game { get; set; } = "";
     public string Plugin { get; set; } = "";
+    /// <summary>False when the DLL carries DebuggableAttribute(DisableOptimizations): the JIT runs it unoptimized.</summary>
+    public bool JitOptimized { get; set; } = true;
+    /// <summary>How to fix it, when JitOptimized is false.</summary>
+    public string? JitAdvice { get; set; }
     public List<HudLintFinding> Findings { get; set; } = [];
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

@@ -19,7 +19,8 @@ public static class PluginLintTools
         known-expensive HUD member (Entity.DistancePlayer, Entity.Pos, Stats, Buffs, GetComponent, GameController.Entities,
         Camera.WorldToScreen...) in code reachable from Tick/Render, with its measured cost (first call per entity per
         frame) and whether it sits in a loop or a per-item lambda (cost x entity count). The cheaper equivalent is in
-        each line; numbers from knowledge pack shared/api-costs. Use before profile_plugin to find likely hot spots, and
+        each line; numbers from knowledge pack shared/api-costs. It also flags plugins the JIT runs unoptimized
+        (jitOptimized=false: the HUD compiles source plugins in Debug; an AssemblyInfo.cs fixes it). Use before profile_plugin to find likely hot spots, and
         on your own plugin before committing.
         """)]
     public static CallToolResult HudPluginLint(BridgeRegistry bridges,
@@ -37,13 +38,16 @@ public static class PluginLintTools
                 try { findings = PluginLint.Lint(dll); }
                 catch (Exception ex) { sb.AppendLine($"{hud.Game} {src.Folder}: could not read {Path.GetFileName(dll)}: {ex.Message}"); continue; }
                 var hot = findings.Where(f => f.InLoop).ToList();
+                var jit = PluginLint.JitOptimized(dll);
                 sb.AppendLine($"{hud.Game} {src.Folder}: {findings.Count} expensive call site(s) on Tick/Render paths, {hot.Count} in loops/lambdas");
+                if (!jit) sb.AppendLine($"  JIT  {PluginLint.JitAdvice}");
                 foreach (var f in findings.Take(12))
                     sb.AppendLine($"  {(f.InLoop ? "LOOP" : "    ")} {f.Method}: {f.Call} x{f.Count} ({(f.CostNs > 0 ? $"~{f.CostNs:N0} ns each" : "allocates")}) -> {f.Advice}");
                 if (findings.Count > 12) sb.AppendLine($"  ... +{findings.Count - 12} more (structuredContent)");
                 result.Add(new JObject
                 {
                     ["game"] = hud.Game, ["plugin"] = src.Folder,
+                    ["jitOptimized"] = jit, ["jitAdvice"] = jit ? null : PluginLint.JitAdvice,
                     ["findings"] = new JArray(findings.Select(f => new JObject
                     {
                         ["method"] = f.Method, ["call"] = f.Call, ["count"] = f.Count, ["inLoop"] = f.InLoop, ["costNs"] = f.CostNs, ["advice"] = f.Advice,
