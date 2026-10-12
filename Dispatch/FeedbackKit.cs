@@ -186,9 +186,38 @@ public static class FeedbackKit
         Regex.Match(gitOutput, @"locked working tree, lock reason: claude session [^\r\n]*\(pid (\d+)\)") is { Success: true } m
         && int.TryParse(m.Groups[1].Value, out var pid) ? pid : null;
 
-    /// <summary>The short id `claude --bg` prints ("backgrounded · 98b400ca · name"), or null.</summary>
-    public static string? ParseBackgrounded(string stdout) =>
-        Regex.Match(Regex.Replace(stdout, @"\x1b\[[0-9;?]*[A-Za-z]", ""), @"backgrounded\s*\S\s*([0-9a-f]{6,})") is { Success: true } m ? m.Groups[1].Value : null;
+    /// <summary>The short id `claude --bg` prints ("backgrounded · 98b400ca · name", or its "claude attach 98b400ca" hint),
+    /// or null. The separator is matched loosely: read in the console's code page, "·" arrives as "â”¬â•–" (press #219
+    /// started a session a minute for 10 minutes because the id was never read).</summary>
+    public static string? ParseBackgrounded(string stdout)
+    {
+        var text = Regex.Replace(stdout, @"\x1b\[[0-9;?]*[A-Za-z]", "");
+        var m = Regex.Match(text, @"backgrounded[^0-9a-f\r\n]{1,16}?([0-9a-f]{6,})\b");
+        if (!m.Success) m = Regex.Match(text, @"claude attach ([0-9a-f]{6,})\b");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    /// <summary>The newest background session named <paramref name="name"/> in `claude agents --json --all` that started at or
+    /// after <paramref name="sinceMs"/> (unix ms), or null: the session a `claude --bg` started when its answer could not
+    /// be read. Throws FormatException when the output is not the list.</summary>
+    public static string? FindAgentByName(string json, string name, long sinceMs)
+    {
+        int from = json.IndexOf('['), to = json.LastIndexOf(']');
+        if (from < 0 || to < from) throw new FormatException($"`claude agents --json` printed no list: {Clip(json, 160)}");
+        try
+        {
+            using var doc = JsonDocument.Parse(json[from..(to + 1)]);
+            return doc.RootElement.EnumerateArray()
+                .Where(e => e.TryGetProperty("name", out var n) && n.GetString() == name && e.TryGetProperty("id", out var i) && i.ValueKind == JsonValueKind.String)
+                .Select(e => (Id: e.GetProperty("id").GetString(), At: e.TryGetProperty("startedAt", out var a) && a.ValueKind == JsonValueKind.Number ? a.GetInt64() : 0))
+                .Where(x => x.At >= sinceMs)
+                .OrderByDescending(x => x.At).Select(x => x.Id).FirstOrDefault();
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            throw new FormatException($"`claude agents --json` is not the expected list: {ex.Message}");
+        }
+    }
 
     /// <summary>One background session from `claude agents --json --all`: its session id, its state (working | blocked |
     /// done ...), and whether its process is alive (a stopped or exited one has no pid). Null when it is not listed.</summary>

@@ -392,6 +392,19 @@ Start Port    End Port
     Check("bg: short id from the CLI's answer",
         ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("Starting background service…\nbackgrounded · 98b400ca · F8 test\n  claude agents") == "98b400ca"
         && ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("Workspace not trusted.") == null);
+    Check("bg: short id through code-page mojibake (press #219) and from the attach hint",
+        ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("backgrounded â”¬â•– 1cfc0796 â”¬â•– F8 #219: Should be (Kingsmarch) claude agents list sessions") == "1cfc0796"
+        && ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("started\n  claude attach 2448b670   open in this terminal") == "2448b670"
+        && ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("backgrounded · F8 #12: abcdef fix") == null);
+    const string namedJson = """
+        [ { "id": "200d925a", "name": "F8 #219: x", "startedAt": 1000 },
+          { "id": "297d8314", "name": "F8 #219: x", "startedAt": 2000 },
+          { "id": "aaaaaaaa", "name": "F8 #220: y", "startedAt": 3000 } ]
+        """;
+    Check("agents: newest session by name since the start",
+        ExileApiMcp.Dispatch.FeedbackKit.FindAgentByName(namedJson, "F8 #219: x", 0) == "297d8314"
+        && ExileApiMcp.Dispatch.FeedbackKit.FindAgentByName(namedJson, "F8 #219: x", 2500) == null
+        && ExileApiMcp.Dispatch.FeedbackKit.FindAgentByName(namedJson, "F8 #221: z", 0) == null);
     const string agentsJson = """
         [ { "pid": 1, "kind": "interactive", "sessionId": "s0", "status": "busy" },
           { "pid": 26424, "id": "98b400ca", "kind": "background", "sessionId": "98b400ca-5279", "status": "idle", "state": "done" },

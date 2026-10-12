@@ -286,11 +286,27 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     /// </summary>
     private async Task<string> StartBackgroundAsync(IReadOnlyList<string> args, string workDir, long seq, CancellationToken ct)
     {
+        var since = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 5000;
         var (code, output, errors) = await RunCliAsync(args, workDir, TimeSpan.FromSeconds(90), ct, seq);
         var all = output + "\n" + errors;
         if (FeedbackKit.ParseBackgrounded(all) is { } id) return id;
         if (code != 0 && !all.Contains("backgrounded", StringComparison.OrdinalIgnoreCase))
             throw new BackgroundRefusedException($"`claude --bg` exited {code}: {FeedbackKit.Clip(all, 240)}");
+        // The answer could not be read, but a session may run: find it by name before calling this a failure, or the
+        // retry a minute later starts a second handler for the same press.
+        try
+        {
+            var (_, list, _) = await RunCliAsync(["agents", "--json", "--all"], null, TimeSpan.FromSeconds(30), ct);
+            if (FeedbackKit.FindAgentByName(list, args[args.ToList().IndexOf("--name") + 1], since) is { } found)
+            {
+                Console.Error.WriteLine($"[Dispatch] #{seq}: `claude --bg` printed no id it could read; found background session {found} by name");
+                return found;
+            }
+        }
+        catch (Exception ex) when (ex is HandlerStartException or FormatException or IOException or System.ComponentModel.Win32Exception)
+        {
+            Console.Error.WriteLine($"[Dispatch] #{seq}: looking the session up by name failed: {ex.Message}");
+        }
         throw new HandlerStartException($"`claude --bg` exited {code} without a session id it could read (it may have started one: `claude agents` lists it): {FeedbackKit.Clip(all, 240)}", null);
     }
 
@@ -306,6 +322,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         var psi = new ProcessStartInfo(_env.Exe ?? throw new HandlerStartException("the Claude Code CLI was not found", null))
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8, StandardErrorEncoding = System.Text.Encoding.UTF8,   // the CLI writes UTF-8, not the console code page
             WorkingDirectory = workDir ?? UserProfile,
         };
         foreach (var a in args) psi.ArgumentList.Add(a);
