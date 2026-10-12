@@ -44,6 +44,9 @@ public static class DeployTools
         [Description("deploy / restore: replace another session's LIVE deploy of this plugin (needs message too). An orphaned deploy (its session is gone or silent for 10 min) needs no force")] bool force = false,
         [Description("With force over a live deploy: what you tell its owner (recorded on its incident, which the owner hears about)")] string? message = null,
         [Description("poe1 | poe2: the HUD to reload; default every running HUD that compiles this folder")] string? game = null,
+        [Description("Absolute path of your scaffolding worktree (or any folder in it). Default: this MCP server's (or, on the shared " +
+                     "server, the caller's) working directory. Pass it when they differ, e.g. a session that started in the main " +
+                     "checkout and then entered a worktree: its server still runs from the main checkout")] string? worktree = null,
         CancellationToken ct = default)
     {
         var act = action.Trim().ToLowerInvariant();
@@ -51,7 +54,9 @@ public static class DeployTools
         var r = new DeployResult { Action = act };
 
         // ── Where things are: this session's checkout, the main checkout, the HUD junctions ──
-        var here = SessionIdentity.WorkingRepoRoot() ?? throw new McpException("Not running in the scaffolding repo (tools\\restart-hud.ps1 not found from the cwd; HEXILE_REPO unset).");
+        var here = string.IsNullOrWhiteSpace(worktree)
+            ? SessionIdentity.WorkingRepoRoot() ?? throw new McpException("Not running in the scaffolding repo (tools\\restart-hud.ps1 not found from the cwd; HEXILE_REPO unset): pass worktree=<absolute path of your worktree>.")
+            : ScaffoldingRoot(worktree);
         var common = PluginGit.Run(here, "rev-parse", "--path-format=absolute", "--git-common-dir");
         if (!common.Ok) throw new McpException($"git rev-parse --git-common-dir in {here}: {common.Err}");
         var mainRoot = Path.GetDirectoryName(common.Line.Replace('/', '\\').TrimEnd('\\'))!;
@@ -124,7 +129,8 @@ public static class DeployTools
         // ── Deploy ──
         if (inMain)
         {
-            r.Note = "This session runs in the main checkout: the HUD compiles your folder directly, nothing to deploy.";
+            r.Note = $"This session runs in the main checkout ({here}): the HUD compiles your folder directly, nothing to deploy. " +
+                     "If you work in a worktree (entered after the session started, so this server still runs from the main checkout), pass worktree=<its absolute path>.";
             if (reload) r.Reload = await Reload(bridges, folder, PickGames(r, game), $"reload {folder}", ct);
             return Finish(r, "unchanged", r.Reload?.Ok != false, null);
         }
@@ -243,6 +249,17 @@ public static class DeployTools
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
+
+    /// <summary>The scaffolding checkout holding <paramref name="path"/> (the folder with tools\restart-hud.ps1), for an explicit worktree=.</summary>
+    private static string ScaffoldingRoot(string path)
+    {
+        path = path.Trim().Trim('"');
+        if (!Path.IsPathFullyQualified(path)) throw new McpException($"worktree '{path}' is relative: pass the absolute path of your worktree (this server's working directory is not yours).");
+        if (!Directory.Exists(path)) throw new McpException($"worktree '{path}' does not exist.");
+        for (var dir = new DirectoryInfo(Path.GetFullPath(path)); dir != null; dir = dir.Parent)
+            if (File.Exists(Path.Combine(dir.FullName, "tools", "restart-hud.ps1"))) return dir.FullName;
+        throw new McpException($"worktree '{path}' is not in a scaffolding checkout (no tools\\restart-hud.ps1 in it or above it).");
+    }
 
     private static string FindFolder(string pluginsDir, string query)
     {
