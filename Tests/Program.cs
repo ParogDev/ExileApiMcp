@@ -392,6 +392,9 @@ Start Port    End Port
     Check("bg: short id from the CLI's answer",
         ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("Starting background service…\nbackgrounded · 98b400ca · F8 test\n  claude agents") == "98b400ca"
         && ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("Workspace not trusted.") == null);
+    Check("bg: a CLI answer on the card is one line, no usage help",
+        ExileApiMcp.Dispatch.FeedbackKit.CliLine("\n  Error: not logged in\n  claude agents  list sessions\n") == "Error: not logged in"
+        && ExileApiMcp.Dispatch.FeedbackKit.CliLine("") == "(no output)");
     Check("bg: short id through code-page mojibake (press #219) and from the attach hint",
         ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("backgrounded â”¬â•– 1cfc0796 â”¬â•– F8 #219: Should be (Kingsmarch) claude agents list sessions") == "1cfc0796"
         && ExileApiMcp.Dispatch.FeedbackKit.ParseBackgrounded("started\n  claude attach 2448b670   open in this terminal") == "2448b670"
