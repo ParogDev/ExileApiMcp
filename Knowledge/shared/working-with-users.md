@@ -97,7 +97,7 @@ Labels are short kebab-case verbs the summary groups by: `next-tab`, `to-invento
 - Pass `step=n steps=m` so the card shows progress. Count repeats as steps (`step 3 / 6`), so "do it again" is expected, not a surprise.
 
 ## Pacing and timeouts
-- `timeoutMs`: 45-60 s for one click or scroll; up to 120 s when the user must open a window first. The card shows the elapsed time; a short timeout makes the card go red while they are still finding the item.
+- `timeoutMs`: 45-60 s for one click or scroll; up to 120 s when the user must open a window first. The card counts the timeout down ("1:42 left", a bar draining along its bottom edge, amber in the last quarter, red in the last 5 s), so the user always sees how long they have; a short timeout makes it go red while they are still finding the item. Queued steps show their per-repeat limit on the queue card before Start. Your own `guide set` steps get the same countdown with `timeLimitSec`.
 - `settleMs`: 500 ms (default) for clicks; 1000-1500 ms when the action triggers a server round trip (stash tab settings, affinities), since the change lands after the confirm.
 - Between steps, call the next `await_change` right away; the card going from CAPTURED to DO THIS NOW is the cue. Don't make them wait on a chat message.
 - **On `changed: false` (TRY AGAIN)**: the card already says it. Check the cheap causes before asking again: is the panel open, is the game window focused, does the watched value follow the action at all (`eval_path` before and after a manual test)? If a `transientChanges` count is high, the watch is too wide: narrow it. Then run the same label again; a second failure means the watch is wrong, not the user. Say so and change the watch, don't ask a third time.

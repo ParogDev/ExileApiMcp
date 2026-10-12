@@ -195,13 +195,15 @@ public static class ExperimentTools
         var before = await CaptureAll(specs, bridges, game, ct);
         // The in-game guide shows the user what to do now (they may not be looking at the chat). The card offers Done
         // (stepId + offerDone, read back with guide.user below) and says "I can't see that change yet" by itself once it
-        // has waited unseenAfterSec; expiresSec clears it should this server go quiet without cleaning up.
+        // has waited unseenAfterSec; expiresSec clears it should this server go quiet without cleaning up. timeLimitSec is
+        // the time the user has left (the baseline capture already took some): the card counts it down.
         var stepId = $"ac-{Guid.NewGuid():N}";
         var guideTitle = $"Experiment: {experiment}";
         await GuideTools.SetAsync(bridges, game, new JObject
         {
             ["title"] = guideTitle, ["instruction"] = instruction ?? $"Do the '{label}' action now", ["status"] = "waiting",
-            ["step"] = step, ["steps"] = steps, ["detail"] = $"Watching {watch.Length} value(s) for up to {timeoutMs / 1000} s",
+            ["step"] = step, ["steps"] = steps, ["detail"] = $"Watching {watch.Length} value(s)",
+            ["timeLimitSec"] = Math.Max(1, timeoutMs - sw.ElapsedMilliseconds) / 1000.0,
             ["stepId"] = stepId, ["offerDone"] = true, ["unseenAfterSec"] = Math.Clamp(timeoutMs / 4000, 8, 20),
             ["expiresSec"] = timeoutMs / 1000 + DoneGraceMs / 1000 + settleMs / 1000 + 30,
         }, ct);

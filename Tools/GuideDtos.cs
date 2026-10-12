@@ -31,6 +31,10 @@ public sealed class GuideState
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Mark { get; set; }
     /// <summary>The card says "I can't see that change yet": waiting longer than the step's unseenAfterSec with no Done.</summary>
     public bool? Unseen { get; set; }
+    /// <summary>The step's time limit the card counts down, seconds; null without one or once the step is over.</summary>
+    public double? TimeLimitSec { get; set; }
+    /// <summary>Seconds left on that countdown, as the card shows it.</summary>
+    public double? TimeLeftSec { get; set; }
     /// <summary>The last log lines, oldest first.</summary>
     public List<GuideLogLine>? Log { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
