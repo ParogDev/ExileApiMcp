@@ -40,6 +40,8 @@ public sealed class ServerSelf
     public int SessionPid { get; set; }
     public string Label { get; set; } = "";
     public bool OnDeployed { get; set; }
+    /// <summary>How its label was decided (null on the shared server's callers).</summary>
+    public SessionIdentityInfo? Identity { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 

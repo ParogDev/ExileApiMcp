@@ -43,6 +43,12 @@ public static class SessionTools
             Incidents.InstrumentIncidents.Check(listBridge.Game == "auto" ? game : listBridge.Game, instr);
         }
         var view = Dto.From<SessionsView>(o);
+        // How this server's own label was decided (roots adopted or not, and why).
+        if (SessionIdentityInfo.Current() is { } idn)
+        {
+            view.Identity = idn;
+            text += $"\nThis server's label '{idn.Label}' ({idn.Source}): {idn.Note}";
+        }
         // The incident board: what is broken for everyone right now, and how each session answered (Incidents/).
         // A board problem never costs the session list: it is named in the text instead.
         try

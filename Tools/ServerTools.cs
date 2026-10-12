@@ -106,6 +106,7 @@ public static class ServerTools
                 Version = McpSetup.Version, Sha = ServerBuild.Short(ServerBuild.Sha), Mode = ServerBuild.Mode,
                 WorkerPid = Environment.ProcessId, SessionPid = SessionIdentity.Pid, Label = SessionIdentity.Label,
                 OnDeployed = deployedSha != null && ServerBuild.Sha == deployedSha,
+                Identity = SessionIdentityInfo.Current(),
             },
         };
         if (Directory.Exists(ServerBuild.SupervisorsDir))
@@ -146,7 +147,8 @@ public static class ServerTools
         {
             s.Deployed == null ? "Deployed: nothing yet (supervised servers run their checkout's build until the first mcp_deploy)."
                 : $"Deployed: {s.Deployed.Version} ({s.Deployed.Sha}) by {s.Deployed.By} at {s.Deployed.DeployedAt:yyyy-MM-dd HH:mm} UTC" + (s.Deployed.Reason != null ? $" - {s.Deployed.Reason}" : ""),
-            $"This server: {s.This.Version}" + (s.This.Sha != null ? $" ({s.This.Sha})" : " (local build)") + $", {s.This.Mode}" + (s.This.OnDeployed ? ", on the deployed build" : ""),
+            $"This server: {s.This.Version}" + (s.This.Sha != null ? $" ({s.This.Sha})" : " (local build)") + $", {s.This.Mode}" + (s.This.OnDeployed ? ", on the deployed build" : "")
+                + (s.This.Identity is { } idn ? $"; label '{idn.Label}' ({idn.Source}): {idn.Note}" : ""),
         };
         foreach (var sup in s.Supervisors)
         {

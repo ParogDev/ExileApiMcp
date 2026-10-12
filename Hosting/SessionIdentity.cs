@@ -8,9 +8,10 @@ namespace ExileApiMcp.Hosting;
 /// is the git branch of the working directory (worktree-aware: .git may be a file pointing at the real gitdir), the
 /// folder name when there is no branch, or HEXILE_AGENT when set. The bridge tags our connection with it on connect
 /// (session.hello, Bridge/BridgeClient.cs) so every guide line, lease and restart request says who asked.
-/// A server started outside any repo (the desktop app starts user-scope servers in C:\Windows\System32) learns its
-/// session's project from the client's MCP roots on the first tool call (AdoptRoots): the label then comes from that
-/// folder's branch, Revision bumps and the bridge connections say hello again. Otherwise fixed for the process.
+/// On the first tool call the client's MCP roots are asked once (AdoptRoots): when they clearly name one other checkout
+/// than the folder the server was started in, its branch becomes the label, Revision bumps and the bridge connections say
+/// hello again. A server started outside any repo (the Claude desktop app starts user-scope servers in
+/// C:\Windows\System32 and shares one among its conversations) never takes its label from roots. Identity says why.
 /// </summary>
 public static class SessionIdentity
 {
@@ -43,62 +44,138 @@ public static class SessionIdentity
     public static string Kind { get; set; } = "mcp";
     /// <summary>Bumped when the identity changes (AdoptRoots); bridge connections re-send session.hello.</summary>
     public static int Revision { get; private set; }
-    /// <summary>The project folder learned from the client's roots, when the cwd had none.</summary>
-    public static string? ProjectRoot { get; private set; }
-    /// <summary>True until the client's roots were asked once (not with HEXILE_AGENT, nor for a shared server's caller). Asked
-    /// even when the cwd has a branch: Claude Code starts a project's stdio server in the project folder (the main checkout)
-    /// while the session works in a worktree, and every such server would otherwise read "main".</summary>
-    public static bool NeedsRoots => !FromEnv && CallerIdentity.Current == null && ProjectRoot == null && !_rootsAsked;
-    private static bool _rootsAsked;
+    /// <summary>True until the roots question was settled once (not with HEXILE_AGENT, nor for a shared server's caller).
+    /// <see cref="BeginRoots"/> claims it, so concurrent first calls ask once.</summary>
+    public static bool NeedsRoots => !FromEnv && CallerIdentity.Current == null && Volatile.Read(ref _rootsState) == 0;
+    private static int _rootsState;   // 0 not asked, 1 claimed (BeginRoots)
+
+    /// <summary>Claims the one roots question of this process: true for the first caller only.</summary>
+    public static bool BeginRoots() => Interlocked.CompareExchange(ref _rootsState, 1, 0) == 0;
 
     private static string MakeLabel(string? branch, string cwd) => Clip(Environment.GetEnvironmentVariable("HEXILE_AGENT") is { Length: > 0 } env ? env
         : branch is { Length: > 0 } b ? (b.StartsWith("claude/", StringComparison.Ordinal) ? b["claude/".Length..] : b)
         : FolderLabel(cwd), 40);
 
+    /// <summary>How this server's label was decided, for hud_sessions (identity) and mcp_status (this.identity): source env |
+    /// cwd | roots | folder, why, the roots the client gave (only when they were asked) and who the client is.</summary>
+    public sealed record IdentityDiagnostic(string Source, string Note, string[]? Roots = null, string? Client = null);
+
+    private static readonly string StartNote = FromEnv ? "HEXILE_AGENT names this server"
+        : _branch != null ? $"the branch of the folder it was started in ({_cwd})"
+        : $"started outside any git checkout ({_cwd})";
+
+    /// <summary>This server's identity decision (process-wide; a shared server's callers have their own headers instead).</summary>
+    public static IdentityDiagnostic Identity { get; private set; } = new(FromEnv ? "env" : _branch != null ? "cwd" : "folder", StartNote + "; roots not asked yet");
+
+    /// <summary>The MCP client whose roots may name the session: Claude Code starts one stdio server per session. Any other
+    /// client (the Claude desktop app shares one server among its conversations) is never asked.</summary>
+    public const string PerSessionClient = "claude-code";
+
+    /// <summary>One root of the client's that is in a git checkout (Checkout: the top-level repo or worktree, never a submodule).</summary>
+    public readonly record struct RootCheckout(string Path, string Checkout, string Branch);
+
     /// <summary>
-    /// The client's roots (file:// URIs): the first that is in a git checkout becomes this session's project, its branch
-    /// the label. Called once; false when nothing changed.
+    /// Whether this server may ask its client's roots at all: only a server started in a checkout (Claude Code starts a
+    /// project's server in the project folder) by Claude Code, which runs one server per session. A server started outside
+    /// any checkout is the Claude desktop app's (it starts user-scope servers in System32 and shares each among its
+    /// conversations: 2026-10-12 one read another session's worktree), and any other client is unknown: neither is asked,
+    /// so another conversation's roots are never even recorded. Returns null when it may ask, else why not.
     /// </summary>
-    /// <remarks>A server whose own cwd is in a checkout already (Claude Code starts it in the project folder, the main
-    /// checkout, while the session works in a worktree) takes only the name from a root in another checkout: label, branch
-    /// and cwd, not ProjectRoot, so RepoRoot keeps naming the checkout it runs from (HEXILE_REPO) for machine-wide scripts.
-    /// A root in its own checkout changes nothing.</remarks>
-    public static bool AdoptRoots(IEnumerable<string> uris)
+    public static string? WhyNotAskRoots(bool inCheckout, string? clientName) =>
+        !inCheckout ? "started outside any git checkout: the Claude desktop app shares such a server among its conversations, so roots can't name one session; not asked"
+        : !string.Equals(clientName, PerSessionClient, StringComparison.OrdinalIgnoreCase) ? $"the client is {clientName ?? "unnamed"}, not Claude Code (one server per session), so its roots may not be this session's; not asked"
+        : null;
+
+    /// <summary>
+    /// What the client's roots say about this session (pure: tests call it). Never a guess: a wrong label names another
+    /// session's worktree on the card, and deploy_plugin would deploy from it.
+    ///   - roots in two or more checkouts are ambiguous, the server's own among them (a session in the main checkout with a
+    ///     worktree as an extra directory reads the same as one in the worktree with main as an extra): kept;
+    ///   - roots in its own checkout only, or none in a checkout: nothing new;
+    ///   - exactly one other checkout: adopted.
+    /// Returns the root to adopt (null: keep the label) and why.
+    /// </summary>
+    public static (RootCheckout? Adopt, string Note) DecideRoots(string ownCheckout, IReadOnlyList<RootCheckout> roots)
     {
-        _rootsAsked = true;
-        var hadBranch = _branch != null;
-        var own = hadBranch ? FindCheckout(_cwd)?.Checkout : null;
-        foreach (var u in uris)
+        static bool Same(string a, string b) => string.Equals(a.TrimEnd('\\', '/'), b.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+        var checkouts = new List<RootCheckout>();
+        foreach (var r in roots) if (!checkouts.Any(c => Same(c.Checkout, r.Checkout))) checkouts.Add(r);
+        if (checkouts.Count == 0) return (null, "no root is in a git checkout: kept the branch of the folder it was started in");
+        if (checkouts.Count > 1) return (null, $"roots name {checkouts.Count} checkouts ({string.Join(", ", checkouts.Select(c => c.Checkout))}): ambiguous, kept the branch of the folder it was started in");
+        if (Same(checkouts[0].Checkout, ownCheckout)) return (null, "the roots are the checkout it was started in");
+        return (checkouts[0], $"the client's roots name one checkout, {checkouts[0].Checkout}");
+    }
+
+    /// <summary>The checkout this server was started in, when it is in one (for WhyNotAskRoots / DecideRoots).</summary>
+    public static string? StartCheckout()
+    {
+        try { return _branch != null && SessionRoot == null ? FindRepoTop(_cwd)?.Checkout : null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
+    }
+
+    /// <summary>
+    /// The client's roots (file:// URIs), asked once on the first tool call when WhyNotAskRoots allows: when they clearly
+    /// name one other checkout than the folder this server was started in (Claude Code starts a project's server in the main
+    /// checkout while the session works in a worktree), that checkout's branch becomes the label and the checkout
+    /// deploy_plugin's (SessionRoot); cwd and branch follow. Otherwise nothing changes and Identity says why (DecideRoots).
+    /// RepoRoot is never changed: machine-wide scripts keep coming from the checkout the server runs from. Revision bumps
+    /// when the label changed, so the bridge connections say hello again. False when the label didn't change.
+    /// </summary>
+    public static bool AdoptRoots(IEnumerable<string> uris, string? client = null)
+    {
+        Interlocked.Exchange(ref _rootsState, 1);
+        var given = uris.ToList();
+        var roots = new List<RootCheckout>();
+        foreach (var u in given)
         {
             if (!Uri.TryCreate(u, UriKind.Absolute, out var uri) || !uri.IsFile) continue;
             var path = uri.LocalPath;
-            if (!Directory.Exists(path) || ReadBranch(path) is not { } branch) continue;
-            if (own != null && string.Equals(FindCheckout(path)?.Checkout, own, StringComparison.OrdinalIgnoreCase)) continue;   // its own checkout: nothing new
-            if (!hadBranch) ProjectRoot = path;
-            else SessionRoot = path;
-            _cwd = path;
-            _branch = branch;
-            _label = MakeLabel(branch, path);
-            Revision++;
-            Console.Error.WriteLine($"[Session] identified by the client's root {path}: {_label}");
-            return true;
+            try
+            {
+                if (Directory.Exists(path) && FindRepoTop(path) is { } c && BranchOfGitDir(c.GitDir) is { } branch) roots.Add(new RootCheckout(path, c.Checkout, branch));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
         }
-        return false;
+        if (StartCheckout() is not { } own)
+        {
+            RootsUnavailable(WhyNotAskRoots(false, client));
+            return false;
+        }
+        var (adopt, note) = DecideRoots(own, roots);
+        Console.Error.WriteLine($"[Session] roots from {client ?? "the client"}: [{string.Join(", ", given)}] -> {(adopt is { } a ? "adopted " + a.Path : "kept '" + _label + "'")}: {note}");
+        if (adopt is not { } r)
+        {
+            Identity = new("cwd", $"{StartNote}; {note}", given.ToArray(), client);
+            return false;
+        }
+        SessionRoot = r.Path;
+        _cwd = r.Path;
+        _branch = r.Branch;
+        _label = MakeLabel(r.Branch, r.Path);
+        Revision++;   // the bridge connections say hello again with the new label
+        Identity = new("roots", note, given.ToArray(), client);
+        return true;
     }
 
-    /// <summary>The checkout a stdio server's session works in when the client's roots named another one than the folder
-    /// the server was started in (AdoptRoots): deploy_plugin's "your checkout" (WorkingRepoRoot).</summary>
+    /// <summary>The checkout a stdio server's session works in when the client's roots clearly named another one than the
+    /// folder the server was started in (AdoptRoots): deploy_plugin's "your checkout" (WorkingRepoRoot). Never set from an
+    /// ambiguous or shared server's roots.</summary>
     public static string? SessionRoot { get; private set; }
 
-    /// <summary>Roots could not be asked (no roots capability, stateless HTTP): stop trying.</summary>
-    public static void RootsUnavailable() => _rootsAsked = true;
+    /// <summary>The roots question is settled without adopting (not asked, no roots capability, stateless HTTP, failed):
+    /// stop trying, and say why in Identity when there is something to say.</summary>
+    public static void RootsUnavailable(string? why = null)
+    {
+        Interlocked.Exchange(ref _rootsState, 1);
+        if (why == null) return;
+        Identity = Identity with { Note = $"{StartNote}; {why}" };
+    }
 
-    /// <summary>The scaffolding repo root (tools\restart-hud.ps1 lives there): the session's project from its roots, then
-    /// HEXILE_REPO (run.cmd sets it to its own checkout), else walk up from the cwd.</summary>
+
+    /// <summary>The scaffolding repo root (tools\restart-hud.ps1 lives there): HEXILE_REPO (run.cmd sets it to its own
+    /// checkout), else walk up from the cwd. Never from the client's roots (another session's worktree on a shared server).</summary>
     public static string? RepoRoot()
     {
-        for (var dir = ProjectRoot == null ? null : new DirectoryInfo(ProjectRoot); dir != null; dir = dir.Parent)
-            if (File.Exists(Path.Combine(dir.FullName, "tools", "restart-hud.ps1"))) return dir.FullName;
         if (Environment.GetEnvironmentVariable("HEXILE_REPO") is { Length: > 0 } env && File.Exists(Path.Combine(env, "tools", "restart-hud.ps1")))
             return Path.GetFullPath(env);
         for (var dir = new DirectoryInfo(Cwd); dir != null; dir = dir.Parent)
@@ -144,20 +221,30 @@ public static class SessionIdentity
     {
         try
         {
-            if (FindCheckout(start) is not { } c) return null;
-            var head = Path.Combine(c.GitDir, "HEAD");
-            if (!File.Exists(head)) return null;
-            var content = File.ReadAllText(head).Trim();
-            if (content.StartsWith("ref: refs/heads/", StringComparison.Ordinal)) return content["ref: refs/heads/".Length..];
-            return content.Length >= 7 ? "detached@" + content[..7] : null;
+            return FindCheckout(start, skipSubmodules: false) is { } c ? BranchOfGitDir(c.GitDir) : null;
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Session] branch unknown: {ex.Message}"); }
         return null;
     }
 
+    /// <summary>The branch a git dir's HEAD names ("detached@abc1234" when detached), or null.</summary>
+    private static string? BranchOfGitDir(string gitDir)
+    {
+        var head = Path.Combine(gitDir, "HEAD");
+        if (!File.Exists(head)) return null;
+        var content = File.ReadAllText(head).Trim();
+        if (content.StartsWith("ref: refs/heads/", StringComparison.Ordinal)) return content["ref: refs/heads/".Length..];
+        return content.Length >= 7 ? "detached@" + content[..7] : null;
+    }
+
+    /// <summary>The top-level checkout (a repo or a worktree, never a submodule) at or above a path, for telling sessions'
+    /// checkouts apart: a root inside Plugins\X belongs to the checkout holding it, not to the plugin's own repo.</summary>
+    private static (string Checkout, string GitDir)? FindRepoTop(string start) => FindCheckout(start, skipSubmodules: true);
+
     /// <summary>The nearest checkout at or above <paramref name="start"/>: the folder holding .git and its git dir (a worktree
-    /// or submodule's .git file says "gitdir: &lt;path&gt;", relative to that folder or absolute). Null outside any.</summary>
-    private static (string Checkout, string GitDir)? FindCheckout(string start)
+    /// or submodule's .git file says "gitdir: &lt;path&gt;", relative to that folder or absolute). With skipSubmodules, a .git
+    /// file pointing into a repo's modules\ folder is passed over for the superproject above it. Null outside any.</summary>
+    private static (string Checkout, string GitDir)? FindCheckout(string start, bool skipSubmodules)
     {
         for (var dir = new DirectoryInfo(Path.GetFullPath(start)); dir != null; dir = dir.Parent)
         {
@@ -165,8 +252,10 @@ public static class SessionIdentity
             if (Directory.Exists(dotGit)) return (dir.FullName.TrimEnd('\\', '/'), dotGit);
             if (!File.Exists(dotGit)) continue;
             var line = File.ReadAllText(dotGit).Trim();
-            if (line.StartsWith("gitdir:", StringComparison.Ordinal))
-                return (dir.FullName.TrimEnd('\\', '/'), Path.GetFullPath(Path.Combine(dir.FullName, line["gitdir:".Length..].Trim())));
+            if (!line.StartsWith("gitdir:", StringComparison.Ordinal)) continue;
+            var gitDir = Path.GetFullPath(Path.Combine(dir.FullName, line["gitdir:".Length..].Trim()));
+            if (skipSubmodules && gitDir.Replace('/', '\\').Contains(@"\modules\", StringComparison.OrdinalIgnoreCase)) continue;
+            return (dir.FullName.TrimEnd('\\', '/'), gitDir);
         }
         return null;
     }
