@@ -31,6 +31,11 @@ const OFFLINE_TOOLS = new Set(["hud_catalog", "bridge_status", "hud_find_types",
 const SERIES_TOOL = { name: "observe_series", title: "One unit's values over time, its shape and relations", description: "The series of one observer unit from the journal: points, shape (toggle | states | counter | timer | continuous | text), top values, and how it relates to other units that change at the same moments.", family: "Observe", readOnly: true, destructive: false, idempotent: true, openWorld: false, inputSchema: { type: "object", properties: { layer: { type: "string" }, unit: { type: "string" }, windowMs: { type: "integer" }, game: { type: "string" } }, required: ["layer", "unit"] } };
 
 /** feedback_sessions (Tools/FeedbackSessionsTools.cs) postdates the catalog capture: the fake offers it like the server does. */
+/** healthbars_state / healthbars_preview (Tools/HealthBarsTools.cs) postdate the catalog capture too. */
+const HEALTHBARS_TOOLS = [
+  { name: "healthbars_state", title: "Health bar plugin: live state", description: "What the PoE2 health bar plugin 'Whats A Health Bar' is doing right now: whether it draws and why not, the area, counts (tracked, wanted, drawn, the peak, per kind), its own timings in microseconds, the in-game preview, its pub/sub link and the last kills.", family: "Health bars", readOnly: true, destructive: false, idempotent: true, openWorld: false, inputSchema: { type: "object", properties: { game: { type: ["string", "null"] } } }, outputSchema: { type: "object", properties: { enabled: { type: "boolean" }, suppressed: { type: ["string", "null"] }, counts: { type: "object" }, timings: { type: "object" }, kills: { type: "array" } } } },
+  { name: "healthbars_preview", title: "Health bar plugin: preview in game", description: "Show the health bar plugin's sample bars in game: one bar per kind mid-screen with fake hits and heals, for `seconds` (1-60, default 8), the `focus` kind first, plus `stress` extra animated bars on a grid (0-2000).", family: "Health bars", readOnly: false, destructive: false, idempotent: false, openWorld: false, inputSchema: { type: "object", properties: { seconds: { type: "number", default: 8 }, focus: { type: ["string", "null"] }, stress: { type: "integer", default: 0 }, game: { type: ["string", "null"] } } }, outputSchema: { type: "object", properties: { ok: { type: "boolean" }, via: { type: "string" }, seq: { type: ["integer", "null"] } } } },
+];
 const FEEDBACK_TOOL = { name: "feedback_sessions", title: "F8 presses and their Claude sessions", description: "Every F8 press of Whats A Route (PoE2) with the Claude Code session the dispatcher started for it, newest first, plus the dispatcher's state.", family: "PubSub", readOnly: true, destructive: false, idempotent: true, openWorld: false, inputSchema: { type: "object", properties: { seq: { type: ["integer", "null"] }, limit: { type: "integer" }, merge: { type: "boolean" }, game: { type: ["string", "null"] } } }, outputSchema: { type: "object", properties: { dispatcher: { type: "object" }, sessions: { type: "array" }, total: { type: "integer" } } } };
 
 /** route_state (Tools/RouteTools.cs) postdates the catalog capture: the fake offers it like the server does. */
@@ -71,16 +76,64 @@ const BRIDGE: Def[] = [
   ["GuideLogOpen", "Log section open", "Agent guide", "toggle", true],
   ["AgentLogHotkey", "Agent log hotkey", "Agent guide", "hotkey", "None", { readOnly: true, description: "Toggles the agent log sheet under the guide card. Set it in game." }],
 ];
+/** Whats A Health Bar's real settings tree (hud_settings on the PoE2 HUD, 2026-10-12), the Health Bars page's contract. */
+function kindDefs(prefix: string, group: string, show: boolean, w: number, h: number, life: string, segments: number, percent: boolean): Def[] {
+  return [
+    [`${prefix}.Show`, "Show", group, "toggle", show],
+    [`${prefix}.Width`, "Width (px)", group, "range", w, { min: 20, max: 300 }],
+    [`${prefix}.Height`, "Height (px)", group, "range", h, { min: 3, max: 40 }],
+    [`${prefix}.LifeColor`, "Life", group, "color", life],
+    [`${prefix}.Segments`, "Segments", group, "range", segments, { min: 0, max: 20, description: "Divider notches across the bar (0: none), e.g. 10 = every 10%" }],
+    [`${prefix}.ShowPercent`, "Show percent", group, "toggle", percent, { description: "Life % next to the bar" }],
+  ];
+}
+const HEALTHBAR: Def[] = [
+  ["Enable", "Enable", "", "toggle", true],
+  ["Visibility.ShowInTown", "Show in town", "Visibility", "toggle", false],
+  ["Visibility.ShowInHideout", "Show in hideout", "Visibility", "toggle", true],
+  ["Visibility.HideWhenPanelsOpen", "Hide behind big panels", "Visibility", "toggle", true, { description: "Hide all bars while a fullscreen or large panel (inventory, skill tree, stash) is open" }],
+  ["Visibility.MaxDistance", "Max distance", "Visibility", "range", 140, { min: 20, max: 400, description: "Grid units from you; bars further away are not drawn" }],
+  ["Visibility.MinionBelowPercent", "Minions only when hurt", "Visibility", "range", 99, { min: 1, max: 100, description: "Show minion and ally bars only below this life %; 100 always shows them" }],
+  ["Visibility.HideFullNormals", "Hide full-life normals", "Visibility", "toggle", false, { description: "Normal enemies at full life draw no bar until they are hit" }],
+  ["Visibility.ZOffset", "Height offset", "Visibility", "range", 0, { min: -300, max: 300, description: "Moves every bar up (negative) or down, in world units" }],
+  ["Visibility.ClassifyHz", "Classify rate (Hz)", "Visibility", "range", 10, { min: 2, max: 30, description: "How often each monster's kind, hostility and distance are rechecked. Positions and life update every frame" }],
+  ["Animation.Enabled", "Animate", "Animation", "toggle", true, { description: "Off: bars jump straight to the current value (cheapest)" }],
+  ["Animation.DamageTrail", "Damage trail", "Animation", "toggle", true, { description: "A lighter chip shows the damage just taken, holds briefly, then drains" }],
+  ["Animation.TrailHoldMs", "Trail hold (ms)", "Animation", "range", 320, { min: 0, max: 1500, description: "How long the damage chip holds before draining" }],
+  ["Animation.TrailDrain", "Trail drain speed", "Animation", "range", 4.5, { min: 0.5, max: 20, description: "Higher drains faster" }],
+  ["Animation.HitFlash", "Hit flash", "Animation", "toggle", true, { description: "The bar's edge flashes white on a hit" }],
+  ["Animation.HealGlow", "Heal glow", "Animation", "toggle", true, { description: "Healing fills smoothly with a glow" }],
+  ["Animation.FadeMs", "Fade in/out (ms)", "Animation", "range", 180, { min: 0, max: 1000, description: "Bars fade in when a monster appears and out when it dies" }],
+  ["Animation.LowLifePulse", "Low life pulse %", "Animation", "range", 20, { min: 0, max: 60, description: "Rare and unique bars pulse below this life %; 0 turns it off" }],
+  ["Look.Scale", "Scale", "Look", "range", 1, { min: 0.5, max: 3, description: "Multiplies every bar's width and height" }],
+  ["Look.ScaleWithResolution", "Scale with resolution", "Look", "toggle", true, { description: "Sizes are for 1440p; other window heights scale them" }],
+  ["Look.Rounding", "Corner rounding (px)", "Look", "range", 2, { min: 0, max: 8 }],
+  ["Look.Outline", "Outline (px)", "Look", "range", 1, { min: 0, max: 4 }],
+  ["Look.OutlineColor", "Outline", "Look", "color", "#08080AE6"],
+  ["Look.BackgroundColor", "Background", "Look", "color", "#161418C8"],
+  ["Look.TrailColor", "Damage trail", "Look", "color", "#FFFAF2D7"],
+  ["Look.HealColor", "Heal glow", "Look", "color", "#96FFAADC"],
+  ["Look.Pools", "Pools", "Look", "list", "Sandwich", { options: ["Sandwich", "Side by side", "Life only"], description: "Life, energy shield and ward each fill and drain on their own (ES recharges while life stays low, ward restores on its timer). Sandwich: the pools are layers stacked top to bottom (ward, ES, life), each as thick as its share of the combined max, each filling left to right by its own value. Side by side: each pool owns a region of the width by its max share, with dividers. Life only: ES and ward are not shown" }],
+  ["Look.TotalLine", "Total line", "Look", "list", "Rares and uniques", { options: ["Off", "Rares and uniques", "All"], description: "A thin line under the bar showing life + ES + ward together, as a share of their sum" }],
+  ["Look.EsColor", "Energy shield", "Look", "color", "#B0E2FFF5"],
+  ["Look.WardColor", "Ward", "Look", "color", "#B084FFF5"],
+  ["Look.PoolDividers", "Pool dividers", "Look", "toggle", true, { description: "Side by side: a dark notch between the life, ES and ward regions" }],
+  ["Look.Gloss", "Gloss", "Look", "range", 0.22, { min: 0, max: 0.6, description: "Strength of the shine on the top half of the fill" }],
+  ["Look.Shading", "Shading", "Look", "range", 0.35, { min: 0, max: 0.8, description: "How much darker the bottom of the fill is" }],
+  ["Look.TextColor", "Text", "Look", "color", "#F5F0E6FF"],
+  ["Look.CullPercent", "Culling marker %", "Look", "range", 0, { min: 0, max: 30, description: "Draws a notch at this life % (culling strike threshold); 0 turns it off" }],
+  ...kindDefs("Unique", "Unique enemies", true, 150, 13, "#E87824FF", 10, true),
+  ...kindDefs("Rare", "Rare enemies", true, 118, 11, "#E2C434FF", 4, true),
+  ...kindDefs("Magic", "Magic enemies", true, 86, 8, "#5C84FFFF", 0, false),
+  ...kindDefs("Normal", "Normal enemies", true, 68, 6, "#D63A34FF", 0, false),
+  ...kindDefs("Minion", "Minions and allies", true, 56, 5, "#48C46EFF", 0, false),
+  ...kindDefs("Player", "Other players", true, 96, 8, "#40C88CFF", 0, false),
+  ...kindDefs("Self", "You", false, 96, 8, "#40C88CFF", 0, false),
+  ["Bridge.PublishKills", "Publish kills", "Bridge", "list", "Uniques", { options: ["Off", "Uniques", "Rares and uniques"], description: "Publish an event (kind healthbars.kill) through the AI Bridge when a unique, or also a rare, dies: name, time to kill, area. Agents and other plugins subscribe to it" }],
+  ["Preview", "Preview in game", "", "button", null, { description: "Draws one sample bar per kind in the middle of the screen for 8 seconds, with fake hits and heals (also from the control center)" }],
+];
 const OTHERS: [string, boolean, Def[]][] = [
-  ["Health Bars", true, [
-    ["Enable", "Enable", "", "toggle", true],
-    ["ShowPlayerBar", "Show player bar", "Player", "toggle", true],
-    ["PlayerColor", "Player colour", "Player", "color", "#e2554bff"],
-    ["ShowMonsters", "Show monsters", "Monsters", "toggle", true],
-    ["UniqueColor", "Unique colour", "Monsters", "color", "#f2a33cff"],
-    ["BarWidth", "Bar width", "Monsters", "range", 120, { min: 40, max: 300 }],
-    ["TextSize", "Text size", "Monsters", "list", "Normal", { options: ["Small", "Normal", "Large"] }],
-  ]],
+  ["Whats A Health Bar", true, HEALTHBAR],
   ["ReAgent", true, [
     ["Enable", "Enable", "", "toggle", true],
     ["ProfileName", "Profile", "", "text", "default"],
@@ -111,7 +164,7 @@ const AGENT_CALLS: [string, Record<string, unknown>][] = [
   ["guide.set", { title: "Open your inventory", status: "waiting", step: 2, steps: 4 }],
   ["experiment.start", { experiment: "stash-ctrl-click", step: 3, timeoutMs: 120000 }],
   ["hud.reload_plugin", { plugin: "Whats An AI Bridge" }],
-  ["settings.set", { plugin: "Health Bars", path: "ShowMonsters", value: true }],
+  ["settings.set", { plugin: "Whats A Health Bar", path: "Look.Pools", value: "Side by side" }],
   ["profile.plugin", { name: "ReAgent", durationMs: 3000 }],
 ];
 type EventKind = "server" | "server-pair" | "stats" | "life" | "buff" | "inventory" | "noisy" | "ui" | "area" | "level" | "entity" | "spike" | "reload" | "agent";
@@ -491,6 +544,7 @@ export class FakeControl {
         let tools = CATALOG.tools.some((t) => t.name === SERIES_TOOL.name) ? CATALOG.tools : [...CATALOG.tools, SERIES_TOOL as unknown as Catalog["tools"][number]];
         if (!tools.some((t) => t.name === ROUTE_TOOL.name)) tools = [...tools, ROUTE_TOOL as unknown as Catalog["tools"][number]];
         if (!tools.some((t) => t.name === FEEDBACK_TOOL.name)) tools = [...tools, FEEDBACK_TOOL as unknown as Catalog["tools"][number]];
+        for (const t of HEALTHBARS_TOOLS) if (!tools.some((x) => x.name === t.name)) tools = [...tools, t as unknown as Catalog["tools"][number]];
         const c = { ...CATALOG, tools, server: { ...CATALOG.server, gamesUp } };
         return json(c, `${c.server.title} ${c.server.version}: ${c.tools.length} tools in ${new Set(c.tools.map((t) => t.family)).size} families, ${c.resources.length} resources (4 subscribable), ${c.prompts.length} prompts. HUDs up: ${gamesUp.join(", ") || "none"}`);
       }
@@ -500,8 +554,10 @@ export class FakeControl {
           : { game: "poe2", bridgeDir: "C:\\...\\halp2\\claude-bridge", status: "connected", port: 50900, hello: { game: "poe2", hudBuild: "0.3.1.2-4e1c", protocolVersion: 9, cannotProvide: ["npcdialog"] }, findingsToCheck: this.scenario === "push" ? undefined : "1 finding(s) verified on another game but not on poe2: stash-tab-affinity-bit. Run verify_finding before relying on them (findings lists all)." };
         return json({ bridges: [{ game: "poe1", bridgeDir: "C:\\...\\PoeHelper\\claude-bridge", status: "not running" }, poe2], desktop: { idleSeconds: 4, displayLikelyOff: false, gameForeground: true } });
       }
-      case "hud_settings":
-        return json({ game: "poe2", plugins: this.settings.map((p) => ({ ...p, settings: p.settings.map((s) => ({ ...s })) })) } satisfies SettingsResult, `${this.settings.length} plugins, ${this.settings.reduce((n, p) => n + p.settings.length, 0)} settings`);
+      case "hud_settings": {
+        const plugins = this.settings.filter((p) => this.healthBarsMode !== "notloaded" || p.plugin !== "Whats A Health Bar");
+        return json({ game: "poe2", plugins: plugins.map((p) => ({ ...p, settings: p.settings.map((s) => ({ ...s })) })) } satisfies SettingsResult, `${plugins.length} plugins, ${plugins.reduce((n, p) => n + p.settings.length, 0)} settings`);
+      }
       case "hud_settings_set": {
         const node = this.findSetting(String(a.plugin), String(a.path));
         if (!node) return json({ error: "not_found", message: `No setting '${a.path}' on plugin '${a.plugin}'. Plugins: ${this.settings.map((p) => p.plugin).join(", ")}` }, undefined, true);
@@ -537,6 +593,9 @@ export class FakeControl {
       case "observe_timeline": return this.observeTimeline(a);
       case "observe_series": return this.observeSeries(a);
       case "route_state": return this.routeState();
+      case "healthbars_state": return this.healthBarsState();
+      case "healthbars_preview": return this.healthBarsPreview(a);
+      case "hud_plugin_perf": return this.pluginPerf();
       case "feedback_sessions": return this.feedbackSessions(a);
       case "knowledge": return json({ topic: a.topic ?? "index", text: "# Knowledge\n\nPacks: shared/dev-loop, shared/api-costs, poe2/stats-layout ..." }, "# Knowledge\n\nPacks: shared/dev-loop, shared/api-costs, poe2/stats-layout ...");
       case "run_csharp": return json({ ok: false, error: "scripts_disabled", message: "Enable 'Allow C# Scripts' in the bridge settings (Dev loop) to run scripts." }, undefined, true);
@@ -548,6 +607,81 @@ export class FakeControl {
         return json({ ok: true, tool: name, arguments: a, note: "The harness has no fixture for this tool: it echoes the call." }, `${name} called with ${JSON.stringify(a)}`);
       }
     }
+  }
+
+  // ── healthbars_state / healthbars_preview: the Whats A Health Bar plugin in a fight ───────────────────────────────
+
+  /** `healthBarsMode` picks the plugin's state: "live" (a pack in The Grelwood: bars drawn, a few kills), "town" (the real
+   *  capture, suppressed "in town"), "panel" (a large panel is open), "unlinked" (the AI Bridge link is down), "notloaded"
+   *  (healthbars_state answers plugin_not_loaded and hud_settings lists no such plugin). */
+  healthBarsMode: "live" | "town" | "panel" | "unlinked" | "notloaded" = "live";
+  private hbPreviewUntil = 0;
+  private hbPreviewFocus: string | null = null;
+  private hbPreviewStress = 0;
+  private hbT = 0;
+  private healthBarsState(): CallToolResult {
+    if (this.healthBarsMode === "notloaded") return json({ error: "plugin_not_loaded", message: "Whats A Health Bar is not loaded in this HUD, or an older build without WhatsAHealthBar.GetState: PluginBridge has no 'WhatsAHealthBar.GetState' and nothing under 'WhatsAHealthBar.': the plugin that registers it is not loaded (hud.plugins lists loaded and failed plugins). hud_plugins plugin=Whats A Health Bar says whether it compiled." }, undefined, true);
+    this.hbT++;
+    const now = Date.now();
+    const previewLeft = Math.max(0, (this.hbPreviewUntil - now) / 1000);
+    const previewBars = previewLeft > 0 ? 7 + this.hbPreviewStress : 0;
+    const live = this.healthBarsMode === "live";
+    const drawn = live ? 9 + Math.round(4 * Math.sin(this.hbT / 3)) + (this.hbT % 7 === 0 ? 3 : 0) : 0;
+    const byKind = live ? { unique: this.hbT % 11 < 6 ? 1 : 0, rare: 2, magic: Math.max(0, drawn - 8), normal: 5, minion: 0, player: 0, self: 0 } : { unique: 0, rare: 0, magic: 0, normal: 0, minion: 0, player: 0, self: 0 };
+    const tickUs = live ? 18 + 2.5 * Math.sin(this.hbT / 2) + previewBars * 0.02 : 4.3;
+    const renderUs = live ? 11 + 1.5 * Math.cos(this.hbT / 2.5) + previewBars * 0.2 : 0.1;
+    const bars = drawn + previewBars;
+    const s = {
+      game: "poe2", plugin: "Whats A Health Bar", schema: 1, enabled: true,
+      suppressed: live ? null : this.healthBarsMode === "panel" ? "a large panel is open" : "in town",
+      area: live || this.healthBarsMode === "panel" ? "The Grelwood (33)" : "Kingsmarch (53)",
+      counts: { tracked: live ? 41 : 5, wanted: live ? drawn + 3 : 0, drawn, peakDrawn: live ? 23 : 0, byKind },
+      // With the stress test in game the plugin measured tick 14 µs, render 101 µs, about 227 ns per bar for 500 bars: the fake follows that curve.
+      timings: { tickUs: Math.round(tickUs * 10) / 10, tickMaxUs: live ? 212.4 : 1647.8, renderUs: Math.round(renderUs * 10) / 10, renderMaxUs: live ? 64.1 : 0.4, classifyUs: live ? 38.2 : 0, perBarNs: bars > 0 ? Math.round(((tickUs + renderUs) * 1000) / bars) : 0, classifyHz: 10, quads: bars * 11, buildUs: Math.round(renderUs * 7) / 10, flushUs: Math.round(renderUs * 3) / 10, renderPath: "batched", windowSec: 5 },
+      preview: { active: previewLeft > 0, secondsLeft: Math.round(previewLeft * 10) / 10, focus: previewLeft > 0 ? this.hbPreviewFocus : null, bars: previewBars },
+      bridge: this.healthBarsMode === "unlinked"
+        ? { linked: false, why: "PluginBridge has no AIBridge.Publish: Whats An AI Bridge is not loaded, or a build before pub/sub", subscribes: "healthbars.preview", publishes: "healthbars.kill", publishKills: "Uniques" }
+        : { linked: true, why: null, subscribes: "healthbars.preview", publishes: "healthbars.kill", publishKills: "Uniques" },
+      poolProblem: this.healthBarsMode === "panel" ? "ES on Rhoa #1203 read 2147483647 / 0 (Life.EnergyShield.Current): skipped" : null,
+      kills: live ? [
+        { name: "Silverfist", rarity: "Unique", path: "Metadata/Monsters/MonkeyChiefJungle/MonkeyChiefJungleUnique", maxLife: 5200, maxEs: 0, maxWard: 300, timeToKillMs: 4120, area: "The Grelwood (33)", at: new Date(now - 42_000).toISOString() },
+        { name: "Zarok, the Breaker", rarity: "Rare", path: "Metadata/Monsters/Rhoa/Rhoa", maxLife: 1800, maxEs: 1200, maxWard: 0, timeToKillMs: 1750, area: "The Grelwood (33)", at: new Date(now - 95_000).toISOString() },
+        { name: "Grelwood Brute", rarity: "Rare", path: "Metadata/Monsters/Brute/Brute", maxLife: 2400, maxEs: 0, maxWard: 0, timeToKillMs: null, area: "The Grelwood (33)", at: new Date(now - 160_000).toISOString() },
+      ] : [],
+      streak: live ? 3 : 0,   // a field the page has no view for: "More" shows it
+    };
+    return json(s, `${s.plugin} · ${s.area}\n${s.suppressed ? `Not drawing: ${s.suppressed}` : "Drawing"}\nBars: ${s.counts.drawn} drawn of ${s.counts.wanted} wanted, ${s.counts.tracked} tracked, peak ${s.counts.peakDrawn}\nOwn cost per frame: tick ${s.timings.tickUs} us (max ${s.timings.tickMaxUs} over 5 s), render ${s.timings.renderUs} us (max ${s.timings.renderMaxUs}); classify ${s.timings.classifyUs} us at 10 Hz; ${s.timings.perBarNs} ns per drawn bar`);
+  }
+
+  private healthBarsPreview(a: Record<string, unknown>): CallToolResult {
+    if (this.healthBarsMode === "notloaded") return json({ error: "plugin_not_loaded", message: "Whats A Health Bar is not loaded in this HUD, or an older build without WhatsAHealthBar.Preview (pub/sub first: no plugin is subscribed to anything in this bridge)." }, undefined, true);
+    const seconds = Math.max(1, Math.min(60, Number(a.seconds ?? 8)));
+    const stress = Math.max(0, Math.min(2000, Number(a.stress ?? 0)));
+    const focus = typeof a.focus === "string" && a.focus ? a.focus : null;
+    this.hbPreviewUntil = Date.now() + seconds * 1000;
+    this.hbPreviewFocus = focus;
+    this.hbPreviewStress = stress;
+    const unlinked = this.healthBarsMode === "unlinked";
+    const r = unlinked
+      ? { ok: true, seconds, focus, stress, via: "bridge_call", seq: null, pluginSubscribed: false, agentListeners: [], note: "called WhatsAHealthBar.Preview directly because no plugin is subscribed to anything in this bridge: Whats A Health Bar is not loaded, or its link to the bridge is down (healthbars_state bridge.why says)" }
+      : { ok: true, seconds, focus, stress, via: "pubsub", seq: 4100 + this.hbT, pluginSubscribed: true, agentListeners: [], note: null };
+    return json(r, `Preview for ${seconds} s${focus ? `, ${focus} first` : ""}${stress ? `, ${stress} stress bars` : ""}: ${unlinked ? "through WhatsAHealthBar.Preview" : `published healthbars.preview #${r.seq}; the plugin is subscribed`}`);
+  }
+
+  /** hud_plugin_perf as the PoE2 HUD answered it on 2026-10-12 (ms, the HUD's own counters), the comparison's source. */
+  private pluginPerf(): CallToolResult {
+    const row = (name: string, enabled: boolean, t: [number, number, number], r: [number, number, number]) => ({ name, enabled, tick: { avgMs: t[0], maxMs: t[1], lastMs: t[0], totalAvgMs: t[2] }, render: { avgMs: r[0], maxMs: r[1], lastMs: r[0], totalAvgMs: r[2] } });
+    const jitter = () => 1 + (Math.random() - 0.5) * 0.2;
+    const plugins = [
+      row("NinjaPricer", true, [0.0001, 0.0014, 0.0001], [0.1263, 14.0823, 0.0983]),
+      row("Whats A Route", true, [0.0943, 17.8023, 0.0525], [0.0118, 0.1295, 0.0143]),
+      row("Whats An AI Bridge", true, [0.0109, 0.5176, 0.0141], [0.0727, 1.6518, 0.0726]),
+      row("Radar", true, [0.0001, 0.0006, 0.0001], [0.0113, 0.1836, 0.0112]),
+      ...(this.healthBarsMode === "notloaded" ? [] : [row("Whats A Health Bar", true, [0.0051 * jitter(), 0.0226, 0.0053], [0.0003 * jitter(), 0.001, 0.0012])]),
+      row("HealthBars", this.healthBarsMode !== "panel", [0.0226 * jitter(), 0.0778, 0.0415], [0.0084 * jitter(), 0.0583, 0.0185]),
+      row("ReAgent", false, [0, 0, 0], [0, 0, 0]),
+    ];
+    return json({ note: "avgMs/maxMs come from the HUD's own per-plugin DebugInformation counters (recent window). Tick runs game logic, Render draws; their sum is the plugin's frame cost.", plugins }, plugins.map((p) => `${p.name}: tick ${p.tick.avgMs.toFixed(4)} ms, render ${p.render.avgMs.toFixed(4)} ms`).join("\n"));
   }
 
   // ── route_state: the Whats A Route plugin walking The Riverbank ───────────────────────────────────────────────────

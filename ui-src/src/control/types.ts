@@ -313,6 +313,61 @@ export interface RouteState {
 /** The error object route_state returns (isError): plugin_not_loaded, plugin_threw, route_not_json, route_shape, bridge_unavailable, bridge_too_old. */
 export interface RouteError { error: string; message?: string; [k: string]: unknown }
 
+// ── healthbars_state / healthbars_preview (Tools/HealthBarsDtos.cs) ──
+
+/** The settings plugin name of the health bar plugin, as hud_settings lists it. */
+export const HEALTHBARS_PLUGIN = "Whats A Health Bar";
+
+export interface HealthBarsState {
+  game?: string | null;
+  plugin?: string | null;
+  schema: number;
+  enabled: boolean;
+  /** Why no bars are drawn right now, or null while drawing. */
+  suppressed?: string | null;
+  area?: string | null;
+  counts: { tracked: number; wanted: number; drawn: number; peakDrawn: number; byKind: Record<string, number>; [k: string]: unknown };
+  timings: { tickUs: number; tickMaxUs: number; renderUs: number; renderMaxUs: number; classifyUs: number; perBarNs: number; classifyHz: number; quads?: number; buildUs?: number; flushUs?: number; renderPath?: string | null; windowSec: number; [k: string]: unknown };
+  preview: { active: boolean; secondsLeft: number; focus?: string | null; bars?: number; [k: string]: unknown };
+  bridge: { linked: boolean; why?: string | null; subscribes?: string | null; publishes?: string | null; publishKills?: string | null; [k: string]: unknown };
+  /** A pool read that couldn't be real in the last 30 s (a moved offset), or null. */
+  poolProblem?: string | null;
+  kills: HealthBarsKill[];
+  [k: string]: unknown;
+}
+
+export interface HealthBarsKill {
+  name: string;
+  rarity: string;
+  path?: string | null;
+  maxLife: number;
+  maxEs: number;
+  maxWard?: number;
+  timeToKillMs?: number | null;
+  area?: string | null;
+  at?: string | null;
+  [k: string]: unknown;
+}
+
+export interface HealthBarsPreviewResult {
+  ok: boolean;
+  seconds: number;
+  focus?: string | null;
+  stress?: number;
+  via: "pubsub" | "bridge_call" | string;
+  seq?: number | null;
+  pluginSubscribed?: boolean | null;
+  agentListeners: string[];
+  note?: string | null;
+  [k: string]: unknown;
+}
+
+// ── hud_plugin_perf (Tools/IntrospectionDtos.cs) ─────────────────────
+
+export interface PluginCostCounter { avgMs?: number | null; maxMs?: number | null; lastMs?: number | null; totalAvgMs?: number | null; [k: string]: unknown }
+export interface PluginPerfRow { name: string; enabled: boolean; tick?: PluginCostCounter | null; render?: PluginCostCounter | null; [k: string]: unknown }
+export interface PluginPerfResult { note?: string | null; plugins: PluginPerfRow[]; [k: string]: unknown }
+
 // ── bridge_status (untyped) ─────────────────────────────────────────
 
 export interface BridgeEntry {

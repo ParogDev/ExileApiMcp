@@ -11,7 +11,7 @@ import { T } from "../tour/ids";
 import { useTours } from "../tour/engine";
 import type { PluginSettings, SettingNode } from "../types";
 import { capsLine } from "../../format";
-import { Badge, Button, Confirm, Kbd, Select, ShowMe, Slider, Switch, TextInput, agoShort } from "../ui";
+import { Badge, Button, ColorControl, Confirm, Kbd, Select, ShowMe, Slider, Switch, TextInput, agoShort } from "../ui";
 
 const UNDO_MS = 8000;
 
@@ -194,25 +194,7 @@ function SettingRow({ node: n, pending, mode, onChange, tour, highlight }: { nod
   );
 }
 
-function ColorControl({ value, onChange, label, disabled }: { value: string; onChange: (v: string) => void; label: string; disabled?: boolean }) {
-  const rgb = value.length >= 7 ? value.slice(0, 7) : "#ffffff";
-  const alpha = value.length === 9 ? value.slice(7) : "ff";
-  const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
-  const commit = (v: string) => { if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(v) && v !== value) onChange(v.length === 7 ? v + alpha : v); else setText(value); };
-  return (
-    <div className="flex items-center gap-2">
-      <span className="relative size-7 overflow-hidden rounded-md border border-line" style={{ background: `linear-gradient(45deg, var(--color-surface-3) 25%, transparent 25%, transparent 75%, var(--color-surface-3) 75%), linear-gradient(45deg, var(--color-surface-3) 25%, transparent 25%, transparent 75%, var(--color-surface-3) 75%)`, backgroundSize: "8px 8px", backgroundPosition: "0 0, 4px 4px" }}>
-        <span className="absolute inset-0" style={{ background: value }} />
-        <input type="color" value={rgb} disabled={disabled} aria-label={label} onChange={(e) => setText(e.target.value + alpha)} onBlur={(e) => commit(e.target.value + alpha)} className="absolute inset-0 cursor-pointer opacity-0" />
-      </span>
-      <input type="text" value={text} disabled={disabled} aria-label={`${label} hex`} onChange={(e) => setText(e.target.value)} onBlur={() => commit(text)} onKeyDown={(e) => { if (e.key === "Enter") commit(text); }} spellCheck={false}
-        className="h-7 w-24 rounded-md border border-line bg-surface px-1.5 font-code text-[11.5px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50" />
-    </div>
-  );
-}
-
-function UndoBar({ store, label, previous }: { store: ControlStore; label: string; previous: unknown }) {
+export function UndoBar({ store, label, previous }: { store: ControlStore; label: string; previous: unknown }) {
   const [busy, setBusy] = useState(false);
   return (
     <div className="slide-up fixed inset-x-3 bottom-3 z-40 flex justify-center" data-tour={T.settingsUndo}>

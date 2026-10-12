@@ -91,6 +91,9 @@ if (server instanceof FakeControl) {
   // control: f8=live|signin|down|empty picks the F8 dispatcher's state for the F8 sessions page.
   const f = params.get("f8");
   if (f === "live" || f === "signin" || f === "down" || f === "empty") server.f8Mode = f;
+  // control: healthbars=live|town|panel|unlinked|notloaded picks the health bar plugin's state for the Health Bars page.
+  const hb = params.get("healthbars");
+  if (hb === "live" || hb === "town" || hb === "panel" || hb === "unlinked" || hb === "notloaded") server.healthBarsMode = hb;
 }
 if (server instanceof FakePerf) {
   if (params.get("trace")) server.traceMs = Number(params.get("trace"));

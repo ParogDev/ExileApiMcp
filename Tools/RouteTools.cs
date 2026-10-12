@@ -28,34 +28,12 @@ public static class RouteTools
     public static async Task<CallToolResult> RouteState(BridgeRegistry bridges, [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
-        var (_, reply) = await bridges.CallAsync(game, "hud.bridge_call", new JObject { ["name"] = Method }, ct);
-        if (reply is not JObject r) return Fail("bridge_reply", $"hud.bridge_call returned {reply.Type}, not an object.");
-        if (r["error"] is JValue { Type: JTokenType.String } err && r["ok"] == null)
-        {
-            var message = r["message"]?.ToString() ?? "";
-            return err.Value<string>() switch
-            {
-                "method_missing" => Fail("plugin_not_loaded", $"Whats A Route is not loaded in this HUD, or an older build without {Method}: {message} hud_plugins plugin=Route says whether it compiled."),
-                "invoke_failed" => Fail("plugin_threw", $"{Method} threw: {message}"),
-                "unavailable" => Fail("bridge_unavailable", message),
-                var code => Fail(code ?? "bridge_error", message),
-            };
-        }
-        if (r["ok"] == null && r["resultType"] == null)
-        {
-            var text = r.ToString(Newtonsoft.Json.Formatting.None);
-            return Fail("bridge_too_old", $"This bridge build has no hud.bridge_call (it answered {(text.Length > 200 ? text[..200] + "..." : text)}): update Whats An AI Bridge and restart the HUD.");
-        }
-        var kind = r["resultType"]?.ToString();
-        if (kind != "json")
-        {
-            var text = r["result"]?.ToString() ?? "";
-            return Fail("route_not_json", $"{Method} returned {kind ?? "nothing"}, not JSON: {(text.Length > 200 ? text[..200] + "..." : text)}");
-        }
-        if (r["result"] is not JObject state) return Fail("route_not_json", $"{Method} returned a JSON {r["result"]?.Type}, not an object.");
+        var (_, reply) = await bridges.CallAsync(game, "hud.bridge_call", PluginCall.Params(Method), ct);
+        var decoded = PluginCall.Decode(reply, Method, "Whats A Route", "Route", "route");
+        if (!decoded.Ok) return Fail(decoded.Code!, decoded.Message!);
 
         RouteStateResult typed;
-        try { typed = TypedReply.Parse<RouteStateResult>(state); }
+        try { typed = TypedReply.Parse<RouteStateResult>(decoded.Json!); }
         catch (System.Text.Json.JsonException ex) { return Fail("route_shape", $"{Method} returned JSON that no longer fits RouteStateResult (Tools/RouteDtos.cs): {ex.Message}"); }
         return Dto.Result(typed, Summary(typed));
     }

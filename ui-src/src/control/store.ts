@@ -6,11 +6,12 @@
 import type { Toast } from "../sync";
 import { errorText, isUnreachable, type Host, type ListenState, type ToolResult } from "./host";
 import type {
-  BridgeEntry, Catalog, CatalogTool, FeedbackSession, FeedbackSessionsResult, Game, LayerMapResult, LayersResult, ObserveEvent, ObserveEventsResult, ObserveStatus,
-  PerfSnapshot, RouteError, RouteState, SeriesResult, SettingChangeResult, SettingNode, SettingsResult, TimelineResult,
+  BridgeEntry, Catalog, CatalogTool, FeedbackSession, FeedbackSessionsResult, Game, HealthBarsPreviewResult, HealthBarsState, LayerMapResult, LayersResult, ObserveEvent, ObserveEventsResult, ObserveStatus,
+  PerfSnapshot, PluginPerfResult, PluginPerfRow, RouteError, RouteState, SeriesResult, SettingChangeResult, SettingNode, SettingsResult, TimelineResult,
 } from "./types";
+import { HEALTHBARS_PLUGIN } from "./types";
 
-export type Page = "overview" | "tools" | "settings" | "observer" | "route" | "f8" | "perf" | "memory" | "explorer" | "stats";
+export type Page = "overview" | "tools" | "settings" | "observer" | "route" | "f8" | "healthbars" | "perf" | "memory" | "explorer" | "stats";
 export interface Route { page: Page; id?: string; sub?: string }
 
 export const PAGES: { page: Page; label: string; standaloneOnly?: boolean }[] = [
@@ -20,6 +21,7 @@ export const PAGES: { page: Page; label: string; standaloneOnly?: boolean }[] = 
   { page: "observer", label: "Observer" },
   { page: "route", label: "Route" },
   { page: "f8", label: "F8 sessions" },
+  { page: "healthbars", label: "Health Bars" },
   { page: "perf", label: "Performance", standaloneOnly: true },
   { page: "memory", label: "Memory", standaloneOnly: true },
   { page: "explorer", label: "Explorer", standaloneOnly: true },
@@ -116,10 +118,30 @@ export interface F8State {
   detail?: { seq: number; loading: boolean; brief?: string | null; stderr?: string | null; error?: string };
 }
 
+/** The Health Bars page: the health bar plugin's state (healthbars_state), polled at 1 Hz while the page is open and
+ *  visible; every 5th read also hud_plugin_perf for the HUD's own counters of this plugin and the stock HealthBars. */
+export interface HealthBarsNavState {
+  state?: HealthBarsState;
+  at?: number;
+  ms?: number;
+  loading: boolean;
+  /** The last call's error: the healthbars_state error object (by code) or the thrown message. */
+  error?: RouteError;
+  live: boolean;
+  reads: number;
+  /** hud_plugin_perf rows for this plugin and the stock HealthBars plugin, when the server offers the tool. */
+  perf?: { ours?: PluginPerfRow; stock?: PluginPerfRow; at: number; note?: string | null };
+  /** A healthbars_preview call in flight. */
+  previewing: boolean;
+  lastPreview?: HealthBarsPreviewResult;
+  previewAt?: number;
+}
+
 export interface Snapshot {
   route: Route;
   nav: RouteNavState;
   f8: F8State;
+  hb: HealthBarsNavState;
   catalog?: Catalog;
   catalogError?: string;
   catalogAt?: number;
@@ -158,10 +180,16 @@ const ROUTE_RETRY_MS = 5000;
 export const F8_POLL_MS = 3000;
 const F8_RETRY_MS = 10_000;
 export const F8_URI = "exile://feedback/sessions";
+/** healthbars_state every second while the Health Bars page is visible; 5 s between retries while it fails; hud_plugin_perf every 5th read. */
+export const HB_POLL_MS = 1000;
+const HB_RETRY_MS = 5000;
+const HB_PERF_EVERY = 5;
+/** The stock health bar plugin's name in the HUD's perf counters (the comparison on the Health Bars page). */
+export const STOCK_HEALTHBARS = "HealthBars";
 
 export class ControlStore {
   private snap: Snapshot = {
-    route: { page: "overview" }, nav: { loading: false, live: false, reads: 0 }, f8: { loading: false, live: false, via: "off" }, loadingCatalog: false, games: [],
+    route: { page: "overview" }, nav: { loading: false, live: false, reads: 0 }, f8: { loading: false, live: false, via: "off" }, hb: { loading: false, live: false, reads: 0, previewing: false }, loadingCatalog: false, games: [],
     health: { watching: false, loading: false, via: "off", history: [] },
     observer: { events: [], seq: 0, busy: false },
     timeline: EMPTY_TIMELINE,
@@ -181,6 +209,10 @@ export class ControlStore {
   private navGen = 0;
   private f8Timer?: ReturnType<typeof setTimeout>;
   private f8Gen = 0;
+  private hbTimer?: ReturnType<typeof setTimeout>;
+  private hbGen = 0;
+  /** Polls so far (reads and failures alike): every HB_PERF_EVERY-th one adds hud_plugin_perf. */
+  private hbPolls = 0;
 
   constructor(public readonly host: Host) {}
 
@@ -206,6 +238,7 @@ export class ControlStore {
     // The Route page mounts (and switches its poll on) before the shell's effect starts the store: resume it here.
     if (this.snap.nav.live) void this.pollRoute(++this.navGen);
     if (this.snap.f8.live) this.startF8(++this.f8Gen);
+    if (this.snap.hb.live) void this.pollHealthBars(++this.hbGen);
   }
 
   stop() {
@@ -216,6 +249,7 @@ export class ControlStore {
     clearTimeout(this.gamesTimer);
     this.setRouteLive(false);
     this.setF8Live(false);
+    this.setHealthBarsLive(false);
     this.unlisten?.();
     this.unlisten = undefined;
     for (const r of this.snap.runs) r.abort?.abort();
@@ -292,10 +326,88 @@ export class ControlStore {
 
   setGame(game: Game) {
     if (game === this.snap.game) return;
-    this.set({ game, observer: { events: [], seq: 0, busy: false }, timeline: EMPTY_TIMELINE, health: { ...this.snap.health, snapshot: undefined, history: [] }, nav: { ...this.snap.nav, state: undefined, at: undefined, error: undefined } });
+    this.set({ game, observer: { events: [], seq: 0, busy: false }, timeline: EMPTY_TIMELINE, health: { ...this.snap.health, snapshot: undefined, history: [] }, nav: { ...this.snap.nav, state: undefined, at: undefined, error: undefined }, hb: { ...this.snap.hb, state: undefined, at: undefined, error: undefined, perf: undefined } });
     this.resubscribe();
     void this.pollEvents();
     if (this.snap.nav.live) void this.pollRoute(++this.navGen);
+    if (this.snap.hb.live) void this.pollHealthBars(++this.hbGen);
+  }
+
+  // ── Health Bars (the health bar plugin's state and preview) ──────
+
+  /** Poll healthbars_state at 1 Hz while on (the Health Bars page mounts with it on, unmounts with it off); nothing while hidden. */
+  setHealthBarsLive(on: boolean) {
+    if (on === this.snap.hb.live) return;
+    this.hbGen++;
+    clearTimeout(this.hbTimer);
+    this.set({ hb: { ...this.snap.hb, live: on } });
+    if (on) void this.pollHealthBars(this.hbGen);
+  }
+
+  /** One read now (also what the poll does). `withPerf` adds hud_plugin_perf for the comparison with the stock plugin. */
+  async refreshHealthBars(withPerf = false): Promise<void> {
+    if (!this.snap.game || !this.hasTool("healthbars_state")) return;
+    const gen = this.hbGen;
+    this.set({ hb: { ...this.snap.hb, loading: true } });
+    const t0 = Date.now();
+    try {
+      const perfCall = withPerf && this.hasTool("hud_plugin_perf") ? this.call("hud_plugin_perf", this.gameArgs(), { quiet: true }).catch(() => undefined) : undefined;
+      const r = await this.call("healthbars_state", this.gameArgs(), { quiet: true });
+      if (gen !== this.hbGen) return;
+      if (r.isError) {
+        const d = r.data as RouteError | undefined;
+        this.set({ hb: { ...this.snap.hb, loading: false, error: d?.error ? d : { error: "error", message: r.text || "healthbars_state failed" } } });
+        return;
+      }
+      const state = r.data as HealthBarsState | undefined;
+      if (!state || typeof state !== "object" || !state.counts || !state.timings) throw new Error("healthbars_state returned no state");
+      let perf = this.snap.hb.perf;
+      const p = perfCall ? await perfCall : undefined;
+      if (p && !p.isError && (p.data as PluginPerfResult | undefined)?.plugins) {
+        const rows = (p.data as PluginPerfResult).plugins;
+        perf = { ours: rows.find((x) => x.name === HEALTHBARS_PLUGIN), stock: rows.find((x) => x.name === STOCK_HEALTHBARS), at: Date.now(), note: (p.data as PluginPerfResult).note };
+      }
+      if (gen !== this.hbGen) return;
+      this.set({ hb: { ...this.snap.hb, state, at: Date.now(), ms: r.ms ?? Date.now() - t0, loading: false, error: undefined, reads: this.snap.hb.reads + 1, perf } });
+    } catch (e) {
+      if (gen !== this.hbGen) return;
+      this.set({ hb: { ...this.snap.hb, loading: false, error: { error: isUnreachable(errorText(e)) ? "unreachable" : "error", message: errorText(e) } } });
+    }
+  }
+
+  private async pollHealthBars(gen: number) {
+    clearTimeout(this.hbTimer);
+    if (gen !== this.hbGen || !this.snap.hb.live || !this.running) return;
+    if (!document.hidden && this.snap.game && this.snap.catalog) await this.refreshHealthBars(this.hbPolls++ % HB_PERF_EVERY === 0);
+    if (gen !== this.hbGen || !this.snap.hb.live || !this.running) return;
+    this.hbTimer = setTimeout(() => void this.pollHealthBars(gen), this.snap.hb.error ? HB_RETRY_MS : HB_POLL_MS);
+  }
+
+  /** Show the plugin's sample bars in game (healthbars_preview): the focused kind first, `stress` extra bars for a cost test. */
+  async previewHealthBars(seconds = 8, focus?: string, stress = 0, quiet = false): Promise<HealthBarsPreviewResult | undefined> {
+    if (!this.snap.game) { this.toast("error", "No HUD is selected", "Preview in game"); return undefined; }
+    if (!this.hasTool("healthbars_preview")) { this.toast("error", "This server has no healthbars_preview tool: deploy a newer build (mcp_deploy).", "Preview in game"); return undefined; }
+    this.set({ hb: { ...this.snap.hb, previewing: true } });
+    try {
+      const args = this.gameArgs({ seconds, ...(focus ? { focus } : {}), ...(stress > 0 ? { stress } : {}) });
+      const r = await this.call("healthbars_preview", args);
+      if (r.isError) {
+        const d = r.data as RouteError | undefined;
+        throw new Error(d?.message ?? r.text ?? "healthbars_preview failed");
+      }
+      const res = r.data as HealthBarsPreviewResult;
+      this.set({ hb: { ...this.snap.hb, previewing: false, lastPreview: res, previewAt: Date.now() } });
+      const how = res.via === "pubsub" ? `published healthbars.preview${res.seq != null ? ` #${res.seq}` : ""}` : "called WhatsAHealthBar.Preview directly";
+      // Auto previews ("live in game") stay quiet: the header badge shows them; only errors toast.
+      if (!quiet) this.toast("success", `${seconds} s${focus ? `, ${focus} first` : ""}${stress > 0 ? `, ${stress} stress bars` : ""} · ${how}`, "Showing in game");
+      // The state shows the preview running within a second; read it now so the badge appears at once.
+      void this.refreshHealthBars();
+      return res;
+    } catch (e) {
+      this.set({ hb: { ...this.snap.hb, previewing: false } });
+      this.toast("error", errorText(e), "Preview in game");
+      return undefined;
+    }
   }
 
   // ── Route (the navigation plugin's state) ────────────────────────
