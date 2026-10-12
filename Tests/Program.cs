@@ -1,6 +1,7 @@
 // Unit checks for the incident board (Incidents/): parsing, raise / respond / resolve / prune, the bridge diagnosis from
 // canned facts and netsh output, deploy orphan judgement, and the store's mutex + atomic writes against a temp folder.
 // No test framework: each Check prints pass/FAIL; the exit code is the number of failures.
+using ExileApiMcp.Dispatch;
 using ExileApiMcp.Hosting;
 using ExileApiMcp.Incidents;
 using Newtonsoft.Json.Linq;
@@ -724,6 +725,118 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
         using (ExileApiMcp.Hud.HudSource.LockAsync(repo, "after release", TimeSpan.FromSeconds(1)).GetAwaiter().GetResult()) Check("hud source lock: free again once released", true);
     }
     finally { try { Directory.Delete(tmp, true); } catch { } }
+}
+
+// ── F8 progress contract (Dispatch/F8.cs): stages, phases, legacy status, inference, replies, presses ──
+{
+    var phases = F8.Stages.Select(F8.Phase).ToList();
+    Check("f8: every stage has a phase, in pipeline order",
+        string.Join(",", phases) == "Sent,Sent,Looking,Looking,Looking,Fixing,Fixing,Fixing,Shipping,Shipping,Checking,Ended,Ended,Ended", string.Join(",", phases));
+    Check("f8: stage names in any casing", F8.Stage("livefix") == "LiveFix" && F8.Stage(" DONE ") == "Done" && F8.Stage("nope") == null && F8.Phase("nope") == null);
+    Check("f8: C5 legacy status -> stage",
+        F8.StageFromStatus("queued") == "Queued" && F8.StageFromStatus("claimed") == "Claimed" && F8.StageFromStatus("working") == "Investigating"
+        && F8.StageFromStatus("done") == "Done" && F8.StageFromStatus("failed") == "Failed" && F8.StageFromStatus("odd") == null);
+    Check("f8: stage -> legacy status round-trips C5",
+        new[] { "queued", "claimed", "working", "done", "failed" }.All(s => F8.LegacyStatus(F8.StageFromStatus(s)) == s));
+    Check("f8: legacy status of the new stages",
+        F8.LegacyStatus("Reading") == "working" && F8.LegacyStatus("LiveFix") == "working" && F8.LegacyStatus("Verifying") == "working"
+        && F8.LegacyStatus("Dropped") == "done" && F8.LegacyStatus("Pressed") == "queued");
+    Check("f8: inference moves forward only", F8.Advance(null, "Investigating") == "Investigating" && F8.Advance("Reading", "Investigating") == "Investigating"
+        && F8.Advance("Fixing", "Investigating") == null && F8.Advance("Investigating", "Reviewing") == "Reviewing" && F8.Advance("Reviewing", "Reviewing") == null);
+    Check("f8: inference never leaves or enters a final stage", F8.Advance("Done", "Reviewing") == null && F8.Advance("Failed", "Investigating") == null
+        && F8.Advance("Fixing", "Done") == null);
+    Check("f8: handler label -> press", F8.SeqOfLabel("route-f8-123") == 123 && F8.SeqOfLabel("route-f8-x") == null && F8.SeqOfLabel("main") == null && F8.SeqOfLabel(null) == null);
+    Check("f8: inferred stages", F8.InferredStage("route_state") == "Investigating" && F8.InferredStage("get_player") == "Investigating"
+        && F8.InferredStage("run_csharp") == "Investigating" && F8.InferredStage("mark_reviewed") == "Reviewing" && F8.InferredStage("feedback_reply") == null
+        && F8.InferredStage("pubsub_wait") == null);
+
+    var legacyReply = JObject.Parse("""{ "seq": 50, "kind": "feedback.reply", "data": { "ref": 41, "status": "working", "text": "Looking" } }""");
+    var newReply = JObject.Parse("""{ "seq": 51, "kind": "feedback.reply", "data": { "ref": 41, "Ref": 41, "status": "working", "Status": "working", "Stage": "Fixing", "text": "x", "Text": "x" } }""");
+    var other = JObject.Parse("""{ "seq": 52, "kind": "feedback.reply", "data": { "ref": 42, "status": "done", "text": "y" } }""");
+    Check("f8: a reply's stage: Stage first, else its legacy status", F8.ReplyStage(legacyReply["data"]) == "Investigating" && F8.ReplyStage(newReply["data"]) == "Fixing");
+    Check("f8: a press's current stage is its newest reply's", F8.CurrentStage([legacyReply, newReply, other], 41) == "Fixing" && F8.CurrentStage([other], 41) == null
+        && F8.CurrentStage([legacyReply, newReply, other], 42) == "Done");
+
+    var reply = F8.Reply(41, "livefix", "Try the lever now.", detail: new string('d', 500), ask: "Pull it", waitingOn: "ci",
+        pr: new ExileApiMcp.Tools.F8PrRef { Repo = "ParogDev/WhatsARoute", Number = 57, Checks = "pending" });
+    var wire = ExileApiMcp.Tools.F8Wire.ToJObject(reply);
+    Check("f8 reply: legacy lowercase and PascalCase both on the wire",
+        wire["ref"]?.Value<long>() == 41 && wire["Ref"]?.Value<long>() == 41 && wire["status"]?.ToString() == "working" && wire["Status"]?.ToString() == "working"
+        && wire["text"]?.ToString() == "Try the lever now." && wire["Text"]?.ToString() == "Try the lever now.", wire.ToString());
+    Check("f8 reply: new fields PascalCase, canonical, clipped",
+        wire["Stage"]?.ToString() == "LiveFix" && wire["WaitingOn"]?.ToString() == "Ci" && wire["Ask"]?.ToString() == "Pull it" && wire["Detail"]!.ToString().Length <= 400
+        && wire["Pr"]?["Number"]?.Value<int>() == 57 && wire["Pr"]?["Repo"]?.ToString() == "ParogDev/WhatsARoute" && wire["At"]?.Type == JTokenType.String, wire.ToString());
+    var plain = ExileApiMcp.Tools.F8Wire.ToJObject(F8.Reply(7, "Queued", null, status: "failed"));
+    Check("f8 reply: nulls omitted, default text, legacy status override",
+        !plain.ContainsKey("Pr") && !plain.ContainsKey("Ask") && !plain.ContainsKey("WaitingOn") && plain["status"]?.ToString() == "failed" && plain["Stage"]?.ToString() == "Queued"
+        && plain["text"]?.ToString().Contains("#7") == true, plain.ToString());
+    Throws<ArgumentException>("f8 reply: an unknown stage is refused", () => F8.Reply(7, "Shipping", "x"));
+    Check("f8 reply: the published data reads back (ReplyRef / ReplyStage / ReplyText)",
+        F8.ReplyRef(wire) == 41 && F8.ReplyStage(wire) == "LiveFix" && F8.ReplyText(wire) == "Try the lever now.");
+
+    var works = JObject.Parse("""{ "Event": "f8", "Flags": ["works"] }""");
+    var worksNote = JObject.Parse("""{ "Event": "f8", "Flags": ["works"], "Note": "but the marker is late" }""");
+    var oldWorks = JObject.Parse("""{ "Event": "works" }""");
+    var confirm = JObject.Parse("""{ "Event": "f8", "Flags": ["something-else"], "Ref": 11, "Verdict": "works" }""");
+    var reopen = JObject.Parse("""{ "Event": "f8", "Flags": ["not-advancing"], "Ref": 11, "Verdict": "still-wrong" }""");
+    Check("f8 press: C7 works-only (new and old), not with a note or a ref",
+        F8.WorksOnly(works) && F8.WorksOnly(oldWorks) && !F8.WorksOnly(worksNote) && !F8.WorksOnly(confirm) && !F8.WorksOnly(JObject.Parse("""{ "Flags": ["works", "odd-path"] }""")));
+    Check("f8 press: Works now confirms, Still wrong reopens", F8.ConfirmsRef(confirm) && !F8.ConfirmsRef(reopen) && F8.Reopens(reopen) && !F8.Reopens(confirm) && F8.PressRef(reopen) == 11);
+    var rich = JObject.Parse("""
+    { "Event": "f8", "Flags": ["wrong-place", "not-advancing"], "Note": "lever", "Scope": "panel", "ScopePanel": "Inventory", "WatchFor": "only the stash",
+      "Hints": ["path-ok", "panel-only"], "WatchNext": true, "Ref": 11, "Verdict": "still-wrong",
+      "Suggested": [ { "Id": "quest-moved", "Label": "Quest moved, step didn't", "Reason": "Q went to 3", "Certain": true, "Kept": true },
+                     { "Id": "blocked", "Label": "No way through", "Reason": "path blocked", "Certain": true, "Kept": false },
+                     { "Id": "stuck", "Label": "Stuck here 4 min", "Certain": false, "Kept": false } ] }
+    """);
+    var section = F8.PressSection(rich, 12, "Moved the lever step to the next room.");
+    Check("f8 brief: reopened press leads with the earlier answer", section.StartsWith("**This reopens #11") && section.Contains("Moved the lever step to the next room."), section);
+    Check("f8 brief: flags with their meaning, kept and rejected suggestions",
+        section.Contains("**Wrong place** (wrong-place)") && section.Contains("Quest moved, step didn't") && section.Contains("PLAYER REJECTED") && section.Contains("No way through")
+        && !section.Contains("Stuck here"), section);
+    Check("f8 brief: scope, hints, watch-for and the capture wait",
+        section.Contains("Scope: **panel**") && section.Contains("Inventory") && section.Contains("do not check pathing") && section.Contains("only the stash")
+        && section.Contains("pubsub_wait kinds=[\"feedback.capture\"] since=12"), section);
+    Check("f8 brief: nothing extra for an old press", F8.PressSection(JObject.Parse("""{ "Event": "note", "Note": "x" }"""), 3, null) == "");
+    Check("f8 press: what was asked", F8.What(rich) == "Wrong place, Not advancing" && F8.What(JObject.Parse("""{ "Event": "Wrong place" }""")) == "Wrong place"
+        && F8.What(JObject.Parse("""{ "Flags": ["something-else"], "Note": "the door" }""")) == "the door");
+    var richPress = new JObject { ["seq"] = 12, ["kind"] = "feedback", ["at"] = "2026-10-12T10:00:00Z", ["data"] = rich };
+    var briefNew = FeedbackKit.Brief(richPress, [], [], @"C:\m\fa.md", @"C:\live", null, "Moved the lever step.");
+    Check("f8 brief: the press section comes first, stages and route_agent named",
+        briefNew.IndexOf("This reopens #11", StringComparison.Ordinal) < briefNew.IndexOf("## First", StringComparison.Ordinal)
+        && briefNew.Contains("stage=") && briefNew.Contains("route_agent action=set ref=12"), briefNew);
+
+    // route_agent validation (AgentRouteKit)
+    ExileApiMcp.Tools.AgentRouteStepArg Step(string target, string label, string? kind = null, string? value = null) =>
+        new() { Target = target, Label = label, Done = kind == null ? null : new ExileApiMcp.Tools.AgentRouteDoneRule { Kind = kind, Value = value } };
+    Throws<ArgumentException>("route_agent: no steps refused", () => AgentRouteKit.Set("a:1", "t", "r", [], null, null, null));
+    Throws<ArgumentException>("route_agent: 9 steps refused", () => AgentRouteKit.Set("a:1", "t", "r", Enumerable.Range(0, 9).Select(i => Step("waypoint", $"s{i}")).ToList(), null, null, null));
+    try { AgentRouteKit.Set("a:1", "t", "r", [], null, null, null); } catch (ArgumentException ex) { Check("route_agent: bad steps says bad_steps", ex.Message.StartsWith("bad_steps")); }
+    Throws<ArgumentException>("route_agent: a title is required", () => AgentRouteKit.Set("a:1", " ", "r", [Step("waypoint", "go")], null, null, null));
+    Throws<ArgumentException>("route_agent: a reason is required", () => AgentRouteKit.Set("a:1", "t", null, [Step("waypoint", "go")], null, null, null));
+    Throws<ArgumentException>("route_agent: a step label is required", () => AgentRouteKit.Set("a:1", "t", "r", [Step("waypoint", "")], null, null, null));
+    Throws<ArgumentException>("route_agent: unknown done kind", () => AgentRouteKit.Set("a:1", "t", "r", [Step("waypoint", "go", "Reach")], null, null, null));
+    Throws<ArgumentException>("route_agent: Flag needs a value", () => AgentRouteKit.Set("a:1", "t", "r", [Step("", "go", "flag")], null, null, null));
+    Throws<ArgumentException>("route_agent: Near needs a target", () => AgentRouteKit.Set("a:1", "t", "r", [Step("", "go", "Near")], null, null, null));
+    Throws<ArgumentException>("route_agent: bad handBack", () => AgentRouteKit.Set("a:1", "t", "r", [Step("waypoint", "go")], null, "Stay", null));
+    Throws<ArgumentException>("route_agent: highlight must be an object", () => AgentRouteKit.Set("a:1", "t", "r",
+        [new() { Target = "waypoint", Label = "go", Highlight = System.Text.Json.JsonDocument.Parse("\"x\"").RootElement }], null, null, null));
+    var cmd = AgentRouteKit.Set("route-f8-12:abc123", new string('T', 60), new string('R', 200),
+        [Step("click:Lever", new string('L', 60)), Step("", "Press Did it once pulled"), Step("", "Kill it", "dead", "MonkeyChiefJungle")], 9999, "hold", 12);
+    Check("route_agent: defaults (Near with a target, Manual without), canonical kinds, limits",
+        cmd.Steps![0].Done!.Kind == "Near" && cmd.Steps[1].Done!.Kind == "Manual" && cmd.Steps[2].Done!.Kind == "Dead" && cmd.Steps[2].Done!.Value == "MonkeyChiefJungle"
+        && cmd.Title!.Length <= 40 && cmd.Reason!.Length <= 120 && cmd.Steps[0].Label.Length <= 40 && cmd.TtlSec == 1800 && cmd.HandBack == "Hold" && cmd.Ref == 12);
+    Check("route_agent: ttl default 600", AgentRouteKit.Set("a:1", "t", "r", [Step("waypoint", "go")], null, null, null).TtlSec == 600);
+    var routeWire = ExileApiMcp.Tools.F8Wire.ToJObject(cmd);
+    Check("route_agent: route.agent data is PascalCase with Op set, no Owner (the bridge stamps it)",
+        routeWire["Op"]?.ToString() == "set" && routeWire["Id"]?.ToString() == "route-f8-12:abc123" && routeWire["Steps"]?[2]?["Done"]?["Kind"]?.ToString() == "Dead"
+        && routeWire["Steps"]?[0]?["Target"]?.ToString() == "click:Lever" && !routeWire.ContainsKey("Owner") && !routeWire.ContainsKey("Hue") && !routeWire.ContainsKey("Text")
+        && routeWire["Steps"]?[0] is JObject s0 && !s0.ContainsKey("Highlight"), routeWire.ToString());
+    var id = AgentRouteKit.NewId("route-f8-12");
+    Check("route_agent: default id is <label>:<6 hex>", System.Text.RegularExpressions.Regex.IsMatch(id, "^route-f8-12:[0-9a-f]{6}$") && id != AgentRouteKit.NewId("route-f8-12"), id);
+    Check("route_agent: progress outcome", AgentRouteKit.Outcome(["started", "step-done", "done"]) == ("done", false)
+        && AgentRouteKit.Outcome(["started", "left"]) == (null, true) && AgentRouteKit.Outcome(["started", "left", "resumed"]) == (null, false)
+        && AgentRouteKit.Outcome(["started", "expired"]) == ("expired", false) && AgentRouteKit.Outcome(["started", "replaced", "started"]) == (null, false));
 }
 
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
