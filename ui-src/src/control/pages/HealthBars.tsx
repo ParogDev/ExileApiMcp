@@ -60,7 +60,7 @@ export function HealthBarsPage({ store, snap }: { store: ControlStore; snap: Sna
   const afterChange = useCallback(() => {
     if (!liveInGame) return;
     clearTimeout(autoTimer.current);
-    autoTimer.current = setTimeout(() => void store.previewHealthBars(8, KINDS[focus]), AUTO_PREVIEW_MS);
+    autoTimer.current = setTimeout(() => void store.previewHealthBars(8, KINDS[focus], 0, true), AUTO_PREVIEW_MS);
   }, [liveInGame, focus, store]);
   useEffect(() => () => clearTimeout(autoTimer.current), []);
 

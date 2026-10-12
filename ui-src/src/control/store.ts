@@ -384,7 +384,7 @@ export class ControlStore {
   }
 
   /** Show the plugin's sample bars in game (healthbars_preview): the focused kind first, `stress` extra bars for a cost test. */
-  async previewHealthBars(seconds = 8, focus?: string, stress = 0): Promise<HealthBarsPreviewResult | undefined> {
+  async previewHealthBars(seconds = 8, focus?: string, stress = 0, quiet = false): Promise<HealthBarsPreviewResult | undefined> {
     if (!this.snap.game) { this.toast("error", "No HUD is selected", "Preview in game"); return undefined; }
     if (!this.hasTool("healthbars_preview")) { this.toast("error", "This server has no healthbars_preview tool: deploy a newer build (mcp_deploy).", "Preview in game"); return undefined; }
     this.set({ hb: { ...this.snap.hb, previewing: true } });
@@ -398,7 +398,8 @@ export class ControlStore {
       const res = r.data as HealthBarsPreviewResult;
       this.set({ hb: { ...this.snap.hb, previewing: false, lastPreview: res, previewAt: Date.now() } });
       const how = res.via === "pubsub" ? `published healthbars.preview${res.seq != null ? ` #${res.seq}` : ""}` : "called WhatsAHealthBar.Preview directly";
-      this.toast("success", `${seconds} s${focus ? `, ${focus} first` : ""}${stress > 0 ? `, ${stress} stress bars` : ""} · ${how}`, "Showing in game");
+      // Auto previews ("live in game") stay quiet: the header badge shows them; only errors toast.
+      if (!quiet) this.toast("success", `${seconds} s${focus ? `, ${focus} first` : ""}${stress > 0 ? `, ${stress} stress bars` : ""} · ${how}`, "Showing in game");
       // The state shows the preview running within a second; read it now so the badge appears at once.
       void this.refreshHealthBars();
       return res;

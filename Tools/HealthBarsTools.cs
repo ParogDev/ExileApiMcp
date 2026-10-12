@@ -102,6 +102,10 @@ public static class HealthBarsTools
             if (stress > 0) data["stress"] = stress;
             var (_, pub) = await bridges.CallAsync(game, "pubsub.publish", new JObject { ["kind"] = PreviewKind, ["data"] = data }, ct);
             if (FeedbackKit.Refusal(pub, "pubsub.publish") is { } refusal) note = refusal;
+            else if (!await PreviewStarted(bridges, game, ct))
+                // A subscriber can outlive its plugin load (a reload after a failed compile keeps the old delegates):
+                // the event went nowhere live. Fall through to the plugin's own method.
+                note = $"published {PreviewKind} #{pub["seq"]}, but the plugin's state showed no preview within 1.5 s (a stale subscriber from an earlier load?)";
             else
             {
                 result.Ok = true;
@@ -126,6 +130,24 @@ public static class HealthBarsTools
         result.Via = "bridge_call";
         result.Note = $"called {PreviewMethod} directly because {note ?? "the plugin was not subscribed to " + PreviewKind}";
         return Dto.Result(result, Summary(result));
+    }
+
+    /// <summary>
+    /// Whether the plugin's state reports a running preview within 1.5 s of the publish (it starts on the plugin's next
+    /// Tick). An unreadable state counts as started, so a missing GetState never blocks the preview.
+    /// </summary>
+    private static async Task<bool> PreviewStarted(BridgeRegistry bridges, string? game, CancellationToken ct)
+    {
+        for (var i = 0; i < 6; i++)
+        {
+            await Task.Delay(250, ct);
+            var (_, reply) = await bridges.CallAsync(game, "hud.bridge_call", PluginCall.Params(StateMethod), ct);
+            var decoded = PluginCall.Decode(reply, StateMethod, Plugin, Folder, "healthbars");
+            if (!decoded.Ok) return true;
+            var preview = decoded.Json!["Preview"] ?? decoded.Json["preview"];
+            if ((preview?["Active"] ?? preview?["active"])?.Value<bool>() == true) return true;
+        }
+        return false;
     }
 
     /// <summary>A kind name as the plugin spells it, or null for the natural order; "You" is Self.</summary>
