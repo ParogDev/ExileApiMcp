@@ -38,11 +38,13 @@ public static class GuideTools
         [Description("A 2-3 word toast title, e.g. 'Low life' (shown in caps); default: from the kind")] string? logTitle = null,
         [Description("Remove the instruction card")] bool clear = false,
         [Description("Show a Done button the user presses when finished (default: on for status=waiting with an instruction); await_done reads it")] bool? offerDone = null,
+        [Description("Time the user has for this step, seconds (3-3600): the card counts it down ('1:42 left') while the step is active. Display only: match it to your own wait (await_done timeoutSec)")] int? timeLimitSec = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
         var set = new JObject();
         if (clear) set["clear"] = true;
+        if (timeLimitSec != null) set["timeLimitSec"] = timeLimitSec;
         string? stepId = null;
         if (!clear && (offerDone ?? (status == "waiting" && instruction != null)))
         {
