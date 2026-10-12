@@ -11,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.77.0";
+    public const string Version = "3.77.1";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -113,15 +113,25 @@ internal static class McpSetup
     {
         try
         {
-            if (SessionIdentity.Kind != "mcp" || server.ClientCapabilities?.Roots == null) { SessionIdentity.RootsUnavailable(); return; }
+            if (SessionIdentity.Kind != "mcp") { SessionIdentity.RootsUnavailable(); return; }
+            // Only a per-session client (Claude Code) of a server started in a checkout is asked: a shared server's roots
+            // may be another conversation's (SessionIdentity.WhyNotAskRoots).
+            var client = server.ClientInfo is { } ci ? $"{ci.Name} {ci.Version}" : null;
+            if (SessionIdentity.WhyNotAskRoots(SessionIdentity.StartCheckout() != null, server.ClientInfo?.Name) is { } why)
+            {
+                SessionIdentity.RootsUnavailable(why + (client != null ? $" (client {client})" : ""));
+                Console.Error.WriteLine($"[Session] roots: {why}; keeping '{SessionIdentity.Label}'");
+                return;
+            }
+            if (server.ClientCapabilities?.Roots == null) { SessionIdentity.RootsUnavailable($"the client ({client}) offers no roots"); return; }
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             var r = await server.RequestRootsAsync(new ListRootsRequestParams(), cts.Token);
-            if (!SessionIdentity.AdoptRoots(r.Roots.Select(x => x.Uri)))
-                Console.Error.WriteLine($"[Session] none of the client's {r.Roots.Count} root(s) names another git checkout; keeping '{SessionIdentity.Label}'");
+            // AdoptRoots logs what the roots were and what it decided (SessionIdentity.Identity keeps it for hud_sessions).
+            SessionIdentity.AdoptRoots(r.Roots.Select(x => x.Uri), client);
         }
         catch (Exception ex)
         {
-            SessionIdentity.RootsUnavailable();
+            SessionIdentity.RootsUnavailable($"roots/list failed: {ex.Message}");
             Console.Error.WriteLine($"[Session] roots/list failed ({ex.Message}); keeping '{SessionIdentity.Label}'");
         }
     }
@@ -217,9 +227,9 @@ internal static class McpSetup
                 // the only record of what an MCP App actually called. Successful polls are skipped (1/s).
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var name = request.Params?.Name ?? "?";
-                // Started outside any repo (the desktop app starts user-scope servers in System32): learn the session's
-                // project from the client's roots once, before anything tells the HUD who we are (SessionIdentity).
-                if (SessionIdentity.NeedsRoots) await AdoptClientRootsAsync(request.Server);
+                // The client's roots, once: a stdio server started in the main checkout takes the one other checkout they clearly name
+                // as its label, before anything tells the HUD who we are (SessionIdentity.DecideRoots: never a guess).
+                if (SessionIdentity.NeedsRoots && SessionIdentity.BeginRoots()) await AdoptClientRootsAsync(request.Server);
                 // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
                 // Polls and the experiment tools stay out of it: await_change writes its own lines, and the Memory View's
                 // experiment runner re-reads the record and presets while it follows along.

@@ -83,9 +83,16 @@ POST requests counted per caller in `CallerIdentity.Enter`) and closes those of 
 counting an mcp-http caller after 10 min without a call (`hud_sessions` shows it `stale`) unless it holds a lease. A worker
 the supervisor retires closes its idle callers at once.
 The server's own identity and the F8 route-dispatcher say `role: infra` in their hello: the shared server's machinery, not
-agents. A stdio server asks its client for its roots on the first call even when its cwd has a branch: Claude Code starts
-it in the project folder (the main checkout) while the session works in a worktree, so it would read "main"; a root in
-another checkout gives it that checkout's branch as its label (`SessionIdentity.AdoptRoots`).
+agents. A stdio server asks its client for its roots once, on the first call: Claude Code starts it in the project folder
+(the main checkout) while the session works in a worktree, so it would read "main". Only Claude Code (clientInfo
+`claude-code`, one server per session) of a server started in a checkout is asked (`SessionIdentity.WhyNotAskRoots`): a
+server started outside any checkout is the Claude desktop app's, which starts its user-scope server in System32 and shares
+it among its conversations (on 2026-10-12 one took another session's worktree as its label), so it keeps "Claude Desktop".
+Roots are adopted only when they clearly name one other top-level checkout (`DecideRoots`; a root inside a submodule
+counts as the checkout holding it): roots in two or more checkouts are ambiguous and change nothing. An adopted root also
+becomes deploy_plugin's checkout (`SessionRoot`); `RepoRoot` (machine-wide scripts) never comes from roots. How the label
+was decided, with the roots and the client's name, is `identity` in `hud_sessions` and `this.identity` in `mcp_status`,
+and the server logs it to stderr.
 
 For your own server (MCP development, or outside the scaffolding):
 ```

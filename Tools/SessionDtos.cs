@@ -26,7 +26,32 @@ public sealed class SessionsView
     public long? AttentionSeq { get; set; }
     /// <summary>Open incidents on the machine-wide board (this server adds them; the bridge doesn't know the board), with each session's response.</summary>
     public List<IncidentView>? Incidents { get; set; }
+    /// <summary>How this server's own label was decided (stdio servers; null for a shared server's caller, named by its headers).</summary>
+    public SessionIdentityInfo? Identity { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>How a server's label was decided (Hosting/SessionIdentity.cs DecideRoots): never a guess from roots.</summary>
+public sealed class SessionIdentityInfo
+{
+    /// <summary>env (HEXILE_AGENT) | cwd (the branch of the folder it was started in) | roots (one other checkout the client named) | folder (outside any checkout).</summary>
+    public string Source { get; set; } = "";
+    /// <summary>Why: what the roots said and why they were or weren't adopted.</summary>
+    public string Note { get; set; } = "";
+    /// <summary>The client's roots as it gave them (null: not asked).</summary>
+    public List<string>? Roots { get; set; }
+    /// <summary>The client's name and version (MCP clientInfo).</summary>
+    public string? Client { get; set; }
+    public string Label { get; set; } = "";
+    /// <summary>deploy_plugin's checkout when the roots named one (else it uses the checkout the server runs from).</summary>
+    public string? SessionRoot { get; set; }
+
+    public static SessionIdentityInfo? Current() => Hosting.CallerIdentity.Current != null ? null : new()
+    {
+        Source = Hosting.SessionIdentity.Identity.Source, Note = Hosting.SessionIdentity.Identity.Note,
+        Roots = Hosting.SessionIdentity.Identity.Roots?.ToList(), Client = Hosting.SessionIdentity.Identity.Client,
+        Label = Hosting.SessionIdentity.Label, SessionRoot = Hosting.SessionIdentity.SessionRoot,
+    };
 }
 
 public sealed class SessionInfo

@@ -305,6 +305,18 @@ Start Port    End Port
     e1.Dispose(); e1.Dispose();   // twice: counted once
     var one = CallerIdentity.OpenCalls(cid);
     e2.Dispose();
+    // Roots never guess a label (SessionIdentity.DecideRoots): 2026-10-12 a desktop-app server read another session's worktree.
+    var main = @"C:\repo"; var wtA = @"C:\repo\.claude\worktrees\a"; var wtB = @"C:\repo\.claude\worktrees\b";
+    SessionIdentity.RootCheckout R(string p, string b) => new(p, p, b);
+    Check("roots: a server outside any checkout never asks", SessionIdentity.WhyNotAskRoots(false, "claude-code") != null);
+    Check("roots: a client other than Claude Code is never asked", SessionIdentity.WhyNotAskRoots(true, "claude-ai") != null && SessionIdentity.WhyNotAskRoots(true, null) != null);
+    Check("roots: Claude Code in a checkout is asked", SessionIdentity.WhyNotAskRoots(true, "claude-code") == null);
+    Check("roots: one other checkout is adopted", SessionIdentity.DecideRoots(main, [R(wtA, "claude/a")]).Adopt?.Path == wtA);
+    Check("roots: two roots in one other checkout are one", SessionIdentity.DecideRoots(main, [R(wtA, "claude/a"), new(wtA + @"\Plugins\X", wtA + "\\", "claude/a")]).Adopt?.Path == wtA);
+    Check("roots: two checkouts are ambiguous", SessionIdentity.DecideRoots(main, [R(wtA, "claude/a"), R(wtB, "claude/b")]).Adopt == null);
+    Check("roots: its own checkout plus a worktree is ambiguous", SessionIdentity.DecideRoots(main, [R(main, "main"), R(wtA, "claude/a")]).Adopt == null);
+    Check("roots: only its own checkout changes nothing", SessionIdentity.DecideRoots(main, [R(main + "\\", "main")]).Adopt == null);
+    Check("roots: no checkout changes nothing", SessionIdentity.DecideRoots(main, []).Adopt == null);
     Check("caller: open calls counted per caller, each leave once", two == 2 && one == 1 && CallerIdentity.OpenCalls(cid) == 0 && CallerIdentity.OpenCalls("nobody") == 0, $"{two} {one}");
 }
 
