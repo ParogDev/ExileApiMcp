@@ -193,7 +193,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             File.WriteAllText(briefPath, FeedbackKit.Brief(press, trace, replies, standingBrief, LiveDir, previous));
             File.WriteAllText(Path.Combine(dir, "prompt.txt"), FeedbackKit.Prompt(seq, briefPath));
             var mcpConfig = Path.Combine(dir, "mcp.json");
-            File.WriteAllText(mcpConfig, McpConfigJson(seq));
+            File.WriteAllText(mcpConfig, McpConfigJson(seq, Path.Combine(repo, ".claude", "worktrees", FeedbackKit.Label(seq))));
             var settings = Path.Combine(dir, "settings.json");
             File.WriteAllText(settings, FeedbackKit.SlimSettingsJson());
             // Inline for the background session; over ~16k chars it would crowd Windows' 32k command line, so it is left
@@ -266,11 +266,13 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
                                                           Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script)))
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = workDir,
+            RedirectStandardInput = true,   // closed below: nothing it starts may inherit our (always open) stdin
         };
         foreach (var k in psi.Environment.Keys.Where(FeedbackKit.Scrub).ToList()) psi.Environment.Remove(k);
         psi.Environment["HEXILE_AGENT"] = FeedbackKit.Label(seq);
         psi.Environment["HEXILE_ROUTE_PRESS"] = seq.ToString();
         using var launcher = Process.Start(psi) ?? throw new HandlerStartException("powershell.exe (the handler's launcher) did not start", null);
+        launcher.StandardInput.Close();
         var stdout = launcher.StandardOutput.ReadToEndAsync(ct);
         var stderr = launcher.StandardError.ReadToEndAsync(ct);
         try { await launcher.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(30), ct); }
@@ -384,9 +386,10 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         Process? p = null;
         try
         {
-            var psi = new ProcessStartInfo(exe, "auth status") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            var psi = new ProcessStartInfo(exe, "auth status") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
             foreach (var k in psi.Environment.Keys.Where(FeedbackKit.Scrub).ToList()) psi.Environment.Remove(k);
             p = Process.Start(psi)!;
+            p.StandardInput.Close();
             var output = p.StandardOutput.ReadToEndAsync(ct);
             var errors = p.StandardError.ReadToEndAsync(ct);   // read both: a full stderr pipe would block the CLI
             await p.WaitForExitAsync(ct).WaitAsync(TimeSpan.FromSeconds(30), ct);
@@ -422,7 +425,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         catch { return null; }
     }
 
-    private static string McpConfigJson(long seq)
+    /// <summary>The handler's MCP config: the shared server, as caller route-f8-&lt;seq&gt; working in its worktree. Tools that
+    /// act on "your checkout" (deploy_plugin) read the cwd header; without it they fall back to the main checkout.</summary>
+    private static string McpConfigJson(long seq, string worktree)
     {
         var port = int.TryParse(Environment.GetEnvironmentVariable("HEXILE_PUBLIC_PORT"), out var p) ? p : 50910;
         var config = new Dictionary<string, object>
@@ -436,6 +441,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
                     {
                         ["Authorization"] = "Bearer " + LocalHttpSecurity.LoadOrCreateToken(),
                         [CallerIdentity.AgentHeader] = FeedbackKit.Label(seq),
+                        [CallerIdentity.CwdHeader] = Uri.EscapeDataString(worktree),
                     },
                 },
             },
@@ -761,9 +767,13 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
 
     internal static (int Code, string Output) Git(string dir, string args, int timeoutMs = 30000)
     {
-        var psi = new ProcessStartInfo("git", $"-C \"{dir}\" {args}") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        // Its own stdin, closed at once (as PluginGit.Run): git waits on an inherited stdin pipe for as long as it stays open,
+        // and ours always is (the supervisor's control pipe on the shared server). Without it every call here ran into its
+        // timeout: mark_reviewed's "not a git checkout", the main sync's "git fetch timed out after 120 s".
+        var psi = new ProcessStartInfo("git", $"-C \"{dir}\" {args}") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";   // a credential prompt would hang with no one to answer it
         using var p = Process.Start(psi)!;
+        p.StandardInput.Close();
         var o = p.StandardOutput.ReadToEndAsync();
         var e = p.StandardError.ReadToEndAsync();
         if (!p.WaitForExit(timeoutMs)) { try { p.Kill(true); } catch { } return (-1, $"git {args.Split(' ')[0]} timed out after {timeoutMs / 1000} s"); }

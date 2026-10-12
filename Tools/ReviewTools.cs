@@ -28,15 +28,19 @@ public static class ReviewTools
         if (!Path.IsPathFullyQualified(path))
             throw new McpException($"path '{path}' is relative: pass the absolute path of the checkout (this server's working directory is not yours).");
         if (!Directory.Exists(path)) throw new McpException($"path '{path}' does not exist.");
-        var gitDir = Git(path, "rev-parse --absolute-git-dir");
-        var head = Git(path, "rev-parse HEAD");
-        if (gitDir == null || head == null) throw new McpException($"'{path}' is not a git checkout (git rev-parse failed there).");
+        var gitDir = Git(path, "rev-parse --absolute-git-dir", out var why) ?? throw new McpException($"'{path}': git rev-parse --absolute-git-dir failed: {why}");
+        var head = Git(path, "rev-parse HEAD", out why) ?? throw new McpException($"'{path}': git rev-parse HEAD failed: {why}");
         var marker = Path.Combine(gitDir.Replace('/', Path.DirectorySeparatorChar), MarkFile);
         File.WriteAllText(marker, head + "\r\n", System.Text.Encoding.ASCII);
         var result = new ReviewMarkResult { Path = path, Head = head, Marker = marker };
         return Dto.Result(result, $"Marked {head[..8]} as reviewed ({path}).");
     }
 
-    private static string? Git(string dir, string args) =>
-        Dispatch.FeedbackDispatcher.Git(dir, args, 15000) is { Code: 0, Output: var o } && o.Trim().Split('\n')[0].Trim() is { Length: > 0 } s ? s : null;   // stdout's line (stderr follows it)
+    /// <summary>stdout's first line (stderr follows it), or null with git's own words (exit code and output) in <paramref name="why"/>.</summary>
+    private static string? Git(string dir, string args, out string why)
+    {
+        var (code, output) = Dispatch.FeedbackDispatcher.Git(dir, args, 15000);
+        why = code == -1 ? output : $"exit {code}: {(output.Trim() is { Length: > 0 } t ? t : "(no output)")}";
+        return code == 0 && output.Trim().Split('\n')[0].Trim() is { Length: > 0 } s ? s : null;
+    }
 }
