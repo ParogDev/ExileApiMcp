@@ -290,8 +290,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         var (code, output, errors) = await RunCliAsync(args, workDir, TimeSpan.FromSeconds(90), ct, seq);
         var all = output + "\n" + errors;
         if (FeedbackKit.ParseBackgrounded(all) is { } id) return id;
+        Console.Error.WriteLine($"[Dispatch] #{seq}: `claude --bg` exited {code}, its full output:\n{all.Trim()}");   // the card gets one line
         if (code != 0 && !all.Contains("backgrounded", StringComparison.OrdinalIgnoreCase))
-            throw new BackgroundRefusedException($"`claude --bg` exited {code}: {FeedbackKit.Clip(all, 240)}");
+            throw new BackgroundRefusedException($"`claude --bg` exited {code}: {FeedbackKit.CliLine(all)}");
         // The answer could not be read, but a session may run: find it by name before calling this a failure, or the
         // retry a minute later starts a second handler for the same press.
         try
@@ -307,7 +308,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         {
             Console.Error.WriteLine($"[Dispatch] #{seq}: looking the session up by name failed: {ex.Message}");
         }
-        throw new HandlerStartException($"`claude --bg` exited {code} without a session id it could read (it may have started one: `claude agents` lists it): {FeedbackKit.Clip(all, 240)}", null);
+        throw new HandlerStartException($"`claude --bg` exited {code} without a session id it could read (`claude agents` lists it if one started): {FeedbackKit.CliLine(all)}", null);
     }
 
     /// <summary>The CLI refused to start a background session (so nothing runs): the headless run may take the press.</summary>

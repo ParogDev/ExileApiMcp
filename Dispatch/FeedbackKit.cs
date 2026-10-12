@@ -368,6 +368,14 @@ public static class FeedbackKit
         return at?.Type == JTokenType.String && DateTimeOffset.TryParse(at.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var t) ? t : null;
     }
 
+    /// <summary>The CLI's answer as one card line: ANSI codes stripped, its first non-blank line only (the rest is usage
+    /// help such as "claude agents  list sessions"), clipped.</summary>
+    public static string CliLine(string? output, int max = 120)
+    {
+        var plain = Regex.Replace(output ?? "", @"\x1b\[[0-9;?]*[A-Za-z]", "");
+        return Clip(plain.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "(no output)", max);
+    }
+
     public static string Clip(string? s, int max)
     {
         if (string.IsNullOrWhiteSpace(s)) return "";
