@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -38,14 +37,6 @@ public static class ReviewTools
         return Dto.Result(result, $"Marked {head[..8]} as reviewed ({path}).");
     }
 
-    private static string? Git(string dir, string args)
-    {
-        var psi = new ProcessStartInfo("git", $"-C \"{dir}\" {args}") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        using var p = Process.Start(psi);
-        if (p == null) return null;
-        var o = p.StandardOutput.ReadToEndAsync();
-        _ = p.StandardError.ReadToEndAsync();
-        if (!p.WaitForExit(15000)) { try { p.Kill(true); } catch { } return null; }
-        return p.ExitCode == 0 && o.Result.Trim() is { Length: > 0 } s ? s : null;
-    }
+    private static string? Git(string dir, string args) =>
+        Dispatch.FeedbackDispatcher.Git(dir, args, 15000) is { Code: 0, Output: var o } && o.Trim().Split('\n')[0].Trim() is { Length: > 0 } s ? s : null;   // stdout's line (stderr follows it)
 }

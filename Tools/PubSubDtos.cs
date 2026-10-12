@@ -116,5 +116,7 @@ public sealed class FeedbackHandlerState
     public string? Sync { get; set; }
     /// <summary>The sync failed: the merged fix is not in the HUD (said on the card with status failed).</summary>
     public bool? SyncFailed { get; set; }
+    /// <summary>A failed sync: what to do about it (on the card after the reason).</summary>
+    public string? SyncFix { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

@@ -767,17 +767,27 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     /// in state.json, so a step retried after a bridge failure doesn't run it again.</summary>
     private async Task<MainSync.Outcome?> SyncMainAsync(FeedbackHandlerState h, CancellationToken ct)
     {
-        if (h.Sync != null) return h.SyncFailed == true ? new MainSync.Outcome(true, h.Sync, h.Sync) : null;
+        if (h.Sync != null) return h.SyncFailed == true ? new MainSync.Outcome(true, h.Sync, h.Sync, h.SyncFix) : null;
         if (Repo() is not { } repo) { h.Sync = "skipped: the main scaffolding checkout is unknown"; SaveHandler(h); return null; }
         MainSync.Outcome o;
-        try { o = await MainSync.RunAsync(bridges, _game, repo, ct); }
+        // The sync can take minutes (fetch, pull, a compile): the status file keeps being written meanwhile, or
+        // feedback_dispatcher would call this dispatcher not running.
+        (_status, _why) = ("syncing", $"bringing #{h.Seq}'s merged fix into the HUD (pull, submodule update, reload)");
+        using var beat = new CancellationTokenSource();
+        var beating = Task.Run(async () =>
+        {
+            while (!beat.IsCancellationRequested) { WriteStatus(); try { await Task.Delay(1000, beat.Token); } catch (OperationCanceledException) { } }
+        });
+        try { o = await Task.Run(() => MainSync.RunAsync(bridges, _game, repo, ct), ct); }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             o = new MainSync.Outcome(true, $"syncing the main checkout failed: {ex.Message.Split('\n')[0]}", $"syncing the main checkout failed: {ex.Message.Split('\n')[0]}");
         }
+        finally { beat.Cancel(); await beating; }
         Console.Error.WriteLine($"[Dispatch] #{h.Seq}: sync: {o.Summary}");
         h.Sync = o.Summary;
         h.SyncFailed = o.Failed;
+        h.SyncFix = o.Fix;
         SaveHandler(h);
         return o.Failed ? o : null;
     }

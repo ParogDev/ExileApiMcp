@@ -576,6 +576,8 @@ Start Port    End Port
     Check("sync: IncludeOptional read", ExileApiMcp.Dispatch.MainSync.IncludeOptional(Describe("false")) == false && ExileApiMcp.Dispatch.MainSync.IncludeOptional(Describe("true")) == true);
     Check("sync: IncludeOptional missing is null", ExileApiMcp.Dispatch.MainSync.IncludeOptional(JObject.Parse("{\"plugins\":[]}")) == null
         && ExileApiMcp.Dispatch.MainSync.IncludeOptional(Describe("\"x\"")) == null);
+    Check("sync: submodule pointer from ls-tree", ExileApiMcp.Dispatch.MainSync.PointerSha("160000 commit c3c854af62cc98b478f8137d3b926652b92e1dca\tPlugins/Whats A Route\n") == "c3c854af62cc98b478f8137d3b926652b92e1dca"
+        && ExileApiMcp.Dispatch.MainSync.PointerSha("") == null && ExileApiMcp.Dispatch.MainSync.PointerSha("100644 blob c3c854af62cc98b478f8137d3b926652b92e1dca\tREADME.md") == null);
     var text = ExileApiMcp.Dispatch.MainSync.FailText(290, new ExileApiMcp.Dispatch.MainSync.Outcome(true, "s", "`git pull --ff-only` in the main checkout refused: fatal: Not possible to fast-forward", "Nothing was reset or merged."));
     Check("sync: the card line says merged, not in game, and why", text.StartsWith("#290's fix is merged but not in game yet: `git pull --ff-only`") && text.EndsWith("Nothing was reset or merged.") && text.Length <= 400, text);
 }

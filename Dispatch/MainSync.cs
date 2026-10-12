@@ -26,28 +26,39 @@ public static class MainSync
         if (fetch.Code != 0) return Fail($"git fetch in the main checkout failed: {Line(fetch.Output)}", "Check the network and GitHub credentials, then pull the main checkout.");
         var behind = FeedbackDispatcher.Git(repo, "rev-list --count HEAD..origin/main");
         if (behind.Code != 0) return Fail($"git rev-list in the main checkout failed: {Line(behind.Output)}", null);
-        if (behind.Output.Trim() == "0") return new Outcome(false, "the main checkout already has origin/main");
-        var branch = FeedbackDispatcher.Git(repo, "rev-parse --abbrev-ref HEAD").Output.Trim();
-        if (branch != "main")
-            return Fail($"the main checkout is on '{branch}', not main, so it was not pulled", "Switch the main checkout back to main, then pull it.");
+        var pulled = behind.Output.Trim() != "0";
+        if (pulled)
+        {
+            var branch = FeedbackDispatcher.Git(repo, "rev-parse --abbrev-ref HEAD").Output.Trim();
+            if (branch != "main")
+                return Fail($"the main checkout is on '{branch}', not main, so it was not pulled", "Switch the main checkout back to main, then pull it.");
+            var pull = FeedbackDispatcher.Git(repo, "pull --ff-only -q origin main", 120_000);
+            if (pull.Code != 0)
+                return Fail($"`git pull --ff-only` in the main checkout refused: {Line(pull.Output)}", "Nothing was reset or merged: sort out the main checkout by hand, then pull it.");
+        }
 
+        // The plugin's checkout against the commit the main checkout records for it: behind also when someone else pulled
+        // the main checkout without updating its submodules.
         var sub = Path.Combine(repo, SubmodulePath.Replace('/', Path.DirectorySeparatorChar));
+        var pointer = PointerSha(FeedbackDispatcher.Git(repo, $"ls-tree HEAD -- \"{SubmodulePath}\"").Output);
         var before = FeedbackDispatcher.Git(sub, "rev-parse HEAD").Output.Trim();
-        var pull = FeedbackDispatcher.Git(repo, "pull --ff-only -q origin main", 120_000);
-        if (pull.Code != 0)
-            return Fail($"`git pull --ff-only` in the main checkout refused: {Line(pull.Output)}", "Nothing was reset or merged: sort out the main checkout by hand, then pull it.");
+        if (pointer == null) return Fail($"the main checkout records no commit for {SubmodulePath}", null);
+        if (before == pointer)
+            return new Outcome(false, pulled ? $"pulled the main checkout; {Plugin} unchanged at {Short(before)}" : $"the main checkout and {Plugin} ({Short(before)}) are up to date");
 
         // A live deploy_plugin deploy of the plugin (another session trying a commit in the HUD) is left alone.
         var owner = DeployIncidents.Owner(Plugin);
         if (owner.Incident != null && !owner.Orphaned)
-            return Fail($"{owner.Owner} has a deploy of {Plugin} in the main checkout ({owner.Why}), so the submodule was not updated",
-                $"Once {owner.Owner} restores it (deploy_plugin action=restore), the main checkout's submodule update brings the fix.");
+            return pulled
+                ? Fail($"{owner.Owner} has a deploy of {Plugin} in the main checkout ({owner.Why}), so the submodule was not updated",
+                    $"Once {owner.Owner} restores it (deploy_plugin action=restore), the main checkout's submodule update brings the fix.")
+                : new Outcome(false, $"the main checkout is up to date; {Plugin} is held by {owner.Owner}'s deploy");
 
         var update = FeedbackDispatcher.Git(repo, $"submodule update -- \"{SubmodulePath}\"", 120_000);
         if (update.Code != 0)
             return Fail($"`git submodule update` of {Plugin} in the main checkout failed: {Line(update.Output)}", "Nothing was reset: look at the plugin's checkout in the main checkout.");
         var after = FeedbackDispatcher.Git(sub, "rev-parse HEAD").Output.Trim();
-        if (after == before) return new Outcome(false, $"pulled the main checkout; {Plugin} unchanged at {Short(after)}");
+        if (after != pointer) return Fail($"{Plugin} is at {Short(after)} after `git submodule update`, not at {Short(pointer)}", "Look at the plugin's checkout in the main checkout.");
 
         JObject reload;
         try { reload = await HudDevTools.ReloadAsync(bridges, Plugin, wait: true, force: false, perf: false, game, ct); }
@@ -98,6 +109,10 @@ public static class MainSync
         if (r["ok"]?.Type == JTokenType.Boolean && r["ok"]!.Value<bool>() && r["error"] == null) return null;
         return Line($"{r["error"] ?? "not ok"}{(r["message"] != null ? $": {r["message"]}" : "")}");
     }
+
+    /// <summary>The commit in a `git ls-tree HEAD -- &lt;submodule&gt;` line ("160000 commit &lt;sha&gt;\t&lt;path&gt;"), or null.</summary>
+    public static string? PointerSha(string lsTree) =>
+        System.Text.RegularExpressions.Regex.Match(lsTree, @"^160000 commit ([0-9a-f]{40})\t", System.Text.RegularExpressions.RegexOptions.Multiline) is { Success: true } m ? m.Groups[1].Value : null;
 
     /// <summary>The card line for a failed sync: the fix is merged, but not in game yet.</summary>
     public static string FailText(long seq, Outcome o) =>
