@@ -111,5 +111,10 @@ public sealed class FeedbackHandlerState
     public DateTimeOffset? StopAt { get; set; }
     /// <summary>remote-control: the session was stopped (its transcript stays openable).</summary>
     public bool Stopped { get; set; }
+    /// <summary>What the dispatcher's sync of the main checkout did once the handler ended (pull, submodule update,
+    /// reload_plugin: Dispatch/MainSync.cs); null until it ran.</summary>
+    public string? Sync { get; set; }
+    /// <summary>The sync failed: the merged fix is not in the HUD (said on the card with status failed).</summary>
+    public bool? SyncFailed { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

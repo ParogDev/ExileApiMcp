@@ -201,11 +201,16 @@ public static partial class HudDevTools
         [Description("Also measure the plugin's per-frame Tick and Render cost for 2 s before and after the reload (pipeline_trace; needs 'Allow HUD Instrumentation'), to see whether an edit made it faster or slower")] bool perf = false,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
+        => ToolResults.Json(await ReloadAsync(bridges, plugin, wait, force, perf, game, ct));
+
+    /// <summary>reload_plugin's result (ok, error, diagnostics, loggedSinceReload...): the tool's, and the F8 dispatcher's
+    /// when it syncs the main checkout after a handler merged a route fix (Dispatch/MainSync.cs).</summary>
+    internal static async Task<JObject> ReloadAsync(BridgeRegistry bridges, string plugin, bool wait, bool force, bool perf, string? game, CancellationToken ct)
     {
         var before = perf ? await PluginCost(bridges, game, plugin, ct) : null;
         var started = DateTime.UtcNow;
         var (bridge, queued) = await bridges.CallAsync(game, "hud.reload_plugin", new JObject { ["name"] = plugin, ["force"] = force }, ct);
-        if (queued["queued"]?.Value<bool>() != true || !wait) return ToolResults.Json(queued);
+        if (queued["queued"]?.Value<bool>() != true || !wait) return queued as JObject ?? new JObject { ["result"] = queued };
         var folder = queued["plugin"]?.Value<string>() ?? plugin;
 
         JToken? last = null;
@@ -225,7 +230,7 @@ public static partial class HudDevTools
             }
         }
         if (last == null)
-            return ToolResults.Json(new JObject { ["plugin"] = folder, ["error"] = "timeout", ["message"] = "No result after 120 s; check hud_log and hud.reload_status." });
+            return new JObject { ["plugin"] = folder, ["error"] = "timeout", ["message"] = "No result after 120 s; check hud_log and hud.reload_status." };
 
         var result = new JObject { ["plugin"] = folder, ["ok"] = last["ok"], ["durationMs"] = last["durationMs"] };
         var hud = Installs(bridges, bridge.Game == "auto" ? game : bridge.Game).FirstOrDefault();
@@ -283,7 +288,7 @@ public static partial class HudDevTools
             }
             if (diags.Count > 0) result["diagnostics"] = diags;
         }
-        return ToolResults.Json(result);
+        return result;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────

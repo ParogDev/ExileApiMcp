@@ -564,6 +564,22 @@ Start Port    End Port
     finally { try { Directory.Delete(tmp, true); } catch { } }
 }
 
+// ── F8 dispatcher's main-checkout sync: a clean reload, Route.IncludeOptional, the card line (Dispatch/MainSync.cs) ──
+{
+    Check("sync: a clean reload has no problem", ExileApiMcp.Dispatch.MainSync.ReloadProblem(JObject.Parse("{\"plugin\":\"Whats A Route\",\"ok\":true,\"durationMs\":900,\"loggedSinceReload\":[]}")) == null);
+    var diag = ExileApiMcp.Dispatch.MainSync.ReloadProblem(JObject.Parse("{\"ok\":false,\"error\":\"reload failed\",\"diagnostics\":[{\"file\":\"WhatsARoute.cs\",\"line\":12,\"col\":3,\"code\":\"CS1002\",\"message\":\"; expected\"}]}"));
+    Check("sync: diagnostics are the problem", diag != null && diag.Contains("CS1002") && diag.Contains("WhatsARoute.cs(12)"), diag);
+    Check("sync: not ok without diagnostics", ExileApiMcp.Dispatch.MainSync.ReloadProblem(JObject.Parse("{\"ok\":false,\"error\":\"not_initialised\",\"message\":\"Initialise returned false\"}")) is { } ni && ni.Contains("not_initialised") && ni.Contains("Initialise returned false"));
+    Check("sync: a timeout is a problem", ExileApiMcp.Dispatch.MainSync.ReloadProblem(JObject.Parse("{\"error\":\"timeout\",\"message\":\"No result after 120 s\"}")) != null);
+    Check("sync: an unqueued reload is a problem", ExileApiMcp.Dispatch.MainSync.ReloadProblem(JObject.Parse("{\"queued\":false,\"error\":\"dll_locked\"}")) is { } dl && dl.Contains("dll_locked"));
+    JObject Describe(string value) => JObject.Parse("{\"plugins\":[{\"plugin\":\"Whats A Route\",\"settings\":[{\"path\":\"Route.Mode\",\"value\":\"Route\"},{\"path\":\"Route.IncludeOptional\",\"value\":" + value + "}]}]}");
+    Check("sync: IncludeOptional read", ExileApiMcp.Dispatch.MainSync.IncludeOptional(Describe("false")) == false && ExileApiMcp.Dispatch.MainSync.IncludeOptional(Describe("true")) == true);
+    Check("sync: IncludeOptional missing is null", ExileApiMcp.Dispatch.MainSync.IncludeOptional(JObject.Parse("{\"plugins\":[]}")) == null
+        && ExileApiMcp.Dispatch.MainSync.IncludeOptional(Describe("\"x\"")) == null);
+    var text = ExileApiMcp.Dispatch.MainSync.FailText(290, new ExileApiMcp.Dispatch.MainSync.Outcome(true, "s", "`git pull --ff-only` in the main checkout refused: fatal: Not possible to fast-forward", "Nothing was reset or merged."));
+    Check("sync: the card line says merged, not in game, and why", text.StartsWith("#290's fix is merged but not in game yet: `git pull --ff-only`") && text.EndsWith("Nothing was reset or merged.") && text.Length <= 400, text);
+}
+
 // ── healthbars_state / healthbars_preview: the plugin's PascalCase state fits the contract; focus and reply decoding ──
 {
     // A real WhatsAHealthBar.GetState answer (PoE2, in town), plus a field the plugin may add later.
