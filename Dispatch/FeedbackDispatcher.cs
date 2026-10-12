@@ -100,6 +100,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         if (_running == null && DateTime.UtcNow >= _nextAdopt) { _nextAdopt = DateTime.UtcNow + AdoptEvery; Adopt(); }
         if (_running != null) await SuperviseAsync(ct);
         if (_env.Exe != null) await ReapAsync(ct);
+        await AsksAsync(ct);
         // The CLI and its login: checked at start (a broken link is on the board before the first press), then every
         // minute while broken and every 10 min while fine, press or not.
         if (DateTime.UtcNow >= _nextEnvCheck) await RefreshEnvironmentAsync(ct);
@@ -711,32 +712,27 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
 
     /// <summary>The handler's worktree, removed when it holds no unmerged work: no uncommitted changes, no submodule commits
     /// that are on no remote (the submodules' git data lives in the worktree and goes with it), and no commits whose
-    /// changes origin/main doesn't hold. Otherwise kept for a person to look at.</summary>
-    private void RemoveWorktree(FeedbackHandlerState h)
+    /// changes origin/main doesn't hold. Otherwise kept for a person to look at; a plugin fix that isn't merged is put to
+    /// the player on the card (h.Unmerged, AsksAsync). discard: the player closed that fix, so only edits keep it.</summary>
+    private void RemoveWorktree(FeedbackHandlerState h, bool discard = false)
     {
         var wt = h.Worktree;
         var repo = Repo();
         if (wt == null || repo == null || !Directory.Exists(wt)) return;
         try
         {
-            var dirty = Git(wt, "status --porcelain --ignore-submodules=none").Output.Trim();
+            // Edits, in the worktree or in a submodule. A submodule only sitting on another commit (the plugin on its fix,
+            // the pointer not bumped) is not an edit: that is the unmerged check's business below.
+            var dirty = (Git(wt, "status --porcelain --ignore-submodules=all").Output
+                         + Git(wt, "submodule foreach --quiet --recursive \"git status --porcelain\"").Output).Trim();
             if (dirty.Length > 0) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (uncommitted changes)"); return; }
-            // HEAD too: a commit on a detached HEAD (after `submodule update`) is on no branch. A local topic branch whose
-            // remote branch was deleted on merge counts as unpushed: the brief has the handler delete it after the merge.
-            var unpushed = Git(wt, "submodule foreach --quiet --recursive \"git log --oneline HEAD --branches --not --remotes\"");
-            if (unpushed.Code != 0 || unpushed.Output.Trim().Length > 0)
-            { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (submodule commits on no remote)"); return; }
-            // Unmerged work: commits whose changes origin/main doesn't hold. A squash merge leaves the branch's own commits
-            // "ahead" though their content is on main: the files they touched are compared with origin/main instead.
-            Git(repo, "fetch -q origin main");   // a merge the handler just made must count as merged (once per handler)
-            var ahead = Git(wt, "log --oneline origin/main..HEAD").Output.Trim().Length > 0;
-            var merged = !ahead;
-            if (ahead && Git(wt, "merge-base origin/main HEAD") is { Code: 0 } mb)
+            if (!discard && KeptFor(h, wt, repo) is { } kept)
             {
-                var files = Git(wt, $"diff --name-only {mb.Output.Trim()} HEAD").Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                merged = files.Length == 0 || Git(wt, "diff --quiet origin/main HEAD -- " + string.Join(' ', files.Select(f => $"\"{f}\""))).Code == 0;
+                Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept ({kept})");
+                // The fix goes to the player once (AsksAsync puts it on the card).
+                if (h.Unmerged == null && UnmergedFix.Find(h.Seq, wt) is { } fix) { h.Unmerged = fix; SaveHandler(h); }
+                return;
             }
-            if (!merged) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: worktree {wt} kept (commits not on origin/main)"); return; }
             var branch = Git(wt, "rev-parse --abbrev-ref HEAD").Output.Trim();
             // --force: checked clean above, and git refuses a worktree with checked-out submodules without it (a handler
             // initializes Plugins/Whats A Route). Ignored files (build output) go with it.
@@ -757,6 +753,163 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: removing worktree: {ex.Message}"); }
     }
+
+    /// <summary>Why the worktree must stay (work that isn't on origin/main), or null when it holds none.</summary>
+    private static string? KeptFor(FeedbackHandlerState h, string wt, string repo)
+    {
+        // HEAD too: a commit on a detached HEAD (after `submodule update`) is on no branch. A local topic branch whose
+        // remote branch was deleted on merge counts as unpushed: the brief has the handler delete it after the merge.
+        var unpushed = Git(wt, "submodule foreach --quiet --recursive \"git log --oneline HEAD --branches --not --remotes\"");
+        if (unpushed.Code != 0 || unpushed.Output.Trim().Length > 0) return "submodule commits on no remote";
+        // Unmerged work: commits whose changes origin/main doesn't hold. A squash merge leaves the branch's own commits
+        // "ahead" though their content is on main: the files they touched are compared with origin/main instead.
+        Git(repo, "fetch -q origin main");   // a merge the handler just made must count as merged (once per handler)
+        if (Git(wt, "log --oneline origin/main..HEAD").Output.Trim().Length > 0 && !UnmergedFix.ContentOnMain(wt)) return "commits not on origin/main";
+        // The plugin pushed on a branch that its origin/main doesn't hold (the PR refused or never merged).
+        if (h.Unmerged == null && UnmergedFix.Find(h.Seq, wt) is { } fix) { h.Unmerged = fix; SaveHandler(h); }
+        if (h.Unmerged is { Status: not ("closed" or "merged") }) return "a plugin fix not merged";
+        // The plugin on a merged commit the scaffolding doesn't point at (its pointer bump was refused): kept, as before.
+        return Git(wt, "diff --quiet --ignore-submodules=none HEAD").Code != 0 ? "a plugin commit the scaffolding doesn't point at" : null;
+    }
+
+    // ── Unmerged fixes: asked on the card, acted on here ─────────────
+
+    private DateTime _nextAsks = DateTime.MinValue;
+    private const int MaxAsks = 3;
+
+    /// <summary>
+    /// A handler whose session couldn't merge its fix (a permission or auto-mode check refused it) leaves it in its kept
+    /// worktree (h.Unmerged). The player is asked on the in-game card (Merge it | Close it | Leave it) so it isn't missed,
+    /// and the click is acted on here: merge on green plus the pointer bump and the HUD sync, or close the PR. An ask that
+    /// expires or is dismissed is asked again, up to MaxAsks times. Merges wait while a handler runs (one change at a time).
+    /// </summary>
+    private async Task AsksAsync(CancellationToken ct)
+    {
+        if (DateTime.UtcNow < _nextAsks || !Directory.Exists(HandlersDir)) return;
+        _nextAsks = DateTime.UtcNow + PollEvery;
+        foreach (var f in Directory.EnumerateFiles(HandlersDir, "state.json", SearchOption.AllDirectories))
+        {
+            FeedbackHandlerState? h;
+            try
+            {
+                var text = File.ReadAllText(f);
+                if (!System.Text.RegularExpressions.Regex.IsMatch(text, "\"unmerged\"\\s*:\\s*\\{")) continue;   // most handlers: none, no parse
+                h = JsonSerializer.Deserialize<FeedbackHandlerState>(text, Dto.Options);
+            }
+            catch { continue; }
+            if (h is not { Unmerged: { Status: "asking" or "asked" } u, Worktree: { } wt } || _running?.Seq == h.Seq) continue;
+            if (!Directory.Exists(wt)) { u.Status = "failed"; u.Outcome = "its worktree is gone"; SaveHandler(h); continue; }
+            try
+            {
+                if (u.Status == "asking") await AskAsync(h, u, ct);
+                else
+                {
+                    var before = (u.Status, u.AskId);
+                    var answer = await AnswerAsync(u, ct);
+                    if (answer != null && _running == null) await ActAsync(h, u, answer, ct);
+                    else if ((u.Status, u.AskId) != before) SaveHandler(h);   // asked again, or kept after MaxAsks
+                }
+            }
+            catch (ModelContextProtocol.McpException ex) { Console.Error.WriteLine($"[Dispatch] #{h.Seq}: unmerged fix ask: {ex.Message.Split('\n')[0]}"); }
+        }
+    }
+
+    private async Task AskAsync(FeedbackHandlerState h, FeedbackUnmerged u, CancellationToken ct)
+    {
+        var (question, detail) = UnmergedFix.AskText(h.Seq, u);
+        var (_, r) = await bridges.CallAsync(_game, "attention.ask", new JObject
+        {
+            ["question"] = question, ["detail"] = detail, ["title"] = $"F8 #{h.Seq}: not merged", ["urgency"] = "now", ["ttlSec"] = 3600,
+            ["options"] = new JArray(UnmergedFix.Options.Select((o, i) => new JObject
+            {
+                ["label"] = o,
+                ["hint"] = i switch { 0 => "Merged once its checks pass, then reloaded in the HUD", 1 => "Closes the PR and deletes its branch", _ => "Keeps the PR and the worktree for you" },
+            })),
+        }, ct);
+        u.AskId = r["id"]?.ToString() ?? r["item"]?["id"]?.ToString();
+        if (u.AskId == null) throw new ModelContextProtocol.McpException($"attention.ask gave no id: {FeedbackKit.Clip(r.ToString(Newtonsoft.Json.Formatting.None), 200)}");
+        u.Asks++;
+        u.Status = "asked";
+        SaveHandler(h);
+        Console.Error.WriteLine($"[Dispatch] #{h.Seq}: asked the player about its unmerged fix ({u.Repo} {(u.Pr is { } pr ? $"#{pr}" : u.Branch)})");
+    }
+
+    /// <summary>The player's choice, or null while the ask waits. An ask that ended without one is put up again (or, after
+    /// MaxAsks, the fix is kept).</summary>
+    private async Task<string?> AnswerAsync(FeedbackUnmerged u, CancellationToken ct)
+    {
+        JToken r;
+        try { (_, r) = await bridges.CallAsync(_game, "attention.result", new JObject { ["id"] = u.AskId }, ct); }
+        catch (ModelContextProtocol.McpException ex) when (AttentionTools.IsUnknownItem(ex))
+        { r = new JObject { ["status"] = "cancelled" }; }   // the bridge lost it (a restart that didn't restore it): ask again
+        var item = r["item"] as JObject ?? r as JObject ?? new JObject();
+        var status = item["status"]?.ToString();
+        if (status == "answered" && item["answer"]?.ToString() is { Length: > 0 } a) return a;
+        if (status is "dismissed" or "expired" or "cancelled" or "done")
+        {
+            u.AskId = null;
+            u.Status = u.Asks >= MaxAsks ? "kept" : "asking";
+            if (u.Status == "kept") u.Outcome = $"asked {u.Asks} times without an answer: kept";
+        }
+        return null;
+    }
+
+    private async Task ActAsync(FeedbackHandlerState h, FeedbackUnmerged u, string answer, CancellationToken ct)
+    {
+        u.Answer = answer;
+        var what = u.Pr is { } pr ? $"PR #{pr}" : $"branch {u.Branch}";
+        if (answer is not (UnmergedFix.Merge or UnmergedFix.Close))
+        {
+            // Leave it, or an answer that isn't one of the choices: never read as Close (that deletes the fix's branch).
+            u.Status = "kept"; u.Outcome = answer == UnmergedFix.Leave ? "the player chose to leave it" : $"unknown answer '{answer}': left as it is";
+            SaveHandler(h);
+            await ReplyAsync(h.Seq, "done", $"#{h.Seq}: left as it is ({u.Repo} {what}); its worktree stays.", ct);
+            return;
+        }
+        var merging = answer == UnmergedFix.Merge;
+        u.Status = merging ? "merging" : "closing";
+        SaveHandler(h);
+        if (merging) await ReplyAsync(h.Seq, "working", $"#{h.Seq}: merging {what} once its checks pass, then into the HUD.", ct);
+        (_status, _why) = (u.Status, $"{(merging ? "merging" : "closing")} #{h.Seq}'s fix ({u.Repo} {what}), as the player chose on the card");
+        var (failed, text) = await WithBeatAsync(() => Task.FromResult(merging ? UnmergedFix.DoMerge(h.Seq, h.Worktree!, u) : UnmergedFix.DoClose(h.Seq, h.Worktree!, u)), ct);
+        u.Outcome = text;
+        Console.Error.WriteLine($"[Dispatch] #{h.Seq}: {answer}: {text}");
+        if (failed)
+        {
+            u.Status = "failed";
+            SaveHandler(h);
+            await ReplyAsync(h.Seq, "failed", $"#{h.Seq}: {text}. The worktree is kept: {h.Worktree}", ct);
+            return;
+        }
+        u.Status = merging ? "merged" : "closed";
+        SaveHandler(h);
+        if (merging)
+        {
+            // The merged fix into the HUD, as after a handler that merged itself.
+            var sync = await WithBeatAsync(() => MainSync.RunAsync(bridges, _game, Repo()!, ct), ct);
+            h.Sync = sync.Summary; h.SyncFailed = sync.Failed; h.SyncFix = sync.Fix;
+            SaveHandler(h);
+            await ReplyAsync(h.Seq, sync.Failed ? "failed" : "done", sync.Failed ? $"#{h.Seq}: {text}; " + MainSync.FailText(h.Seq, sync) : $"#{h.Seq}: {text}; {sync.Summary}.", ct);
+        }
+        else await ReplyAsync(h.Seq, "done", $"#{h.Seq}: {text}.", ct);
+        RemoveWorktree(h, discard: !merging);
+    }
+
+    /// <summary>Runs slow work off the loop while the status file keeps being written (feedback_dispatcher would call
+    /// this dispatcher not running otherwise).</summary>
+    private async Task<T> WithBeatAsync<T>(Func<Task<T>> work, CancellationToken ct)
+    {
+        _busy = true;   // KeepAliveAsync holds the shared server up meanwhile: an idle exit would cut a merge half way
+        using var beat = new CancellationTokenSource();
+        var beating = Task.Run(async () =>
+        {
+            while (!beat.IsCancellationRequested) { WriteStatus(); try { await Task.Delay(1000, beat.Token); } catch (OperationCanceledException) { } }
+        });
+        try { return await Task.Run(work, ct); }
+        finally { beat.Cancel(); await beating; _busy = false; }
+    }
+
+    private volatile bool _busy;
 
     private static bool ProcessRuns(int pid)
     {
@@ -955,7 +1108,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         {
             try
             {
-                if (DateTime.UtcNow - _bridgeOkAt < KeepAliveAfterBridge || _running != null)
+                if (DateTime.UtcNow - _bridgeOkAt < KeepAliveAfterBridge || _running != null || _busy)
                 {
                     using var req = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/keepalive?sec=300");
                     req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", LocalHttpSecurity.LoadOrCreateToken());
