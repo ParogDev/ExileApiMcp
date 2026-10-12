@@ -27,6 +27,27 @@ param(
 
 $root = Join-Path $env:LOCALAPPDATA 'ExileApiMcp'
 $src = Join-Path $root 'deploy-src'
+
+# Builds one project into $outDir; returns nothing on success, else the lines that say why it failed.
+# --disable-build-servers: no MSBuild server, node reuse or shared compiler (VBCSCompiler). mcp_deploy runs this script
+# from the MCP server inside the Claude app's MSIX package, where %LOCALAPPDATA% is virtualized (to
+# ...\Packages\Claude_*\LocalCache\Local), so deploy-src exists only in the package's view. A build server started by a
+# session's own `dotnet build` outside the package sees the real %LOCALAPPDATA%; a deploy build handed to it can't find
+# the obj\ files it just generated (CS2001 ...GeneratedMSBuildEditorConfig.editorconfig; three failed deploys on
+# 2026-10-12). A cold compiler costs a deploy a few seconds.
+function Invoke-DeployBuild([string]$proj, [string]$outDir, [string]$what) {
+    $out = & dotnet build $proj -c Release -nologo -v q --disable-build-servers -o $outDir 2>&1
+    if ($LASTEXITCODE -eq 0) { return }
+    $errors = @($out | ForEach-Object { "$_" } | Where-Object { $_ -match 'error' })
+    "ERROR: $what failed:"
+    $errors | Select-Object -First 15 | ForEach-Object { "  $_" }
+    if ($errors | Where-Object { $_ -match 'CS2001' -and $_ -match '[\\/]obj[\\/]' }) {
+        "  broken link: the compiler could not see an obj\ file this build had just generated under $src, so the compile"
+        "  ran in another view of %LOCALAPPDATA% (a build server shared across the Claude MSIX package boundary)."
+        "  Build servers are disabled here; if it persists, run 'dotnet build-server shutdown' and deploy again."
+    }
+    if (-not $errors) { "  (exit code $LASTEXITCODE, no error lines; last output:)"; $out | Select-Object -Last 5 | ForEach-Object { "  $_" } }
+}
 $builds = Join-Path $root 'builds'
 $current = Join-Path $root 'current.json'
 New-Item -ItemType Directory -Force $builds | Out-Null
@@ -85,10 +106,9 @@ try {
         $tmp = "$dir.tmp-$PID"
         if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
         Write-Output "building $version ($short, $refWhy)..."
-        $out = & dotnet build (Join-Path $src 'ExileApiMcp.csproj') -c Release -nologo -v q -o $tmp 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Output "ERROR: build failed:"
-            $out | Where-Object { $_ -match 'error' } | Select-Object -First 15 | ForEach-Object { Write-Output "  $_" }
+        $failed = Invoke-DeployBuild (Join-Path $src 'ExileApiMcp.csproj') $tmp 'build'
+        if ($failed) {
+            $failed | Write-Output
             Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
             exit 3
         }
@@ -96,10 +116,9 @@ try {
         # build's supervisor, never a session's checkout. Older commits without one still deploy (the launcher falls back).
         $supProj = Join-Path $src 'Supervisor\ExileApiMcp.Supervisor.csproj'
         if (Test-Path $supProj) {
-            $out = & dotnet build $supProj -c Release -nologo -v q -o (Join-Path $tmp 'supervisor') 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                Write-Output "ERROR: supervisor build failed:"
-                $out | Where-Object { $_ -match 'error' } | Select-Object -First 15 | ForEach-Object { Write-Output "  $_" }
+            $failed = Invoke-DeployBuild $supProj (Join-Path $tmp 'supervisor') 'supervisor build'
+            if ($failed) {
+                $failed | Write-Output
                 Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
                 exit 3
             }
