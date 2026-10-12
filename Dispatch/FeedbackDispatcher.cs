@@ -172,6 +172,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     // ── Presses that need no session (C7, the verify row) ────────────
 
     private readonly Dictionary<long, JObject> _notes = new();
+    private readonly HashSet<long> _confirmed = new();   // running presses the player confirmed with Works now
     /// <summary>A note older than this (read again by a new worker, from before notes were answered) is left alone.</summary>
     private static readonly TimeSpan NoteMaxAge = TimeSpan.FromMinutes(10);
 
@@ -183,13 +184,27 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         {
             // A bridge call that throws leaves the note for the next step.
             var (_, c) = await bridges.CallAsync(_game, "pubsub.claim", new JObject { ["seq"] = seq, ["stage"] = "reply", ["by"] = By }, ct);
+            if (c["ok"]?.Value<bool>() != true)
+            {
+                // Claimed: another dispatcher answered it. Gone from the bridge's memory: nothing to answer. Anything else
+                // (the bridge mid-reload) is tried again next step.
+                if (c["error"]?.ToString() is "claimed" or "unknown_event") _notes.Remove(seq);
+                continue;
+            }
             _notes.Remove(seq);
-            if (c["ok"]?.Value<bool>() != true) continue;   // another dispatcher answered it
             var d = e["data"] as JObject ?? new JObject();
             if (F8.ConfirmsRef(d) && F8.PressRef(d) is { } about)
             {
                 EndVerify(about);
-                await ReplyAsync(about, "Done", $"#{about}: confirmed by you. Thanks!", ct);
+                // A press still being handled is not ended under its handler: it ends with the handler's answer, which
+                // then skips the verification watch (the player already confirmed it). In memory only: a swapped worker
+                // just watches it as usual.
+                if (_running?.Seq == about)
+                {
+                    _confirmed.Add(about);
+                    await ReplyAsync(about, await StageNowAsync(about, ct), $"#{about}: you say it works now. Claude wraps up.", ct);
+                }
+                else await ReplyAsync(about, "Done", $"#{about}: confirmed by you. Thanks!", ct);
                 await ReplyAsync(seq, "Done", $"Noted: #{about}'s fix works.", ct);
                 Console.Error.WriteLine($"[Dispatch] #{seq}: the player confirmed #{about}'s fix");
             }
@@ -218,12 +233,21 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
 
     private static string VerifyFile(long seq) => Path.Combine(HandlersDir, seq.ToString(), "verify.json");
 
-    private void StartVerify(long seq, string answer)
+    private async Task StartVerifyAsync(long seq, string answer, CancellationToken ct)
     {
+        // Progress counts only after the bridge's head now, not after _cursor: the main sync just reloaded Whats A Route
+        // while this loop waited, and that reload's own objective / quest trace is not the player moving on.
+        var since = _cursor;
+        try
+        {
+            var (_, head) = await bridges.CallAsync(_game, "pubsub.events", new JObject { ["since"] = long.MaxValue, ["limit"] = 1 }, ct);
+            since = Math.Max(since, head["seq"]?.Value<long>() ?? 0);
+        }
+        catch (ModelContextProtocol.McpException) { }
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(VerifyFile(seq))!);
-            File.WriteAllText(VerifyFile(seq), JsonSerializer.Serialize(new VerifyState { Seq = seq, Since = _cursor, Until = DateTimeOffset.UtcNow + VerifyFor, Answer = answer }, Dto.Options));
+            File.WriteAllText(VerifyFile(seq), JsonSerializer.Serialize(new VerifyState { Seq = seq, Since = since, Until = DateTimeOffset.UtcNow + VerifyFor, Answer = answer }, Dto.Options));
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] #{seq}: writing verify.json: {ex.Message}"); }
     }
@@ -234,13 +258,10 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         try { File.Delete(VerifyFile(seq)); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
-    /// <summary>A press whose handler ended with a fix: its replies reached Fixing or later, or the route reloaded its live
-    /// fixes while it ran (Whats A Route's route-reloaded / live-reloaded trace), or the sync brought a change into the HUD.</summary>
-    private bool HadFix(FeedbackHandlerState h, IEnumerable<JObject> replies) =>
-        replies.Any(r => F8.Rank(F8.ReplyStage(r["data"])) is var k && k >= F8.Rank("Fixing") && k <= F8.Rank("Deploying"))
-        || _trace.Any(t => t["seq"]!.Value<long>() > h.Seq && t["kind"]?.ToString() == FeedbackKit.TraceKind
-                           && t["data"]?["Event"]?.ToString() is "route-reloaded" or "live-reloaded")
-        || h.Sync?.Contains("reloaded clean", StringComparison.Ordinal) == true;   // MainSync: "<plugin> a -> b, reloaded clean"
+    /// <summary>A press whose handler ended with a fix: its own replies reached Fixing or later. A route reload or a main sync
+    /// is not evidence (another agent's live edit or merge reloads the route too); the brief tells handlers to say Fixing.</summary>
+    private static bool HadFix(IEnumerable<JObject> replies) =>
+        replies.Any(r => F8.Rank(F8.ReplyStage(r["data"])) is var k && k >= F8.Rank("Fixing") && k <= F8.Rank("Deploying"));
 
     /// <summary>Presses in Verifying: Done "confirmed" once the route trace shows progress (an objective or quest event after
     /// the fix), else Done "unconfirmed" after 3 min. Exactly once across dispatchers (claim stage verify).</summary>
@@ -849,8 +870,8 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         {
             // Read the replies fresh: the handler may have said done just before it exited (feedback_reply).
             var (_, rr) = await bridges.CallAsync(_game, "pubsub.events", new JObject { ["since"] = h.Seq, ["kinds"] = new JArray(FeedbackKit.ReplyKind), ["limit"] = 500 }, ct);
-            var handlerSaidDone = (rr["events"] as JArray ?? []).Any(x => F8.ReplyRef(x["data"]) == h.Seq && x["source"]?.ToString() != Subscriber
-                                                                         && F8.IsFinal(F8.ReplyStage(x["data"])));
+            // Already final (the handler said Done, or the player confirmed it with Works now): nothing more to say.
+            var handlerSaidDone = (rr["events"] as JArray ?? []).Any(x => F8.ReplyRef(x["data"]) == h.Seq && F8.IsFinal(F8.ReplyStage(x["data"])));
             if (failed) await FailAsync(h.Seq, $"its Claude session failed: {error}", h.Url != null ? $"Its transcript: {h.Url}" : $"Details: {h.Dir}", true, ct);
             else if (!handlerSaidDone)
             {
@@ -858,9 +879,10 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
                 if (h.Mode == "remote-control") text += $" (Transcript: \"F8 #{h.Seq}\" in Claude.)";
                 // C6: a press that got a fix is watched for up to 3 min (VerifyAsync) before it ends; the answer shows meanwhile.
                 var replies = (rr["events"] as JArray ?? []).OfType<JObject>().Where(x => F8.ReplyRef(x["data"]) == h.Seq).ToList();
-                if (HadFix(h, replies))
+                if (_confirmed.Remove(h.Seq)) await ReplyAsync(h.Seq, "Done", text, ct, detail: "Confirmed by you (Works now).");
+                else if (HadFix(replies))
                 {
-                    StartVerify(h.Seq, text);
+                    await StartVerifyAsync(h.Seq, text, ct);
                     await ReplyAsync(h.Seq, "Verifying", text, ct, detail: "Watching the route for the step to move on (3 min). F8 > Works now / Still wrong says it sooner.");
                 }
                 else await ReplyAsync(h.Seq, "Done", text, ct);
@@ -1160,7 +1182,13 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     {
         try
         {
-            if (onlyForward && F8.Advance(await F8Replies.CurrentStageAsync(bridges, _game, seq, ct), stage) == null) return;
+            if (onlyForward)
+            {
+                string? now;
+                try { now = await F8Replies.CurrentStageAsync(bridges, _game, seq, ct); }
+                catch (ModelContextProtocol.McpException) { now = null; }   // can't tell: say it (a repeat beats a lost stage)
+                if (now != null && F8.Advance(now, stage) == null) return;
+            }
             await F8Replies.PublishAsync(bridges, _game, F8.Reply(seq, stage, text, detail, null, pr, waitingOn, status), Subscriber, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { Console.Error.WriteLine($"[Dispatch] reply to #{seq} failed: {ex.Message}"); }

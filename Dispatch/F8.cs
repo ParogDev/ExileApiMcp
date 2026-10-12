@@ -266,7 +266,7 @@ public static class AgentRouteKit
     public static readonly string[] HandBacks = ["Resume", "Hold"];
 
     /// <summary>Progress events after which the route no longer leads (left parks it: resumed brings it back).</summary>
-    public static readonly string[] EndEvents = ["done", "expired", "ended", "replaced", "owner-gone", "cleared"];
+    public static readonly string[] EndEvents = ["done", "expired", "ended", "replaced", "owner-gone", "cleared", "refused"];
 
     public static string? DoneKind(string? s) => s == null ? null : Array.Find(DoneKinds, k => k.Equals(s.Trim(), StringComparison.OrdinalIgnoreCase));
 

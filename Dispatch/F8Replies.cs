@@ -36,12 +36,22 @@ public static class F8Replies
     /// <summary>The stage press <paramref name="seq"/> stands at now, from its replies on the bridge (null: none yet).</summary>
     public static async Task<string?> CurrentStageAsync(BridgeRegistry bridges, string? game, long seq, CancellationToken ct)
     {
-        var (_, r) = await bridges.CallAsync(game ?? Game, "pubsub.events", new JObject
+        // Every page after the press: the newest reply decides, and a busy log can hold more than one page of replies.
+        var events = new List<JObject>();
+        for (var since = seq; ;)
         {
-            ["since"] = seq, ["kinds"] = new JArray(FeedbackKit.ReplyKind), ["limit"] = 500,
-        }, ct);
-        if (FeedbackKit.Refusal(r, "pubsub.events") != null) return null;
-        var stage = F8.CurrentStage((r["events"] as JArray ?? []).OfType<JObject>(), seq);
+            var (_, r) = await bridges.CallAsync(game ?? Game, "pubsub.events", new JObject
+            {
+                ["since"] = since, ["kinds"] = new JArray(FeedbackKit.ReplyKind), ["limit"] = 500,
+            }, ct);
+            if (FeedbackKit.Refusal(r, "pubsub.events") != null) return null;
+            var page = (r["events"] as JArray ?? []).OfType<JObject>().ToList();
+            events.AddRange(page);
+            if (page.Count < 500 || events.Count >= 4000) break;
+            if (page[^1]["seq"] is not { } next) break;
+            since = next.Value<long>();
+        }
+        var stage = F8.CurrentStage(events, seq);
         if (stage != null) Remember(seq, stage);
         return stage;
     }
