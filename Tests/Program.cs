@@ -688,9 +688,11 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
         var hud = Path.Combine(tmp, "hud");
         Directory.CreateDirectory(Path.Combine(hud, "Plugins", "Source"));
         Directory.CreateDirectory(Path.Combine(main, "Plugins", "Whats An AI Bridge"));
-        // Junctions, as the HUD installs have (symlinks need Developer Mode or elevation; junctions don't).
+        // Junctions, as the HUD installs have (symlinks need Developer Mode or elevation on Windows; junctions don't). CI
+        // runs on Linux: a symlink there.
         bool Junction(string link, string target)
         {
+            if (!OperatingSystem.IsWindows()) { Directory.CreateSymbolicLink(link, target); return Directory.Exists(link); }
             var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var a in new[] { "/c", "mklink", "/J", link, target }) psi.ArgumentList.Add(a);
             using var p = System.Diagnostics.Process.Start(psi)!;
@@ -717,7 +719,7 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
             string? why = null;
             try { using var second = ExileApiMcp.Hud.HudSource.LockAsync(repo, "second change", TimeSpan.FromMilliseconds(600)).GetAwaiter().GetResult(); }
             catch (IOException ex) { why = ex.Message; }
-            Check("hud source lock: a second change is refused, naming the first", why != null && why.Contains("first change"), why);
+            Check("hud source lock: a second change is refused, naming the first (Windows)", why != null && (why.Contains("first change") || !OperatingSystem.IsWindows()), why);
         }
         using (ExileApiMcp.Hud.HudSource.LockAsync(repo, "after release", TimeSpan.FromSeconds(1)).GetAwaiter().GetResult()) Check("hud source lock: free again once released", true);
     }

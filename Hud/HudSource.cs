@@ -107,13 +107,14 @@ public static class HudSource
     {
         var gitDir = PluginGit.Run(root, "rev-parse", "--absolute-git-dir");
         if (!gitDir.Ok) throw new IOException($"{root}: no git dir for the HUD source lock ({gitDir.Err})");
-        var path = Path.Combine(gitDir.Line.Replace('/', '\\'), LockFile);
+        var path = Path.GetFullPath(Path.Combine(gitDir.Line, LockFile));
         var deadline = DateTime.UtcNow + wait;
         while (true)
         {
             try
             {
-                var fs = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+                // Read sharing lets a refused taker name the holder. .NET on Unix (CI) only locks exclusively with None.
+                var fs = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, OperatingSystem.IsWindows() ? FileShare.Read : FileShare.None);
                 var bytes = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(new LockHolder
                 {
                     Who = Hosting.SessionIdentity.Label, What = what, Pid = Environment.ProcessId, At = DateTimeOffset.UtcNow,
