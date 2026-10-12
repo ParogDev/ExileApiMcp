@@ -564,5 +564,39 @@ Start Port    End Port
     finally { try { Directory.Delete(tmp, true); } catch { } }
 }
 
+// ── healthbars_state / healthbars_preview: the plugin's PascalCase state fits the contract; focus and reply decoding ──
+{
+    // A real WhatsAHealthBar.GetState answer (PoE2, in town), plus a field the plugin may add later.
+    const string live = """
+    {"Plugin":"Whats A Health Bar","Schema":1,"Enabled":true,"Suppressed":"in town","Area":"Kingsmarch (53)",
+     "Counts":{"Tracked":5,"Wanted":0,"Drawn":0,"PeakDrawn":0,"ByKind":{"unique":0,"rare":0,"magic":0,"normal":0,"minion":0,"player":0,"self":0}},
+     "Timings":{"TickUs":4.3,"TickMaxUs":1647.8,"RenderUs":0.1,"RenderMaxUs":0.4,"ClassifyUs":0,"PerBarNs":0,"ClassifyHz":10,"WindowSec":5},
+     "Preview":{"Active":false,"SecondsLeft":0,"Focus":null},
+     "Bridge":{"Linked":true,"Why":null,"Subscribes":"healthbars.preview","Publishes":"healthbars.kill","PublishKills":"Uniques"},
+     "Kills":[{"Name":"Silverfist","Rarity":"Unique","MaxLife":5200,"MaxEs":0,"MaxWard":300,"TimeToKillMs":4120,"Area":"The Grelwood","At":"2026-10-12T01:00:00Z","Streak":2}],
+     "Later":{"x":1}}
+    """;
+    var s = System.Text.Json.JsonSerializer.Deserialize<ExileApiMcp.Tools.HealthBarsStateResult>(live, ExileApiMcp.Tools.Dto.Options)!;
+    Check("healthbars: PascalCase state parses", s.Plugin == "Whats A Health Bar" && s.Suppressed == "in town" && s.Counts.Tracked == 5 && s.Counts.ByKind["self"] == 0 && s.Timings.TickMaxUs == 1647.8 && s.Bridge.Linked && s.Bridge.PublishKills == "Uniques");
+    Check("healthbars: kills with pools and time to kill", s.Kills.Count == 1 && s.Kills[0].MaxWard == 300 && s.Kills[0].TimeToKillMs == 4120 && s.Kills[0].Extra?.ContainsKey("Streak") == true);
+    Check("healthbars: unknown top-level field kept", s.Extra?.ContainsKey("Later") == true);
+    var wire = JObject.Parse(ExileApiMcp.Tools.Dto.Element(s).GetRawText());
+    Check("healthbars: camelCase on the wire", wire["counts"]?["peakDrawn"] != null && wire["timings"]?["perBarNs"] != null && wire["Counts"] == null);
+
+    Check("healthbars: focus normalised", ExileApiMcp.Tools.HealthBarsTools.NormalizeFocus("rare") == "Rare" && ExileApiMcp.Tools.HealthBarsTools.NormalizeFocus("you") == "Self" && ExileApiMcp.Tools.HealthBarsTools.NormalizeFocus(" ") == null);
+    Throws<ModelContextProtocol.McpException>("healthbars: a wrong focus is refused", () => ExileApiMcp.Tools.HealthBarsTools.NormalizeFocus("Boss"));
+
+    // PluginCall.Decode: the bridge's hud.bridge_call answers, each broken link by code.
+    var missing = ExileApiMcp.Tools.PluginCall.Decode(JObject.Parse("""{"error":"method_missing","message":"PluginBridge has no 'WhatsAHealthBar.GetState'"}"""), "WhatsAHealthBar.GetState", "Whats A Health Bar", "Whats A Health Bar", "healthbars");
+    Check("plugin call: method missing is plugin_not_loaded, names the plugin and the hud_plugins hint", missing.Code == "plugin_not_loaded" && missing.Message!.Contains("Whats A Health Bar is not loaded") && missing.Message.Contains("hud_plugins plugin=Whats A Health Bar"));
+    Check("plugin call: the method threw", ExileApiMcp.Tools.PluginCall.Decode(JObject.Parse("""{"error":"invoke_failed","message":"threw"}"""), "M", "P", "F", "x").Code == "plugin_threw");
+    Check("plugin call: a bridge without hud.bridge_call", ExileApiMcp.Tools.PluginCall.Decode(JObject.Parse("""{"foo":1}"""), "M", "P", "F", "x").Code == "bridge_too_old");
+    Check("plugin call: text instead of JSON carries the prefix", ExileApiMcp.Tools.PluginCall.Decode(JObject.Parse("""{"ok":true,"resultType":"text","result":"hello"}"""), "M", "P", "F", "route").Code == "route_not_json");
+    var okReply = ExileApiMcp.Tools.PluginCall.Decode(JObject.Parse("""{"ok":true,"resultType":"json","result":{"a":1}}"""), "M", "P", "F", "x");
+    Check("plugin call: a JSON result", okReply.Ok && okReply.Json!["a"]?.Value<int>() == 1);
+    var ps = ExileApiMcp.Tools.PluginCall.Params("WhatsAHealthBar.Preview", "{\"seconds\":8}");
+    Check("plugin call: params carry name and scalar args", ps["name"]?.ToString() == "WhatsAHealthBar.Preview" && ps["args"] is JArray { Count: 1 } && ExileApiMcp.Tools.PluginCall.Params("M")["args"] == null);
+}
+
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures;

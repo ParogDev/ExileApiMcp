@@ -96,6 +96,27 @@ export function Select({ value, options, onChange, label, disabled, tour, classN
   );
 }
 
+/** A colour with alpha, as the bridge's settings carry it ("#rrggbbaa"): a swatch over a checkerboard with the native
+ *  picker, and the hex. `onPreview` gets every value the picker passes through (a live preview); `onChange` the committed one. */
+export function ColorControl({ value, onChange, onPreview, label, disabled, size = "md" }: { value: string; onChange: (v: string) => void; onPreview?: (v: string) => void; label: string; disabled?: boolean; size?: "sm" | "md" }) {
+  const rgb = value.length >= 7 ? value.slice(0, 7) : "#ffffff";
+  const alpha = value.length === 9 ? value.slice(7) : "ff";
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const commit = (v: string) => { if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(v) && v !== value) onChange(v.length === 7 ? v + alpha : v); else { setText(value); onPreview?.(value); } };
+  const h = size === "sm" ? "h-6" : "h-7";
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`relative ${size === "sm" ? "size-6" : "size-7"} overflow-hidden rounded-md border border-line`} style={{ background: `linear-gradient(45deg, var(--color-surface-3) 25%, transparent 25%, transparent 75%, var(--color-surface-3) 75%), linear-gradient(45deg, var(--color-surface-3) 25%, transparent 25%, transparent 75%, var(--color-surface-3) 75%)`, backgroundSize: "8px 8px", backgroundPosition: "0 0, 4px 4px" }}>
+        <span className="absolute inset-0" style={{ background: text.length >= 7 ? text : value }} />
+        <input type="color" value={rgb} disabled={disabled} aria-label={label} onChange={(e) => { setText(e.target.value + alpha); onPreview?.(e.target.value + alpha); }} onBlur={(e) => commit(e.target.value + alpha)} className="absolute inset-0 cursor-pointer opacity-0" />
+      </span>
+      <input type="text" value={text} disabled={disabled} aria-label={`${label} hex`} onChange={(e) => { setText(e.target.value); if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(e.target.value)) onPreview?.(e.target.value.length === 7 ? e.target.value + alpha : e.target.value); }} onBlur={() => commit(text)} onKeyDown={(e) => { if (e.key === "Enter") commit(text); }} spellCheck={false}
+        className={`${h} w-24 rounded-md border border-line bg-surface px-1.5 font-code text-[11.5px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50`} />
+    </div>
+  );
+}
+
 /** A row of exclusive options (small). */
 export function Segmented<T extends string>({ value, options, onChange, label, tour, size = "md" }: { value: T; options: { value: T; label: ReactNode; title?: string }[]; onChange: (v: T) => void; label: string; tour?: string; size?: "sm" | "md" }) {
   return (
