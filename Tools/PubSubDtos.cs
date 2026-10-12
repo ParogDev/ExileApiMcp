@@ -118,5 +118,34 @@ public sealed class FeedbackHandlerState
     public bool? SyncFailed { get; set; }
     /// <summary>A failed sync: what to do about it (on the card after the reason).</summary>
     public string? SyncFix { get; set; }
+    /// <summary>The handler's fix its session couldn't merge, and the player's answer on the card (Dispatch/UnmergedFix.cs);
+    /// null when there was none.</summary>
+    public FeedbackUnmerged? Unmerged { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>An F8 handler's unmerged fix (Dispatch/UnmergedFix.cs): where it is, and what the player chose on the card.</summary>
+public sealed class FeedbackUnmerged
+{
+    /// <summary>The plugin repo, owner/name.</summary>
+    public string? Repo { get; set; }
+    public string? Branch { get; set; }
+    public string? Sha { get; set; }
+    /// <summary>The commit is on the remote (the branch was pushed).</summary>
+    public bool Pushed { get; set; }
+    /// <summary>The open PR, when there is one.</summary>
+    public int? Pr { get; set; }
+    /// <summary>The PR title, else the commit subject.</summary>
+    public string? Subject { get; set; }
+    /// <summary>asking (to be put on the card) | asked | merging | closing | merged | closed | kept | failed</summary>
+    public string Status { get; set; } = "asking";
+    /// <summary>The attention-queue item on the card (bridge attention.result).</summary>
+    public string? AskId { get; set; }
+    /// <summary>How often it was put on the card: an ask that expired or was dismissed is asked again, up to 3 times.</summary>
+    public int Asks { get; set; }
+    /// <summary>What the player chose: Merge it | Close it | Leave it.</summary>
+    public string? Answer { get; set; }
+    /// <summary>What happened once it was answered (or why it wasn't acted on).</summary>
+    public string? Outcome { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

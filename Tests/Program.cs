@@ -644,6 +644,20 @@ Start Port    End Port
     Check("plugin call: params carry name and scalar args", ps["name"]?.ToString() == "WhatsAHealthBar.Preview" && ps["args"] is JArray { Count: 1 } && ExileApiMcp.Tools.PluginCall.Params("M")["args"] == null);
 }
 
+// ── F8 unmerged fixes: what is asked on the card, what the scripts' output says ──
+{
+    Check("unmerged: repo from https remote", ExileApiMcp.Dispatch.UnmergedFix.RepoName("https://github.com/ParogDev/WhatsARoute.git") == "ParogDev/WhatsARoute");
+    Check("unmerged: repo from ssh remote", ExileApiMcp.Dispatch.UnmergedFix.RepoName("git@github.com:ParogDev/WhatsARoute") == "ParogDev/WhatsARoute");
+    Check("unmerged: no repo from a local path", ExileApiMcp.Dispatch.UnmergedFix.RepoName("C:/repos/x") == null);
+    Check("unmerged: last PR number in output", ExileApiMcp.Dispatch.UnmergedFix.PrNumber("pushed\nhttps://github.com/ParogDev/WhatsARoute/pull/49\nhttps://github.com/ParogDev/ExileApiScaffolding/pull/186\n") == 186);
+    Check("unmerged: no PR number", ExileApiMcp.Dispatch.UnmergedFix.PrNumber("nothing to bump") == null);
+    var withPr = ExileApiMcp.Dispatch.UnmergedFix.AskText(647, new ExileApiMcp.Tools.FeedbackUnmerged { Pr = 51, Pushed = true, Branch = "f8-647-travel-map", Subject = "Read 'travel to a new island' as Sail" });
+    var noPr = ExileApiMcp.Dispatch.UnmergedFix.AskText(389, new ExileApiMcp.Tools.FeedbackUnmerged { Pushed = true, Branch = "route-g4-7-arena", Subject = new string('x', 300) });
+    Check("unmerged: question names the PR", withPr.Question.Contains("PR #51") && withPr.Question.Contains("#647") && withPr.Question.Length <= 120, withPr.Question);
+    Check("unmerged: question names the branch without a PR", noPr.Question.Contains("route-g4-7-arena") && noPr.Detail.Length <= 160, noPr.Question);
+    Check("unmerged: three choices", ExileApiMcp.Dispatch.UnmergedFix.Options.Length == 3);
+}
+
 // ── hud_plugin_lint: DebuggableAttribute read from metadata agrees with reflection (Debug and Release builds) ──
 foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(JObject).Assembly })
 {
