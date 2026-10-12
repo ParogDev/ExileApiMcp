@@ -42,7 +42,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         RetryEvery = TimeSpan.FromMinutes(1), KeepAliveAfterBridge = TimeSpan.FromMinutes(20), AdoptEvery = TimeSpan.FromSeconds(10);
 
     private readonly string _game = Environment.GetEnvironmentVariable("HEXILE_DISPATCH_GAME") is { Length: > 0 } g ? g : "poe2";
-    private readonly CallerIdentity _as = new("route-dispatcher", null, null);
+    private readonly CallerIdentity _as = new("route-dispatcher", null, null) { Infra = true };   // not an agent on the HUD's chip
     /// <summary>Who claims: the claim lapses (ttl) if this server dies before the handler ends; release names the holder.</summary>
     private static readonly string By = $"{Subscriber}@{Environment.ProcessId}";
     private long _cursor;

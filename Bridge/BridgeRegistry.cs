@@ -34,8 +34,14 @@ public sealed class BridgeRegistry : IDisposable
         public readonly List<BridgeClient> Bridges = bridges;
         public long LastUsedTicks = DateTime.UtcNow.Ticks;
     }
+    /// <summary>A caller idle this long has its connections closed. The HUD already stops counting it after 10 min (the
+    /// bridge's McpHttpIdle, unless it holds a lease); the connection stays longer so its leases, card and queued asks
+    /// (released when the connection goes) survive a pause between calls.</summary>
     public static readonly TimeSpan CallerIdleClose = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan CallerTickEvery = TimeSpan.FromMinutes(1);
     private long _nextSweepTicks;
+    private Timer? _callerTimer;
+    private volatile bool _draining;
     private readonly int _port;
     private readonly List<(string Game, string Dir)> _layout = new();
 
@@ -61,28 +67,76 @@ public sealed class BridgeRegistry : IDisposable
 
     private List<BridgeClient> ForCaller(Hosting.CallerIdentity c)
     {
-        SweepIdleCallers();
+        // The minute tick runs from a timer (a worker that only finishes old calls after a swap gets no new ones to sweep
+        // from); started by the first caller, so a stdio server never runs it.
+        if (_callerTimer == null)
+        {
+            var t = new Timer(_ => _ = CallerTickAsync(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+            if (Interlocked.CompareExchange(ref _callerTimer, t, null) == null) t.Change(CallerTickEvery, CallerTickEvery);
+            else t.Dispose();   // another call started it first
+        }
         var set = _callers.GetOrAdd(SessionIdentity.IdOf(c), _ => new CallerBridges(_layout.Select(x => new BridgeClient(x.Game, x.Dir, _port, c)).ToList()));
         Interlocked.Exchange(ref set.LastUsedTicks, DateTime.UtcNow.Ticks);
         return set.Bridges;
     }
 
-    /// <summary>Closes the connections of callers that made no call for <see cref="CallerIdleClose"/> (at most once a minute):
-    /// the HUD then shows them as gone instead of connected forever. Their next call connects again.</summary>
-    private void SweepIdleCallers()
+    /// <summary>
+    /// Once a minute, per caller: one with an HTTP call still running (Hosting/CallerIdentity.cs OpenCalls: incident_wait, a
+    /// long observe_wait) sends session.touch on its open connections, so the HUD keeps it present; one that made no call for
+    /// <see cref="CallerIdleClose"/> (or any idle one, once the supervisor retired this worker) has its connections closed, so
+    /// the HUD stops counting it. Its next call connects again under the same session id.
+    /// </summary>
+    private async Task CallerTickAsync()
+    {
+        try { await CallerTickCoreAsync(); }
+        catch (Exception ex) { Console.Error.WriteLine($"[Bridge] caller tick failed: {ex.GetType().Name}: {ex.Message}"); }
+    }
+
+    private async Task CallerTickCoreAsync()
     {
         var now = DateTime.UtcNow.Ticks;
         var next = Interlocked.Read(ref _nextSweepTicks);
-        if (now < next || Interlocked.CompareExchange(ref _nextSweepTicks, now + TimeSpan.TicksPerMinute, next) != next) return;
-        foreach (var (_, set) in _callers)
+        if (now < next || Interlocked.CompareExchange(ref _nextSweepTicks, now + CallerTickEvery.Ticks - TimeSpan.TicksPerSecond, next) != next) return;
+        foreach (var (id, set) in _callers)
         {
-            if (now - Interlocked.Read(ref set.LastUsedTicks) < CallerIdleClose.Ticks) continue;
-            foreach (var b in set.Bridges.Where(b => b.IsConnected && !b.Busy))
+            if (Hosting.CallerIdentity.OpenCalls(id) > 0)
             {
-                Console.Error.WriteLine($"[Bridge:{b.Game}] closing {b.Caller?.Label}'s connection: no call for {CallerIdleClose.TotalMinutes:0} min");
-                b.Close();
+                Interlocked.Exchange(ref set.LastUsedTicks, now);
+                foreach (var b in set.Bridges.Where(b => b.IsConnected))
+                {
+                    try
+                    {
+                        using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                        await b.SendRequestAsync("session.touch", null, budget.Token);
+                    }
+                    catch (Exception ex) when (ex is BridgeException or OperationCanceledException or IOException) { }   // an older bridge, or it went away
+                }
+                continue;
             }
+            if (!_draining && now - Interlocked.Read(ref set.LastUsedTicks) < CallerIdleClose.Ticks) continue;
+            CloseIdle(set, _draining ? "this worker was retired by a newer build" : $"no call for {CallerIdleClose.TotalMinutes:0} min");
         }
+    }
+
+    private static void CloseIdle(CallerBridges set, string why)
+    {
+        foreach (var b in set.Bridges.Where(b => b.IsConnected && !b.Busy))
+        {
+            Console.Error.WriteLine($"[Bridge:{b.Game}] closing {b.Caller?.Label}'s connection: {why}");
+            b.Close();
+        }
+    }
+
+    /// <summary>
+    /// The supervisor retired this worker (a newer build took over): close the connections of callers with no call running
+    /// now, and of the others as their calls end (the minute tick), so the HUD doesn't keep them on the old build ("swapping")
+    /// until this worker exits. Their next call goes to the new worker.
+    /// </summary>
+    public void Retire()
+    {
+        _draining = true;
+        foreach (var (id, set) in _callers)
+            if (Hosting.CallerIdentity.OpenCalls(id) == 0) CloseIdle(set, "this worker was retired by a newer build");
     }
 
     private static readonly TimeSpan StartupGrace = TimeSpan.FromSeconds(4);
@@ -244,6 +298,7 @@ public sealed class BridgeRegistry : IDisposable
 
     public void Dispose()
     {
+        _callerTimer?.Dispose();
         foreach (var b in _bridges) b.Dispose();
         foreach (var (_, set) in _callers) foreach (var b in set.Bridges) b.Dispose();
     }

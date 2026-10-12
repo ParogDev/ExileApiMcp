@@ -14,6 +14,8 @@ public sealed class SessionsView
     public string? You { get; set; }
     /// <summary>Seconds a free restart still waits on the card with Not now (bridge setting).</summary>
     public int? HoldSec { get; set; }
+    /// <summary>How many agents the in-game chip counts: present sessions that are not infra (null from older bridges).</summary>
+    public int? Agents { get; set; }
     public List<SessionInfo>? Sessions { get; set; }
     public List<LeaseInfo>? Leases { get; set; }
     /// <summary>Everything a restart would interrupt right now (implicit activity plus explicit leases).</summary>
@@ -39,6 +41,14 @@ public sealed class SessionInfo
     /// <summary>mcp | mcp-http | script | ...</summary>
     public string? Kind { get; set; }
     public bool Connected { get; set; }
+    /// <summary>Counted as an agent on this HUD: connected, and for an mcp-http caller seen in the last 10 min (or a call or lease open).</summary>
+    public bool? Present { get; set; }
+    /// <summary>Connected but idle: an mcp-http caller with no call for 10 min (its connection outlives it on the shared server).</summary>
+    public bool? Stale { get; set; }
+    /// <summary>The shared server's own connection (control center, route-dispatcher), not an agent.</summary>
+    public bool? Infra { get; set; }
+    /// <summary>Seconds since it last spoke to the bridge.</summary>
+    public int? IdleSec { get; set; }
     public DateTimeOffset? HelloAt { get; set; }
     public DateTimeOffset? LastSeen { get; set; }
     public int? Leases { get; set; }

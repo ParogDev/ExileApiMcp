@@ -45,8 +45,10 @@ public static class SessionIdentity
     public static int Revision { get; private set; }
     /// <summary>The project folder learned from the client's roots, when the cwd had none.</summary>
     public static string? ProjectRoot { get; private set; }
-    /// <summary>True until a project is known (env, cwd branch or roots): the call filter asks the client for its roots once.</summary>
-    public static bool NeedsRoots => !FromEnv && CallerIdentity.Current == null && _branch == null && ProjectRoot == null && !_rootsAsked;
+    /// <summary>True until the client's roots were asked once (not with HEXILE_AGENT, nor for a shared server's caller). Asked
+    /// even when the cwd has a branch: Claude Code starts a project's stdio server in the project folder (the main checkout)
+    /// while the session works in a worktree, and every such server would otherwise read "main".</summary>
+    public static bool NeedsRoots => !FromEnv && CallerIdentity.Current == null && ProjectRoot == null && !_rootsAsked;
     private static bool _rootsAsked;
 
     private static string MakeLabel(string? branch, string cwd) => Clip(Environment.GetEnvironmentVariable("HEXILE_AGENT") is { Length: > 0 } env ? env
@@ -57,15 +59,23 @@ public static class SessionIdentity
     /// The client's roots (file:// URIs): the first that is in a git checkout becomes this session's project, its branch
     /// the label. Called once; false when nothing changed.
     /// </summary>
+    /// <remarks>A server whose own cwd is in a checkout already (Claude Code starts it in the project folder, the main
+    /// checkout, while the session works in a worktree) takes only the name from a root in another checkout: label, branch
+    /// and cwd, not ProjectRoot, so RepoRoot keeps naming the checkout it runs from (HEXILE_REPO) for machine-wide scripts.
+    /// A root in its own checkout changes nothing.</remarks>
     public static bool AdoptRoots(IEnumerable<string> uris)
     {
         _rootsAsked = true;
+        var hadBranch = _branch != null;
+        var own = hadBranch ? FindCheckout(_cwd)?.Checkout : null;
         foreach (var u in uris)
         {
             if (!Uri.TryCreate(u, UriKind.Absolute, out var uri) || !uri.IsFile) continue;
             var path = uri.LocalPath;
             if (!Directory.Exists(path) || ReadBranch(path) is not { } branch) continue;
-            ProjectRoot = path;
+            if (own != null && string.Equals(FindCheckout(path)?.Checkout, own, StringComparison.OrdinalIgnoreCase)) continue;   // its own checkout: nothing new
+            if (!hadBranch) ProjectRoot = path;
+            else SessionRoot = path;
             _cwd = path;
             _branch = branch;
             _label = MakeLabel(branch, path);
@@ -75,6 +85,10 @@ public static class SessionIdentity
         }
         return false;
     }
+
+    /// <summary>The checkout a stdio server's session works in when the client's roots named another one than the folder
+    /// the server was started in (AdoptRoots): deploy_plugin's "your checkout" (WorkingRepoRoot).</summary>
+    public static string? SessionRoot { get; private set; }
 
     /// <summary>Roots could not be asked (no roots capability, stateless HTTP): stop trying.</summary>
     public static void RootsUnavailable() => _rootsAsked = true;
@@ -93,29 +107,33 @@ public static class SessionIdentity
     }
 
     /// <summary>
-    /// The checkout the session edits, for deploy_plugin: on the shared HTTP server the caller's own (its cwd header), else
+    /// The checkout the session edits, for deploy_plugin: on the shared HTTP server the caller's own (its cwd header); for a
+    /// stdio server started in the main checkout, the worktree its client's roots named (<see cref="SessionRoot"/>); else
     /// <see cref="RepoRoot"/>. Machine-wide scripts (restart-hud.ps1, deploy.ps1) keep coming from RepoRoot, the main checkout
     /// HEXILE_REPO names, never from a caller's worktree.
     /// </summary>
     public static string? WorkingRepoRoot()
     {
-        if (CallerIdentity.Current?.Cwd is { } callerCwd && Directory.Exists(callerCwd))
+        if ((CallerIdentity.Current != null ? CallerIdentity.Current.Cwd : SessionRoot) is { } callerCwd && Directory.Exists(callerCwd))
             for (var dir = new DirectoryInfo(callerCwd); dir != null; dir = dir.Parent)
                 if (File.Exists(Path.Combine(dir.FullName, "tools", "restart-hud.ps1"))) return dir.FullName;
         return RepoRoot();
     }
 
     /// <summary>session.hello for a bridge connection: the process's identity, or <paramref name="caller"/>'s for the
-    /// connections the shared HTTP server keeps per caller (Bridge/BridgeRegistry.cs).</summary>
+    /// connections the shared HTTP server keeps per caller (Bridge/BridgeRegistry.cs). role: the shared server's own identity
+    /// (the control center) and infra callers (the F8 route-dispatcher) are "infra", which the HUD doesn't count as agents.</summary>
     public static Newtonsoft.Json.Linq.JObject HelloParams(CallerIdentity? caller = null) => caller == null
         ? new()
         {
             ["id"] = _id, ["label"] = _label, ["branch"] = _branch, ["cwd"] = _cwd, ["pid"] = Pid, ["kind"] = Kind,
+            ["role"] = Kind == "mcp-http" ? "infra" : "agent",
             ["mcp"] = ServerBuild.HelloInfo(),
         }
         : new()
         {
             ["id"] = IdOf(caller), ["label"] = caller.Label, ["branch"] = caller.Branch, ["cwd"] = caller.Cwd ?? _cwd, ["pid"] = Pid, ["kind"] = Kind,
+            ["role"] = caller.Infra ? "infra" : "agent",
             ["mcp"] = ServerBuild.HelloInfo(),
         };
 
@@ -126,27 +144,30 @@ public static class SessionIdentity
     {
         try
         {
-            for (var dir = new DirectoryInfo(start); dir != null; dir = dir.Parent)
-            {
-                var dotGit = Path.Combine(dir.FullName, ".git");
-                string? gitDir = null;
-                if (Directory.Exists(dotGit)) gitDir = dotGit;
-                else if (File.Exists(dotGit))
-                {
-                    // A worktree or submodule: "gitdir: <path>" (relative to the folder holding .git, or absolute).
-                    var line = File.ReadAllText(dotGit).Trim();
-                    if (line.StartsWith("gitdir:", StringComparison.Ordinal))
-                        gitDir = Path.GetFullPath(Path.Combine(dir.FullName, line["gitdir:".Length..].Trim()));
-                }
-                if (gitDir == null) continue;
-                var head = Path.Combine(gitDir, "HEAD");
-                if (!File.Exists(head)) return null;
-                var content = File.ReadAllText(head).Trim();
-                if (content.StartsWith("ref: refs/heads/", StringComparison.Ordinal)) return content["ref: refs/heads/".Length..];
-                return content.Length >= 7 ? "detached@" + content[..7] : null;
-            }
+            if (FindCheckout(start) is not { } c) return null;
+            var head = Path.Combine(c.GitDir, "HEAD");
+            if (!File.Exists(head)) return null;
+            var content = File.ReadAllText(head).Trim();
+            if (content.StartsWith("ref: refs/heads/", StringComparison.Ordinal)) return content["ref: refs/heads/".Length..];
+            return content.Length >= 7 ? "detached@" + content[..7] : null;
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Session] branch unknown: {ex.Message}"); }
+        return null;
+    }
+
+    /// <summary>The nearest checkout at or above <paramref name="start"/>: the folder holding .git and its git dir (a worktree
+    /// or submodule's .git file says "gitdir: &lt;path&gt;", relative to that folder or absolute). Null outside any.</summary>
+    private static (string Checkout, string GitDir)? FindCheckout(string start)
+    {
+        for (var dir = new DirectoryInfo(Path.GetFullPath(start)); dir != null; dir = dir.Parent)
+        {
+            var dotGit = Path.Combine(dir.FullName, ".git");
+            if (Directory.Exists(dotGit)) return (dir.FullName.TrimEnd('\\', '/'), dotGit);
+            if (!File.Exists(dotGit)) continue;
+            var line = File.ReadAllText(dotGit).Trim();
+            if (line.StartsWith("gitdir:", StringComparison.Ordinal))
+                return (dir.FullName.TrimEnd('\\', '/'), Path.GetFullPath(Path.Combine(dir.FullName, line["gitdir:".Length..].Trim())));
+        }
         return null;
     }
 

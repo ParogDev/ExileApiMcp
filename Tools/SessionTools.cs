@@ -71,13 +71,20 @@ public static class SessionTools
     private static string SessionsText(JObject o)
     {
         var lines = new List<string>();
+        if (o["agents"]?.Type == JTokenType.Integer) lines.Add($"Agents on this HUD (the in-game chip): {o["agents"]}");
         foreach (var s in o["sessions"] as JArray ?? [])
         {
             var doing = string.Join("; ", (s["doing"] as JArray ?? []).Select(d => d.ToString()));
             // The server build it runs (bridge session.hello mcp; absent from older servers and bridges).
             var mcp = s["mcp"] is JObject m ? $" (mcp {m["version"]}{(m["mode"]?.ToString() is { } mode && mode != "supervised" ? $", {mode}" : "")})" : "";
-            lines.Add($"{(s["connected"]?.Value<bool>() == true ? "*" : "-")} {s["label"]}{(s["id"]?.ToString() == o["you"]?.ToString() ? " (you)" : "")}" +
-                      $"{(s["branch"] != null && s["branch"]?.ToString() != s["label"]?.ToString() ? $" [{s["branch"]}]" : "")}{mcp}: {(doing.Length > 0 ? doing : s["connected"]?.Value<bool>() == true ? "idle" : "disconnected")}");
+            // Newer bridges say who the chip counts: present agents (*), stale shell callers (~, idle 10+ min), the shared
+            // server's own connections (infra). Older ones: connected (*) or not (-).
+            var connected = s["connected"]?.Value<bool>() == true;
+            var stale = s["stale"]?.Value<bool>() == true;
+            var infra = s["infra"]?.Value<bool>() == true;
+            var state = !connected ? "disconnected" : stale ? $"stale (no call for {(s["idleSec"]?.Value<int>() ?? 0) / 60} min)" : "idle";
+            lines.Add($"{(!connected ? "-" : stale ? "~" : "*")} {s["label"]}{(s["id"]?.ToString() == o["you"]?.ToString() ? " (you)" : "")}{(infra ? " (shared server, not an agent)" : "")}" +
+                      $"{(s["branch"] != null && s["branch"]?.ToString() != s["label"]?.ToString() ? $" [{s["branch"]}]" : "")}{mcp}: {(doing.Length > 0 ? doing : state)}");
             // Its attention items: what it waits to show the player (position 0 = on the card now).
             foreach (var q in (s["queued"] as JArray ?? []).OfType<JObject>())
                 lines.Add($"    {(q["position"]?.Value<int>() == 0 ? "on the card" : $"#{q["position"]} in line")}: {q["kind"]} {q["title"]} ({q["id"]}{(q["mergedInto"] != null ? $", shares {q["mergedInto"]}" : "")})");
