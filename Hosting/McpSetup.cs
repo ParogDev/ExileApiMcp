@@ -11,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.77.1";
+    public const string Version = "3.78.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -69,7 +69,7 @@ internal static class McpSetup
         shows who holds the card and where you stand.
         Problems that affect every session go on the machine-wide incident board (incidents): a bridge down with the broken
         link named (HUD not running, restart in progress, Windows reserving the bridge ports, no token, nothing listening),
-        a HUD restart with its ETA, a deploy left in the main checkout (orphaned when its session is gone). They are raised
+        a HUD restart with its ETA, a deploy left in the HUD source (orphaned when its session is gone). They are raised
         and resolved automatically, and a tool error from an unreachable bridge ends with the open incidents. When one
         affects your work, say so (incident_respond ok|blocked|waiting, minutes) and plan around it; to resume as soon as it
         is over, run incident_wait since=<rev> in the background instead of polling. Raise other machine-wide problems with

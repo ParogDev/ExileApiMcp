@@ -1,4 +1,5 @@
 using ExileApiMcp.Bridge;
+using ExileApiMcp.Hud;
 using ExileApiMcp.Incidents;
 using ExileApiMcp.Tools;
 using Newtonsoft.Json.Linq;
@@ -6,9 +7,10 @@ using Newtonsoft.Json.Linq;
 namespace ExileApiMcp.Dispatch;
 
 /// <summary>
-/// After an F8 handler ends, the dispatcher brings its merged fix into the HUD: the HUD compiles Whats A Route from the main
-/// scaffolding checkout, and a handler can't touch that checkout (Claude Code's worktree isolation refuses every command
-/// aimed at it), so this runs here, outside Claude Code. When origin/main is ahead of the main checkout: `pull --ff-only`,
+/// After an F8 handler ends, the dispatcher brings its merged fix into the HUD: the HUD compiles Whats A Route from the HUD
+/// source (its junction's target: hud-live after tools\hud-live.ps1 cutover, the main scaffolding checkout before), and a
+/// handler can't touch it (Claude Code's worktree isolation refuses every command aimed outside its worktree), so this
+/// runs here, outside Claude Code, under the HUD source lock. When origin/main is ahead of it: `pull --ff-only`,
 /// `submodule update -- "Plugins/Whats A Route"`, the same reload as MCP reload_plugin (its diagnostics must be empty), then
 /// Settings.Route.IncludeOptional back to true when the saved setting says false. Never resets or merges: a refused pull,
 /// a live deploy_plugin deploy of the plugin, or a failed reload is said on the card (feedback.reply status failed).
@@ -22,49 +24,67 @@ public static class MainSync
 
     public static async Task<Outcome> RunAsync(BridgeRegistry bridges, string game, string repo, CancellationToken ct)
     {
-        var fetch = FeedbackDispatcher.Git(repo, "fetch -q origin main", 120_000);
-        if (fetch.Code != 0) return Fail($"git fetch in the main checkout failed: {Line(fetch.Output)}", "Check the network and GitHub credentials, then pull the main checkout.");
-        var behind = FeedbackDispatcher.Git(repo, "rev-list --count HEAD..origin/main");
-        if (behind.Code != 0) return Fail($"git rev-list in the main checkout failed: {Line(behind.Output)}", null);
-        var pulled = behind.Output.Trim() != "0";
-        if (pulled)
+        // repo is the HUD source (the junction's target): hud-live after tools\hud-live.ps1 cutover, the main checkout
+        // before. Its git steps run under the HUD source lock (hud-live.ps1 sync and deploy_plugin take it too); the reload
+        // after them only reads the tree.
+        var src = HudSource.Describe(repo);
+        string? after, before;
+        bool pulled;
+        IDisposable srcLock;
+        try { srcLock = HudSource.Lock(repo, $"F8 sync of {Plugin}", TimeSpan.FromSeconds(120)); }
+        catch (IOException ex) { return Fail(Line(ex.Message), "Nothing changed: the next fix's sync, or tools\\hud-live.ps1 sync, brings it."); }
+        using (srcLock)
         {
-            var branch = FeedbackDispatcher.Git(repo, "rev-parse --abbrev-ref HEAD").Output.Trim();
-            if (branch != "main")
-                return Fail($"the main checkout is on '{branch}', not main, so it was not pulled", "Switch the main checkout back to main, then pull it.");
-            var pull = FeedbackDispatcher.Git(repo, "pull --ff-only -q origin main", 120_000);
-            if (pull.Code != 0)
-                return Fail($"`git pull --ff-only` in the main checkout refused: {Line(pull.Output)}", "Nothing was reset or merged: sort out the main checkout by hand, then pull it.");
+            var fetch = FeedbackDispatcher.Git(repo, "fetch -q origin main", 120_000);
+            if (fetch.Code != 0) return Fail($"git fetch in {src} failed: {Line(fetch.Output)}", "Check the network and GitHub credentials, then pull it.");
+            var behind = FeedbackDispatcher.Git(repo, "rev-list --count HEAD..origin/main");
+            if (behind.Code != 0) return Fail($"git rev-list in {src} failed: {Line(behind.Output)}", null);
+            pulled = behind.Output.Trim() != "0";
+            if (pulled)
+            {
+                var branch = FeedbackDispatcher.Git(repo, "rev-parse --abbrev-ref HEAD").Output.Trim();
+                if (branch != "main")
+                    return Fail($"{src} is on '{branch}', not main, so it was not pulled", "Switch it back to main, then pull it.");
+                var pull = FeedbackDispatcher.Git(repo, "pull --ff-only -q origin main", 120_000);
+                if (pull.Code != 0)
+                    return Fail($"`git pull --ff-only` in {src} refused: {Line(pull.Output)}", "Nothing was reset or merged: sort it out by hand, then pull it.");
+            }
+
+            // The plugin's checkout against the commit the HUD source records for it: behind also when someone else pulled
+            // it without updating its submodules.
+            var sub = Path.Combine(repo, SubmodulePath.Replace('/', Path.DirectorySeparatorChar));
+            var pointer = PointerSha(FeedbackDispatcher.Git(repo, $"ls-tree HEAD -- \"{SubmodulePath}\"").Output);
+            before = FeedbackDispatcher.Git(sub, "rev-parse HEAD").Output.Trim();
+            if (pointer == null) return Fail($"{src} records no commit for {SubmodulePath}", null);
+            if (before == pointer)
+                return new Outcome(false, pulled ? $"pulled {src}; {Plugin} unchanged at {Short(before)}" : $"{src} and {Plugin} ({Short(before)}) are up to date");
+
+            // A live deploy_plugin deploy of the plugin (another session trying a commit in the HUD) is left alone.
+            var owner = DeployIncidents.Owner(Plugin);
+            if (owner.Incident != null && !owner.Orphaned)
+                return pulled
+                    ? Fail($"{owner.Owner} has a deploy of {Plugin} in {src} ({owner.Why}), so the submodule was not updated",
+                        $"Once {owner.Owner} restores it (deploy_plugin action=restore), tools\\hud-live.ps1 sync (or the next fix's sync) brings the fix.")
+                    : new Outcome(false, $"{src} is up to date; {Plugin} is held by {owner.Owner}'s deploy");
+
+            var update = FeedbackDispatcher.Git(repo, $"submodule update -- \"{SubmodulePath}\"", 120_000);
+            if (update.Code != 0)
+                return Fail($"`git submodule update` of {Plugin} in {src} failed: {Line(update.Output)}", "Nothing was reset: look at the plugin's checkout there.");
+            after = FeedbackDispatcher.Git(sub, "rev-parse HEAD").Output.Trim();
+            if (after != pointer) return Fail($"{Plugin} is at {Short(after)} after `git submodule update`, not at {Short(pointer)}", $"Look at the plugin's checkout in {src}.");
+            // An orphaned deploy it just replaced: its record and its lease go, so restore can't later undo the fix.
+            if (PluginGit.ReadState(sub) is { } orphan)
+            {
+                try { PluginGit.WriteState(sub, null); DeployIncidents.Restored(Plugin, $"{orphan.By}'s orphaned deploy replaced by the F8 sync ({Short(after)})"); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Console.Error.WriteLine($"[Dispatch] sync: clearing {orphan.By}'s orphaned deploy record: {ex.Message}"); }
+            }
         }
-
-        // The plugin's checkout against the commit the main checkout records for it: behind also when someone else pulled
-        // the main checkout without updating its submodules.
-        var sub = Path.Combine(repo, SubmodulePath.Replace('/', Path.DirectorySeparatorChar));
-        var pointer = PointerSha(FeedbackDispatcher.Git(repo, $"ls-tree HEAD -- \"{SubmodulePath}\"").Output);
-        var before = FeedbackDispatcher.Git(sub, "rev-parse HEAD").Output.Trim();
-        if (pointer == null) return Fail($"the main checkout records no commit for {SubmodulePath}", null);
-        if (before == pointer)
-            return new Outcome(false, pulled ? $"pulled the main checkout; {Plugin} unchanged at {Short(before)}" : $"the main checkout and {Plugin} ({Short(before)}) are up to date");
-
-        // A live deploy_plugin deploy of the plugin (another session trying a commit in the HUD) is left alone.
-        var owner = DeployIncidents.Owner(Plugin);
-        if (owner.Incident != null && !owner.Orphaned)
-            return pulled
-                ? Fail($"{owner.Owner} has a deploy of {Plugin} in the main checkout ({owner.Why}), so the submodule was not updated",
-                    $"Once {owner.Owner} restores it (deploy_plugin action=restore), the main checkout's submodule update brings the fix.")
-                : new Outcome(false, $"the main checkout is up to date; {Plugin} is held by {owner.Owner}'s deploy");
-
-        var update = FeedbackDispatcher.Git(repo, $"submodule update -- \"{SubmodulePath}\"", 120_000);
-        if (update.Code != 0)
-            return Fail($"`git submodule update` of {Plugin} in the main checkout failed: {Line(update.Output)}", "Nothing was reset: look at the plugin's checkout in the main checkout.");
-        var after = FeedbackDispatcher.Git(sub, "rev-parse HEAD").Output.Trim();
-        if (after != pointer) return Fail($"{Plugin} is at {Short(after)} after `git submodule update`, not at {Short(pointer)}", "Look at the plugin's checkout in the main checkout.");
 
         JObject reload;
         try { reload = await HudDevTools.ReloadAsync(bridges, Plugin, wait: true, force: false, perf: false, game, ct); }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return Fail($"{Plugin} is at {Short(after)} in the main checkout, but its reload failed: {Line(ex.Message)}", "The HUD compiles it at its next start, or press the plugin's Reload in the HUD menu.");
+            return Fail($"{Plugin} is at {Short(after)} in {src}, but its reload failed: {Line(ex.Message)}", "The HUD compiles it at its next start, or press the plugin's Reload in the HUD menu.");
         }
         if (ReloadProblem(reload) is { } problem)
             return Fail($"{Plugin} {Short(after)} did not reload cleanly: {problem}", "The plugin stays off until it compiles: the next fix must repair it.");

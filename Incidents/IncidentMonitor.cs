@@ -117,7 +117,7 @@ public sealed class IncidentHub(IncidentWatcher watcher) : IResourceHub
 /// says "stopping", checks whether the bridges behind open bridge-down / hud-restart incidents answer again (resolve)
 /// or now fail for another reason (re-diagnose), lifts ports-reserved once netsh no longer lists the bridge ports, and
 /// lets a "HUD not running" nobody hit for 30 min go. Every 30 s it beats for the deploys this session owns; every 5 min
-/// it scans the main checkout for orphaned deploys. Several servers doing this at once is fine: raises dedupe by key
+/// it scans the HUD source (the junctions' target) for orphaned deploys. Several servers doing this at once is fine: raises dedupe by key
 /// under the board's mutex and a no-op writes nothing.
 /// </summary>
 public sealed class IncidentMonitor(BridgeRegistry bridges, IncidentWatcher watcher) : BackgroundService

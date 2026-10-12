@@ -421,9 +421,23 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             var hud = Path.GetDirectoryName(bridges.Resolve(_game).BridgeDir.TrimEnd('\\'));
             var link = new DirectoryInfo(Path.Combine(hud!, "Plugins", "Source", "Whats A Route")).LinkTarget;
             var main = link == null ? null : Path.GetDirectoryName(Path.GetDirectoryName(link.TrimEnd('\\')));
-            return main != null && Directory.Exists(Path.Combine(main, ".git")) ? main : null;
+            // After the cutover the junction points into hud-live, which is no place for handler worktrees.
+            return main != null && Directory.Exists(Path.Combine(main, ".git")) && Hud.HudSource.Kind(main) == "main-checkout" ? main : null;
         }
         catch { return null; }
+    }
+
+    /// <summary>The tree the HUD compiles Whats A Route from (its junction's target: hud-live after tools\hud-live.ps1
+    /// cutover, the main checkout before), which the post-handler sync updates; else the main checkout.</summary>
+    private string? HudSourceRepo()
+    {
+        try
+        {
+            var hud = Path.GetDirectoryName(bridges.Resolve(_game).BridgeDir.TrimEnd('\\'));
+            if (hud != null && Hud.HudSource.RootFor(MainSync.Plugin, [(_game, hud)]) is { } root) return root;
+        }
+        catch { }
+        return Repo();
     }
 
     /// <summary>The handler's MCP config: the shared server, as caller route-f8-&lt;seq&gt; working in its worktree. Tools that
@@ -941,7 +955,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     private async Task<MainSync.Outcome?> SyncMainAsync(FeedbackHandlerState h, CancellationToken ct)
     {
         if (h.Sync != null) return h.SyncFailed == true ? new MainSync.Outcome(true, h.Sync, h.Sync, h.SyncFix) : null;
-        if (Repo() is not { } repo) { h.Sync = "skipped: the main scaffolding checkout is unknown"; SaveHandler(h); return null; }
+        if (HudSourceRepo() is not { } repo) { h.Sync = "skipped: the HUD source (Whats A Route's junction target) and the main scaffolding checkout are unknown"; SaveHandler(h); return null; }
         MainSync.Outcome o;
         // The sync can take minutes (fetch, pull, a compile): the status file keeps being written meanwhile, or
         // feedback_dispatcher would call this dispatcher not running.

@@ -12,31 +12,36 @@ namespace ExileApiMcp.Tools;
 
 /// <summary>
 /// Worktree plugin deployment. The HUDs compile every plugin from &lt;HUD&gt;\Plugins\Source\&lt;folder&gt;, a junction into
-/// the scaffolding's MAIN checkout, so a session working in a worktree never reaches the running HUD by editing. This
-/// moves the worktree submodule's committed HEAD into the main checkout's submodule (git fetch from the worktree, then
-/// a detached checkout), under a reload lease so no restart lands in the middle, then reloads the plugin (or restarts
-/// the HUD for Whats An AI Bridge) and reports what the HUD runs against what this session edited.
-/// Never touches uncommitted work: a dirty main-checkout submodule is refused, uncommitted worktree edits are named as
-/// not deployed. The main checkout's previous branch / commit is kept in the submodule's git dir (hexile-deploy.json)
-/// so action=restore puts it back; until then the scaffolding shows the plugin as modified, and every result says so.
+/// the HUD source tree (Hud/HudSource.cs: hud-live once tools\hud-live.ps1 cut it over, the scaffolding's main checkout
+/// before), never a worktree, so a session working in a worktree never reaches the running HUD by editing. This moves
+/// the worktree submodule's committed HEAD into the HUD source's submodule (git fetch from the worktree, then a detached
+/// checkout), under the HUD source lock and a reload lease so no sync or restart lands in the middle, then reloads the
+/// plugin (or restarts the HUD for Whats An AI Bridge) and reports what the HUD runs against what this session edited.
+/// Never touches uncommitted work: a dirty HUD-source submodule is refused, uncommitted worktree edits are named as not
+/// deployed. The previous branch / commit is kept in the submodule's git dir (hexile-deploy.json) so action=restore puts
+/// it back; until then the HUD source shows the plugin as modified (hud-live.ps1 sync leaves it alone), and every result
+/// says so. The JSON keeps the name "main" for the HUD source's copy.
 /// </summary>
 [McpServerToolType]
 public static class DeployTools
 {
     private const string BridgeFolder = "Whats An AI Bridge";
+    /// <summary>How long a deploy waits for the HUD source lock (a sync or another deploy holding it).</summary>
+    private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(60);
 
     [McpServerTool(Name = "deploy_plugin", Title = "Put a worktree's plugin commit into the HUD", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(DeployResult))]
     [Description("From a worktree session: make the running HUD compile your plugin's committed code. The HUD compiles plugins " +
-                 "from the MAIN checkout's Plugins folders (junctions), never a worktree, so edits in a worktree don't reach it. " +
-                 "action=deploy fetches your worktree submodule's HEAD commit into the main checkout's submodule (detached; " +
-                 "refused when the main checkout has uncommitted changes there, or another live session's deploy is active), " +
-                 "under a reload lease, then reload_plugin (hud_restart for Whats An AI Bridge). Uncommitted worktree edits are " +
-                 "not deployed: commit first. action=restore puts the main checkout back to the branch/commit it was on; " +
+                 "from its HUD source tree (the target of its Plugins\\Source junctions: hud-live, or the main checkout before " +
+                 "tools\\hud-live.ps1 cutover), never a worktree, so edits in a worktree don't reach it. " +
+                 "action=deploy fetches your worktree submodule's HEAD commit into the HUD source's submodule (detached; " +
+                 "refused when it has uncommitted changes there, or another live session's deploy is active), under the HUD " +
+                 "source lock and a reload lease, then reload_plugin (hud_restart for Whats An AI Bridge). Uncommitted worktree " +
+                 "edits are not deployed: commit first. action=restore puts the HUD source back to the branch/commit it was on; " +
                  "action=status shows what the HUD compiles vs what you edited. Each deploy is a lease on the incident board " +
                  "(deploy:<folder>, kept alive by your server's heartbeat): every session sees it, and once your session is gone " +
                  "(or silent 10 min) it is orphaned and any session may restore it or deploy over it without force. Until " +
-                 "restore (or a merged PR and a pointer bump), the scaffolding main checkout shows the plugin as modified.")]
+                 "restore, hud-live.ps1 sync (and the F8 sync) leave the plugin alone.")]
     public static async Task<CallToolResult> DeployPlugin(BridgeRegistry bridges,
         [Description("Plugin folder (or a unique part of it), e.g. 'Whats A Route'")] string plugin,
         [Description("deploy (default) | restore | status")] string action = "deploy",
@@ -53,20 +58,28 @@ public static class DeployTools
         if (act is not ("deploy" or "restore" or "status")) throw new McpException("action must be deploy, restore or status.");
         var r = new DeployResult { Action = act };
 
-        // ── Where things are: this session's checkout, the main checkout, the HUD junctions ──
+        // ── Where things are: this session's checkout, the HUD source (the junctions' target), the HUD junctions ──
         var here = string.IsNullOrWhiteSpace(worktree)
             ? SessionIdentity.WorkingRepoRoot() ?? throw new McpException("Not running in the scaffolding repo (tools\\restart-hud.ps1 not found from the cwd; HEXILE_REPO unset): pass worktree=<absolute path of your worktree>.")
             : ScaffoldingRoot(worktree);
-        var common = PluginGit.Run(here, "rev-parse", "--path-format=absolute", "--git-common-dir");
-        if (!common.Ok) throw new McpException($"git rev-parse --git-common-dir in {here}: {common.Err}");
-        var mainRoot = Path.GetDirectoryName(common.Line.Replace('/', '\\').TrimEnd('\\'))!;
         var folder = FindFolder(Path.Combine(here, "Plugins"), plugin);
         r.Plugin = folder;
         var edited = Path.Combine(here, "Plugins", folder);
-        var main = Path.Combine(mainRoot, "Plugins", folder);
-        var inMain = string.Equals(Path.GetFullPath(here).TrimEnd('\\'), Path.GetFullPath(mainRoot).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
-
         var installs = HudDevTools.Installs(bridges, null);
+        // The tree the HUD compiles this folder from, read off its junction (hud-live after the cutover, the main checkout
+        // before). No junction for it: the main checkout, as before hud-live, and the warning below says so.
+        var srcRoot = HudSource.RootFor(folder, installs.Select(h => (h.Game, h.Root)));
+        if (srcRoot == null)
+        {
+            var common = PluginGit.Run(here, "rev-parse", "--path-format=absolute", "--git-common-dir");
+            if (!common.Ok) throw new McpException($"No HUD has a Plugins\\Source\\{folder} junction, and git rev-parse --git-common-dir in {here} failed: {common.Err}");
+            srcRoot = Path.GetDirectoryName(common.Line.Replace('/', '\\').TrimEnd('\\'))!;
+        }
+        var src = HudSource.Describe(srcRoot);
+        r.Source = srcRoot; r.SourceTree = HudSource.Kind(srcRoot);
+        var main = Path.Combine(srcRoot, "Plugins", folder);
+        var inMain = string.Equals(Path.GetFullPath(here).TrimEnd('\\'), Path.GetFullPath(srcRoot).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+
         foreach (var hud in installs)
         {
             var link = Path.Combine(hud.SourcePluginsDir, folder);
@@ -75,10 +88,15 @@ public static class DeployTools
         }
         if (r.Games.Count == 0)
             r.Warnings.Add($"No HUD's Plugins\\Source\\{folder} points at {main}: the HUD doesn't compile this folder (missing junction?).");
+        // A half-done cutover: one HUD on hud-live, the other still on the main checkout. Only the first is deployed to.
+        var elsewhere = HudSource.Links(installs.Select(h => (h.Game, h.Root)))
+            .Where(l => string.Equals(l.Folder, folder, StringComparison.OrdinalIgnoreCase) && l.Root != null && !string.Equals(l.Root, srcRoot, StringComparison.OrdinalIgnoreCase)).ToList();
+        foreach (var l in elsewhere)
+            r.Warnings.Add($"The {l.Game} HUD compiles {folder} from {HudSource.Describe(l.Root!)}, not {src}: this deploy doesn't reach it (cut that HUD over: tools\\hud-live.ps1 cutover -Game {l.Game}).");
 
-        var mainHead = PluginGit.ReadHead(main, out var mainWhy) ?? throw new McpException($"Main checkout's {folder}: {mainWhy}");
+        var mainHead = PluginGit.ReadHead(main, out var mainWhy) ?? throw new McpException($"The HUD source's {folder} ({src}): {mainWhy}");
         r.Main = Checkout(main, mainHead);
-        var pointer = PluginGit.Run(mainRoot, "ls-tree", "HEAD", "--", $"Plugins/{folder}");
+        var pointer = PluginGit.Run(srcRoot, "ls-tree", "HEAD", "--", $"Plugins/{folder}");
         r.Pointer = pointer.Ok && pointer.Line.Split(' ', '\t') is [_, "commit", var sha, ..] ? sha : null;
         var state = PluginGit.ReadState(main);
         if (state != null) r.Deployed = StateInfo(state);
@@ -129,7 +147,7 @@ public static class DeployTools
         // ── Deploy ──
         if (inMain)
         {
-            r.Note = $"This session runs in the main checkout ({here}): the HUD compiles your folder directly, nothing to deploy. " +
+            r.Note = $"This session runs in the HUD source, {src}: the HUD compiles your folder directly, nothing to deploy. " +
                      "If you work in a worktree (entered after the session started, so this server still runs from the main checkout), pass worktree=<its absolute path>.";
             if (reload) r.Reload = await Reload(bridges, folder, PickGames(r, game), $"reload {folder}", ct);
             return Finish(r, "unchanged", r.Reload?.Ok != false, null);
@@ -139,12 +157,12 @@ public static class DeployTools
         if (r.Edited.Uncommitted is { Count: > 0 } wip)
             r.Warnings.Add($"{wip.Count} uncommitted change(s) in your worktree are NOT deployed (only commits are): {string.Join(", ", wip.Take(5))}{(wip.Count > 5 ? ", ..." : "")}. Commit them and deploy again.");
         if (mainHead.Changed.Count > 0)
-            return Finish(r, "refused", false, $"The main checkout's {folder} has {mainHead.Changed.Count} uncommitted change(s) ({string.Join(", ", mainHead.Changed.Take(5))}): someone is editing there. Nothing was touched.");
+            return Finish(r, "refused", false, $"{folder} in {src} has {mainHead.Changed.Count} uncommitted change(s) ({string.Join(", ", mainHead.Changed.Take(5))}): someone is editing there. Nothing was touched.");
         if (state != null && mainHead.Sha != state.DeployedSha)
-            r.Warnings.Add($"The main checkout moved since the last deploy ({Short(state.DeployedSha)} -> {Short(mainHead.Sha)}); restore will return to {state.BeforeBranch ?? Short(state.BeforeSha)} as first recorded.");
+            r.Warnings.Add($"{folder} in {src} moved since the last deploy ({Short(state.DeployedSha)} -> {Short(mainHead.Sha)}); restore will return to {state.BeforeBranch ?? Short(state.BeforeSha)} as first recorded.");
         if (mainHead.Sha == r.Edited.Commit)
         {
-            r.Note = $"The main checkout is already at {Short(mainHead.Sha)}.";
+            r.Note = $"{folder} in {src} is already at {Short(mainHead.Sha)}.";
             // Our deploy without its lease (the board write failed, or it predates the board): record it now.
             if (state != null && state.DeployedSha == mainHead.Sha && (owner.Incident == null || owner.Incident.OwnerPid != SessionIdentity.Pid))
                 try
@@ -160,18 +178,24 @@ public static class DeployTools
         }
 
         string? leaseId = null;
+        IDisposable? srcLock = null;
         var g = PickGames(r, game);
         try
         {
             leaseId = await Lease(bridges, g.FirstOrDefault(), $"deploying {folder} {Short(r.Edited.Commit)} from {SessionIdentity.Label}", ct);
+            // One change to the HUD source at a time (hud-live.ps1 sync, the F8 sync, other deploys).
+            try { srcLock = HudSource.Lock(srcRoot, $"deploy_plugin {folder} {Short(r.Edited.Commit)}", LockWait); }
+            catch (IOException ex) { return Finish(r, "refused", false, $"{ex.Message}. Nothing was touched: try again in a minute."); }
+            if (PluginGit.ReadHead(main, out _) is { } now && now.Sha != mainHead.Sha)
+                return Finish(r, "refused", false, $"{folder} in {src} moved to {Short(now.Sha)} while this deploy waited (a sync or another deploy). Nothing was touched: run deploy_plugin again.");
             // Fetch the worktree's HEAD by path (a local fetch: no remote, no push), then check it out detached.
             var fetch = PluginGit.Run(main, "fetch", "--quiet", "--no-tags", edited, "HEAD");
-            if (!fetch.Ok) return Finish(r, "failed", false, $"git fetch from {edited} into the main checkout failed: {fetch.Err}");
+            if (!fetch.Ok) return Finish(r, "failed", false, $"git fetch from {edited} into {src} failed: {fetch.Err}");
             var got = PluginGit.Run(main, "rev-parse", "FETCH_HEAD").Line;
             if (got != r.Edited.Commit) return Finish(r, "failed", false, $"Fetched {Short(got)}, expected {Short(r.Edited.Commit)} (the worktree moved meanwhile?). Nothing checked out.");
             var before = state ?? new PluginGit.DeployState { BeforeBranch = mainHead.Branch, BeforeSha = mainHead.Sha };
             var co = PluginGit.Run(main, "checkout", "--quiet", "--detach", got);
-            if (!co.Ok) return Finish(r, "failed", false, $"git checkout {Short(got)} in the main checkout failed (it is still at {Short(mainHead.Sha)}): {co.Err}");
+            if (!co.Ok) return Finish(r, "failed", false, $"git checkout {Short(got)} in {src} failed (it is still at {Short(mainHead.Sha)}): {co.Err}");
             before.Plugin = folder; before.DeployedSha = got; before.DeployedBranch = r.Edited.Branch; before.Subject = r.Edited.Subject;
             before.By = SessionIdentity.Label; before.From = here; before.At = DateTimeOffset.UtcNow;
             PluginGit.WriteState(main, before);
@@ -199,7 +223,8 @@ public static class DeployTools
         finally
         {
             // Released before reloading: the reload is itself a blocker while it compiles, and our own lease would hold a
-            // bridge restart back.
+            // bridge restart back. The reload only reads the tree, so the source lock goes too.
+            srcLock?.Dispose();
             if (leaseId != null) await Release(bridges, g.FirstOrDefault(), leaseId, ct);
         }
         if (reload) r.Reload = await Reload(bridges, folder, g, $"deploy {folder} {Short(r.Main.Commit)}", ct);
@@ -210,26 +235,33 @@ public static class DeployTools
     private static async Task<CallToolResult> Restore(BridgeRegistry bridges, DeployResult r, string main, PluginGit.Head mainHead,
         PluginGit.DeployState? state, bool reload, string? game, string? takeover, CancellationToken ct)
     {
+        var src = r.Source != null ? HudSource.Describe(r.Source) : "the HUD source";
         if (state == null)
         {
-            if (mainHead.Branch != null)
-                try { DeployIncidents.Restored(r.Plugin, $"the main checkout's {r.Plugin} is on {mainHead.Branch}"); }
+            // Nothing recorded and not detached off origin/main: no deploy to hold (a submodule update leaves it detached
+            // at the recorded commit, which is not a deploy).
+            if (mainHead.Branch != null || PluginGit.Run(main, "merge-base", "--is-ancestor", mainHead.Sha, "origin/main").Code == 0)
+                try { DeployIncidents.Restored(r.Plugin, $"{r.Plugin} in {src} is at {Short(mainHead.Sha)}{(mainHead.Branch != null ? $" on {mainHead.Branch}" : " (on origin/main)")}"); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { r.Warnings.Add($"The incident board wasn't updated ({ex.Message})."); }
-            return Finish(r, "unchanged", true, $"Nothing deployed into the main checkout's {r.Plugin}: it is at {Short(mainHead.Sha)}{(mainHead.Branch != null ? $" on {mainHead.Branch}" : " (detached; deploy_plugin recorded nothing to return to: switch it back by hand, or deploy over it)")}.");
+            return Finish(r, "unchanged", true, $"Nothing deployed into {r.Plugin} in {src}: it is at {Short(mainHead.Sha)}{(mainHead.Branch != null ? $" on {mainHead.Branch}" : " (detached; deploy_plugin recorded nothing to return to: switch it back by hand, or deploy over it)")}.");
         }
         if (mainHead.Changed.Count > 0)
-            return Finish(r, "refused", false, $"The main checkout's {r.Plugin} has {mainHead.Changed.Count} uncommitted change(s) ({string.Join(", ", mainHead.Changed.Take(5))}): not touched. Commit or stash them there first.");
+            return Finish(r, "refused", false, $"{r.Plugin} in {src} has {mainHead.Changed.Count} uncommitted change(s) ({string.Join(", ", mainHead.Changed.Take(5))}): not touched. Commit or stash them there first.");
         if (mainHead.Sha != state.DeployedSha)
-            return Finish(r, "refused", false, $"The main checkout's {r.Plugin} is at {Short(mainHead.Sha)}, not the deployed {Short(state.DeployedSha)}: someone moved it since. Left as is (the deploy record stays: check it, then delete {PluginGit.StatePath(main)} by hand).");
+            return Finish(r, "refused", false, $"{r.Plugin} in {src} is at {Short(mainHead.Sha)}, not the deployed {Short(state.DeployedSha)}: someone moved it since. Left as is (the deploy record stays: check it, then delete {PluginGit.StatePath(main)} by hand).");
         var g = PickGames(r, game);
         string? leaseId = null;
+        IDisposable? srcLock = null;
         try
         {
             leaseId = await Lease(bridges, g.FirstOrDefault(), $"restoring {r.Plugin} to {state.BeforeBranch ?? Short(state.BeforeSha)}", ct);
+            if (r.Source != null)
+                try { srcLock = HudSource.Lock(r.Source, $"deploy_plugin restore {r.Plugin}", LockWait); }
+                catch (IOException ex) { return Finish(r, "refused", false, $"{ex.Message}. Nothing was touched: try again in a minute."); }
             var co = state.BeforeBranch != null && PluginGit.Run(main, "rev-parse", "--verify", "--quiet", $"refs/heads/{state.BeforeBranch}").Ok
                 ? PluginGit.Run(main, "checkout", "--quiet", state.BeforeBranch)
                 : PluginGit.Run(main, "checkout", "--quiet", "--detach", state.BeforeSha);
-            if (!co.Ok) return Finish(r, "failed", false, $"git checkout in the main checkout failed (still at {Short(mainHead.Sha)}): {co.Err}");
+            if (!co.Ok) return Finish(r, "failed", false, $"git checkout in {src} failed (still at {Short(mainHead.Sha)}): {co.Err}");
             PluginGit.WriteState(main, null);
             var back = state.BeforeBranch ?? Short(state.BeforeSha);
             try { DeployIncidents.Restored(r.Plugin, $"restored to {back} by {SessionIdentity.Label}" + (takeover != null ? $" ({takeover})" : "")); }
@@ -241,6 +273,7 @@ public static class DeployTools
         }
         finally
         {
+            srcLock?.Dispose();
             if (leaseId != null) await Release(bridges, g.FirstOrDefault(), leaseId, ct);
         }
         if (reload) r.Reload = await Reload(bridges, r.Plugin, g, $"restore {r.Plugin}", ct);
@@ -358,15 +391,20 @@ public static class DeployTools
     private static string StatusNote(DeployResult r, bool inMain)
     {
         var parts = new List<string>();
-        if (inMain) parts.Add("This session runs in the main checkout: the HUD compiles your folder directly.");
+        var src = r.Source != null ? HudSource.Describe(r.Source) : "the HUD source";
+        if (inMain) parts.Add($"This session runs in the HUD source, {src}: the HUD compiles your folder directly.");
         else if (r.Edited != null && r.Main != null)
             parts.Add(r.Edited.Commit == r.Main.Commit
-                ? $"The main checkout is at your commit {Short(r.Main.Commit)}."
-                : $"The main checkout is at {Short(r.Main.Commit)}, you are at {Short(r.Edited.Commit)}: the HUD doesn't have your code (deploy_plugin).");
+                ? $"The HUD source, {src}, is at your commit {Short(r.Main.Commit)}."
+                : $"The HUD source, {src}, is at {Short(r.Main.Commit)}, you are at {Short(r.Edited.Commit)}: the HUD doesn't have your code (deploy_plugin).");
         if (r.Deployed != null)
             parts.Add($"Deployed by {r.Deployed.By} ({Short(r.Deployed.Commit)}, {r.Deployed.At:u}); restore returns it to {r.Deployed.BeforeBranch ?? Short(r.Deployed.BeforeCommit)}.");
         if (r.Pointer != null && r.Main != null && r.Pointer != r.Main.Commit)
-            parts.Add($"The scaffolding main checkout records {Short(r.Pointer)} for Plugins/{r.Plugin}, so it shows the plugin as modified until restore or a merged PR plus pointer bump. Don't commit that pointer from the main checkout by accident.");
+            parts.Add(r.SourceTree == "hud-live"
+                ? r.Deployed != null
+                    ? $"hud-live records {Short(r.Pointer)} for Plugins/{r.Plugin}; until restore, hud-live.ps1 sync and the F8 sync leave this plugin alone."
+                    : $"hud-live records {Short(r.Pointer)} for Plugins/{r.Plugin} (it moved meanwhile): tools\\hud-live.ps1 sync brings the plugin there."
+                : $"The scaffolding main checkout records {Short(r.Pointer)} for Plugins/{r.Plugin}, so it shows the plugin as modified until restore or a merged PR plus pointer bump. Don't commit that pointer from the main checkout by accident.");
         return string.Join(" ", parts);
     }
 
@@ -376,7 +414,7 @@ public static class DeployTools
         if (note != null) r.Note = r.Note != null ? r.Note + " " + note : note;
         var lines = new List<string> { $"{r.Plugin}: {status}{(r.Games.Count > 0 ? $" (HUD: {string.Join(", ", r.Games)})" : "")}" };
         if (r.Edited != null) lines.Add($"  you edited:    {Short(r.Edited.Commit)} {r.Edited.Branch ?? "(detached)"} {r.Edited.Subject}");
-        if (r.Main != null) lines.Add($"  main checkout: {Short(r.Main.Commit)} {r.Main.Branch ?? "(detached)"} {r.Main.Subject}");
+        if (r.Main != null) lines.Add($"  HUD source:    {Short(r.Main.Commit)} {r.Main.Branch ?? "(detached)"} {r.Main.Subject}{(r.SourceTree != null ? $" [{r.SourceTree}]" : "")}");
         if (r.HudRuns != null) lines.Add("  " + r.HudRuns);
         foreach (var w in r.Warnings) lines.Add("  ! " + w);
         if (r.Note != null) lines.Add("  " + r.Note);

@@ -28,7 +28,8 @@ public static partial class HudDevTools
                  "compile (the HUD never deletes it). Reads HUD folders on disk: works with the game and HUD closed. " +
                  "Use after a HUD restart (or the plugin's Reload button) to confirm an edit compiled: the HUD " +
                  "compiles source plugins at startup, not on save. Each plugin's source says which folder the HUD " +
-                 "compiles (the junction target: always the scaffolding's MAIN checkout, never a worktree), its git " +
+                 "compiles (the junction target, in the HUD source tree: hud-live, or the scaffolding's main checkout before " +
+                 "tools\\hud-live.ps1 cutover; never a worktree) and which tree that is, its git " +
                  "commit and branch, uncommitted files, a deploy_plugin deploy if one is active, and changedSinceCompile " +
                  "when the folder changed after the HUD compiled it. With the HUD running, each install also carries " +
                  "'instrumentation': the Harmony patches of running measurements (profile_plugin, pipeline_trace), anything " +
@@ -58,10 +59,15 @@ public static partial class HudDevTools
                 }
                 plugins.Add(o);
             }
+            // The tree(s) this HUD's junctions point into: one, unless a cutover to hud-live is half done.
+            var trees = HudSource.Links([(hud.Game, hud.Root)]).Where(l => l.Root != null)
+                .GroupBy(l => l.Root!, StringComparer.OrdinalIgnoreCase)
+                .Select(g => $"{HudSource.Describe(g.Key)}: {g.Count()} plugin(s)").ToList();
             var install = new JObject
             {
                 ["game"] = hud.Game,
                 ["hudRoot"] = hud.Root,
+                ["compilesFrom"] = trees.Count > 0 ? string.Join("; ", trees) : null,
                 ["run"] = RunInfo(run),
                 ["plugins"] = plugins,
             };
@@ -394,6 +400,7 @@ public static partial class HudDevTools
         var target = PluginGit.Resolve(p.Path);
         if (!PluginGit.IsRepo(target)) return null;
         var o = new JObject { ["path"] = target };
+        if (HudSource.CheckoutOf(target) is { } root) o["tree"] = HudSource.Kind(root);
         if (PluginGit.ReadHead(target, out var why) is not { } h) { o["error"] = why; return o; }
         o["commit"] = h.Sha.Length >= 7 ? h.Sha[..7] : h.Sha;
         o["branch"] = h.Branch;
@@ -402,7 +409,7 @@ public static partial class HudDevTools
         if (h.Changed.Count > 0) o["uncommitted"] = new JArray(h.Changed.Take(20));
         if (PluginGit.NewestSource(target) is { } edit) o["newestEdit"] = edit.ToString("O");
         if (target.Contains(@"\.claude\worktrees\", StringComparison.OrdinalIgnoreCase))
-            o["note"] = "This junction points into a worktree, not the main checkout.";
+            o["note"] = "This junction points into a worktree, not the HUD source (hud-live or the main checkout).";
         if (PluginGit.ReadState(target) is { } d)
             o["deployed"] = $"deploy_plugin by {d.By} from {d.From} at {d.At:u}: {(d.DeployedSha.Length >= 7 ? d.DeployedSha[..7] : d.DeployedSha)} {d.Subject} (restore returns to {d.BeforeBranch ?? d.BeforeSha[..Math.Min(7, d.BeforeSha.Length)]})";
         // The deploy's lease on the incident board, and whether its session is gone (Incidents/DeployIncidents.cs).

@@ -666,5 +666,63 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check($"lint: JitOptimized({asm.GetName().Name}) == {expected} ({flags})", ExileApiMcp.Hud.PluginLint.JitOptimized(asm.Location) == expected);
 }
 
+// ── HUD source: which tree a junction points into, and the lock that serializes changes to it (Hud/HudSource.cs) ──
+{
+    var tmp = Path.Combine(Path.GetTempPath(), "hexile-hudsource-test-" + Guid.NewGuid().ToString("N")[..8]);
+    try
+    {
+        var live = Path.Combine(tmp, "hud-live");
+        var main = Path.Combine(tmp, "main");
+        Directory.CreateDirectory(Path.Combine(live, ".git"));
+        Directory.CreateDirectory(Path.Combine(live, "Plugins", "Whats A Route"));
+        File.WriteAllText(Path.Combine(live, ".git", ExileApiMcp.Hud.HudSource.HudLiveMarker), "{}");
+        Directory.CreateDirectory(Path.Combine(main, ".git"));
+        Directory.CreateDirectory(Path.Combine(main, "Plugins", "Whats A Route"));
+        Check("hud source: a plugin folder's checkout", ExileApiMcp.Hud.HudSource.CheckoutOf(Path.Combine(live, "Plugins", "Whats A Route")) == live
+            && ExileApiMcp.Hud.HudSource.CheckoutOf(Path.Combine(tmp, "elsewhere", "X")) == null);
+        Check("hud source: hud-live by its marker, a .git folder is the main checkout",
+            ExileApiMcp.Hud.HudSource.Kind(live) == "hud-live" && ExileApiMcp.Hud.HudSource.Kind(main) == "main-checkout"
+            && ExileApiMcp.Hud.HudSource.Kind(@"C:\x\.claude\worktrees\agent-1") == "worktree");
+
+        // Junctions in a fake HUD: one into hud-live, one into the main checkout (a half-done cutover).
+        var hud = Path.Combine(tmp, "hud");
+        Directory.CreateDirectory(Path.Combine(hud, "Plugins", "Source"));
+        Directory.CreateDirectory(Path.Combine(main, "Plugins", "Whats An AI Bridge"));
+        // Junctions, as the HUD installs have (symlinks need Developer Mode or elevation; junctions don't).
+        bool Junction(string link, string target)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var a in new[] { "/c", "mklink", "/J", link, target }) psi.ArgumentList.Add(a);
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            p.WaitForExit(10_000);
+            return Directory.Exists(link);
+        }
+        var linked = Junction(Path.Combine(hud, "Plugins", "Source", "Whats A Route"), Path.Combine(live, "Plugins", "Whats A Route"))
+                     && Junction(Path.Combine(hud, "Plugins", "Source", "Whats An AI Bridge"), Path.Combine(main, "Plugins", "Whats An AI Bridge"));
+        if (linked)
+        {
+            var huds = new[] { ("poe2", hud) };
+            Check("hud source: a folder's tree from its junction", ExileApiMcp.Hud.HudSource.RootFor("whats a route", huds) == live
+                && ExileApiMcp.Hud.HudSource.RootFor("Whats An AI Bridge", huds) == main && ExileApiMcp.Hud.HudSource.RootFor("Nope", huds) == null);
+            Check("hud source: both trees of a half-done cutover", ExileApiMcp.Hud.HudSource.Roots(huds).Count == 2);
+        }
+        else Check("hud source: mklink /J made the test junctions", false);
+
+        // The lock: a second taker waits, then names the holder.
+        var repo = Path.Combine(tmp, "repo");
+        Directory.CreateDirectory(repo);
+        ExileApiMcp.Hud.PluginGit.Run(repo, "init", "-q");
+        using (ExileApiMcp.Hud.HudSource.Lock(repo, "first change", TimeSpan.FromSeconds(1)))
+        {
+            string? why = null;
+            try { using var second = ExileApiMcp.Hud.HudSource.Lock(repo, "second change", TimeSpan.FromMilliseconds(600)); }
+            catch (IOException ex) { why = ex.Message; }
+            Check("hud source lock: a second change is refused, naming the first", why != null && why.Contains("first change"), why);
+        }
+        using (ExileApiMcp.Hud.HudSource.Lock(repo, "after release", TimeSpan.FromSeconds(1))) Check("hud source lock: free again once released", true);
+    }
+    finally { try { Directory.Delete(tmp, true); } catch { } }
+}
+
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures;
