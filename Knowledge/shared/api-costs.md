@@ -21,6 +21,17 @@ Measured on PoE2 (ExileCore2), 2026-10-09, in town with ~600 entities loaded, wi
 
 **Worked example.** Whats An Azmeri Wisp read `DistancePlayer` on every entity (~550) in two passes: 550 x 2.9 µs x 2 ≈ 3.2 ms per frame, which matched the profile (2.9 ms). After filtering on `Path`/`Type` first and scanning at 20 Hz it was 33x cheaper.
 
+## The JIT runs source plugins unoptimized (fix: AssemblyInfo.cs)
+The HUD's PluginCompiler builds source plugins in **Debug** (both games). Roslyn then gives the assembly `DebuggableAttribute(Default | DisableOptimizations | EnableEditAndContinue | IgnoreSymbolStoreSequencePoints)` and the JIT runs every method of the plugin unoptimized. Roslyn only synthesizes that attribute when the assembly declares none, so one file fixes it:
+```csharp
+// AssemblyInfo.cs, in the plugin folder
+[assembly: System.Diagnostics.Debuggable(System.Diagnostics.DebuggableAttribute.DebuggingModes.IgnoreSymbolStoreSequencePoints)]
+```
+- **Measured** (PoE2, 2026-10-11): Whats A Health Bar with 500 bars, Render 450 -> 101 us, Tick 43 -> 14 us. The gain is in the plugin's own code (loops, math, collections); time spent inside HUD calls doesn't change.
+- **Check it live:** `run_csharp` `AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetCustomAttributes(typeof(DebuggableAttribute), false))` -> `DebuggingFlags`; `IgnoreSymbolStoreSequencePoints` alone means optimized. **Offline:** `hud_plugin_lint` reports `jitOptimized` per compiled plugin.
+- Breakpoints still bind; a debugger may show locals as optimized away.
+- What a plugin can't fix: on PoE2, `ExileCore2.dll`, `GameOffsets2.dll` and `run_csharp` scripts also carry DisableOptimizations.
+
 ## UI elements (first per element per frame, PoE2, worker thread, 5-run medians)
 | Call | cost | Cheaper equivalent |
 |---|---|---|

@@ -42,6 +42,47 @@ public static class PluginLint
     private static readonly Dictionary<short, OpCode> Ops = typeof(OpCodes).GetFields()
         .Select(f => (OpCode)f.GetValue(null)!).ToDictionary(o => o.Value);
 
+    /// <summary>Advice when a compiled plugin carries DisableOptimizations (knowledge pack shared/api-costs).</summary>
+    public const string JitAdvice = "compiled with DisableOptimizations (the HUD builds source plugins in Debug): the JIT runs every method unoptimized, ~2-4x slower. Add AssemblyInfo.cs with [assembly: System.Diagnostics.Debuggable(System.Diagnostics.DebuggableAttribute.DebuggingModes.IgnoreSymbolStoreSequencePoints)]";
+
+    /// <summary>
+    /// Whether the JIT optimizes this DLL: false when its assembly-level DebuggableAttribute has DisableOptimizations
+    /// (Roslyn synthesizes it in Debug builds unless the assembly declares its own), true otherwise.
+    /// </summary>
+    public static bool JitOptimized(string dllPath)
+    {
+        using var pe = new PEReader(File.OpenRead(dllPath));
+        var md = pe.GetMetadataReader();
+        foreach (var ah in md.GetAssemblyDefinition().GetCustomAttributes())
+        {
+            var attr = md.GetCustomAttribute(ah);
+            if (AttributeTypeName(md, attr.Constructor) != "DebuggableAttribute") continue;
+            var blob = md.GetBlobReader(attr.Value);
+            if (blob.ReadUInt16() != 1) continue; // prolog
+            // Two constructors: (DebuggingModes modes), or (bool isJITTrackingEnabled, bool isJITOptimizerDisabled).
+            if (blob.RemainingBytes >= 4 + 2) return (blob.ReadInt32() & 0x100) == 0; // DebuggingModes.DisableOptimizations
+            blob.ReadBoolean();
+            return !blob.ReadBoolean();
+        }
+        return true;
+    }
+
+    private static string? AttributeTypeName(MetadataReader md, EntityHandle ctor)
+    {
+        var parent = ctor.Kind switch
+        {
+            HandleKind.MemberReference => md.GetMemberReference((MemberReferenceHandle)ctor).Parent,
+            HandleKind.MethodDefinition => md.GetMethodDefinition((MethodDefinitionHandle)ctor).GetDeclaringType(),
+            _ => default,
+        };
+        return parent.Kind switch
+        {
+            HandleKind.TypeReference => md.GetString(md.GetTypeReference((TypeReferenceHandle)parent).Name),
+            HandleKind.TypeDefinition => md.GetString(md.GetTypeDefinition((TypeDefinitionHandle)parent).Name),
+            _ => null,
+        };
+    }
+
     /// <summary>Lint one plugin DLL. Entry points: methods named Tick or Render (and their lambdas/callees).</summary>
     public static List<Finding> Lint(string dllPath)
     {

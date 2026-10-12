@@ -598,5 +598,13 @@ Start Port    End Port
     Check("plugin call: params carry name and scalar args", ps["name"]?.ToString() == "WhatsAHealthBar.Preview" && ps["args"] is JArray { Count: 1 } && ExileApiMcp.Tools.PluginCall.Params("M")["args"] == null);
 }
 
+// ── hud_plugin_lint: DebuggableAttribute read from metadata agrees with reflection (Debug and Release builds) ──
+foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(JObject).Assembly })
+{
+    var flags = (asm.GetCustomAttributes(typeof(System.Diagnostics.DebuggableAttribute), false).FirstOrDefault() as System.Diagnostics.DebuggableAttribute)?.DebuggingFlags ?? 0;
+    var expected = (flags & System.Diagnostics.DebuggableAttribute.DebuggingModes.DisableOptimizations) == 0;
+    Check($"lint: JitOptimized({asm.GetName().Name}) == {expected} ({flags})", ExileApiMcp.Hud.PluginLint.JitOptimized(asm.Location) == expected);
+}
+
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures;
