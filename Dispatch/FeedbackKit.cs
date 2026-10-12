@@ -219,9 +219,13 @@ public static class FeedbackKit
         }
     }
 
+    private static readonly HashSet<string> EndedStates = new(StringComparer.OrdinalIgnoreCase) { "stopped", "exited", "failed", "error", "killed", "crashed" };
+
     /// <summary>One background session from `claude agents --json --all`: its session id, its state (working | blocked |
-    /// done ...), and whether its process is alive (a stopped or exited one has no pid). Null when it is not listed.</summary>
-    /// Throws FormatException when the output is not that list (the CLI failed: not the same as "not listed").</summary>
+    /// done ...), and whether its process is alive. Null when it is not listed.
+    /// Throws FormatException when the output is not that list (the CLI failed: not the same as "not listed").
+    /// The CLI (2.1.295) lists a running background job without a pid, so a pid means alive and, without one, so does
+    /// any state but an ended one (stopped, exited, failed ...).</summary>
     public static (string? SessionId, string? State, bool Alive)? ParseAgent(string json, string id)
     {
         int from = json.IndexOf('['), to = json.LastIndexOf(']');
@@ -233,7 +237,10 @@ public static class FeedbackKit
             {
                 if (!e.TryGetProperty("id", out var i) || i.GetString() != id) continue;
                 string? Str(string n) => e.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-                return (Str("sessionId"), Str("state"), e.TryGetProperty("pid", out var p) && p.ValueKind == JsonValueKind.Number);
+                var state = Str("state");
+                var alive = e.TryGetProperty("pid", out var p) && p.ValueKind == JsonValueKind.Number
+                    || state != null && !EndedStates.Contains(state);
+                return (Str("sessionId"), state, alive);
             }
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)

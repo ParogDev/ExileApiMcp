@@ -515,9 +515,10 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
 
     // ── Watching a visible (background, Remote Control) handler ──────
 
-    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(5), ListGrace = TimeSpan.FromSeconds(45), StopRetry = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan PollEvery = TimeSpan.FromSeconds(5), ListGrace = TimeSpan.FromSeconds(45), DoneGrace = TimeSpan.FromSeconds(15), StopRetry = TimeSpan.FromMinutes(1);
     private DateTime _nextPoll = DateTime.MinValue, _nextReap = DateTime.MinValue;
     private readonly HashSet<long> _toldBlocked = new();
+    private readonly Dictionary<long, DateTime> _doneSince = new();
     private readonly Dictionary<string, FeedbackKit.TranscriptState> _transcripts = new();
 
     /// <summary>
@@ -563,11 +564,12 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
                 await ReplyAsync(h.Seq, "working", $"#{h.Seq} waits for an answer: open \"{h.Name}\" in Claude (claude.ai/code or the Claude app).", ct);
             return;
         }
-        else if (agent.Value.State == "done" && (t.TurnEnded || !agent.Value.Alive)) { }   // its turn ended: the answer is written
+        else if (agent.Value.State == "done" && (t.TurnEnded || !agent.Value.Alive || DoneFor(h.Seq) > DoneGrace)) { }   // its turn ended: the answer is written
         else if (!agent.Value.Alive)
             error = $"its session exited before finishing (state {agent.Value.State ?? "unknown"})";
-        else return;   // still working
+        else return;   // still working (or done, and the transcript catches up within DoneGrace)
 
+        _doneSince.Remove(h.Seq);
         var failed = error != null;
         h.StopAt = DateTimeOffset.UtcNow + StopRetry;   // ReapAsync stops it then if the stop below doesn't
         // A good answer goes out first (the player doesn't wait for the stop); a failed or over-time session is stopped
@@ -580,6 +582,14 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         if (!failed) await StopSessionAsync(h, ct);
         SaveHandler(h);
         if (h.Stopped) RemoveWorktree(h);
+    }
+
+    /// <summary>How long the CLI has listed this handler as done: its turn is over even when the transcript doesn't say
+    /// so yet (a live background job has no pid to tell "done and idle" from "exited").</summary>
+    private TimeSpan DoneFor(long seq)
+    {
+        if (!_doneSince.TryGetValue(seq, out var since)) _doneSince[seq] = since = DateTime.UtcNow;
+        return DateTime.UtcNow - since;
     }
 
     /// <summary>Finished visible sessions a stop didn't end (the CLI failed): stopped again a minute later (the transcript

@@ -411,12 +411,18 @@ Start Port    End Port
     const string agentsJson = """
         [ { "pid": 1, "kind": "interactive", "sessionId": "s0", "status": "busy" },
           { "pid": 26424, "id": "98b400ca", "kind": "background", "sessionId": "98b400ca-5279", "status": "idle", "state": "done" },
-          { "id": "c37e5f7f", "kind": "background", "sessionId": "c37e5f7f-3394", "state": "done" } ]
+          { "id": "c37e5f7f", "kind": "background", "sessionId": "c37e5f7f-3394", "state": "stopped" },
+          { "id": "832c4db8", "kind": "background", "startedAt": 1791779738464, "state": "working" },
+          { "id": "bc5a8b97", "kind": "background", "state": "done" } ]
         exit 0
         """;
     var live = ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "98b400ca");
     var stopped = ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "c37e5f7f");
     Check("agents: state, session id, alive by pid", live is { SessionId: "98b400ca-5279", State: "done", Alive: true } && stopped is { Alive: false });
+    // CLI 2.1.295 lists a running background job without a pid: reading that as "exited" stopped F8 #346 at its first poll.
+    Check("agents: no pid, a running state is alive",
+        ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "832c4db8") is { State: "working", Alive: true }
+        && ExileApiMcp.Dispatch.FeedbackKit.ParseAgent(agentsJson, "bc5a8b97") is { State: "done", Alive: true });
     Check("worktree: the CLI's lock pid, not another lock's",
         ExileApiMcp.Dispatch.FeedbackKit.StaleLockPid("fatal: cannot remove a locked working tree, lock reason: claude session route-f8-138 (pid 25444)\nuse 'remove -f -f'") == 25444
         && ExileApiMcp.Dispatch.FeedbackKit.StaleLockPid("fatal: cannot remove a locked working tree, lock reason: on a USB stick") == null);
