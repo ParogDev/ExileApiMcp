@@ -25,7 +25,9 @@ namespace ExileApiMcp.Dispatch;
 /// - headless `claude -p` when the background session can't start (the card says which one runs).
 /// Both start slim (FeedbackKit.SlimArguments): the standing brief as the system prompt, no CLAUDE.md or memory, only the
 /// tools a route fix needs. The final message goes to the card once (pubsub.claim stage reply first, and not at all when
-/// the handler already said done), and the worktree is removed when it holds no unmerged work.
+/// the handler already said done), and the worktree is removed when it holds no unmerged work. Before that answer, the
+/// handler's merged fix is brought into the HUD (MainSync: pull the main checkout, update Whats A Route, reload_plugin):
+/// handlers stop at "merged", since Claude Code's worktree isolation refuses every command aimed at the main checkout.
 ///
 /// One handler at a time (they share route.live.json): later presses wait, and the card says so. Every link that can break
 /// is said on the card and raised as incident feedback-dispatch:machine (CLI not found, not logged in, the session
@@ -505,7 +507,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             error = h.Error ?? why + (result != null ? $": {result}" : "") + (err.Length > 0 ? $" (stderr: {err})" : "");
         }
         h.SessionId = sessionId;
+        var sync = await SyncMainAsync(h, ct);
         await FinishAsync(h, result, failed, error, ct);
+        await TellSyncFailedAsync(h, sync, ct);
         RemoveWorktree(h);
     }
 
@@ -569,7 +573,10 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         // A good answer goes out first (the player doesn't wait for the stop); a failed or over-time session is stopped
         // first, so the card's "was stopped" is true and nothing keeps working once the next press starts.
         if (failed) await StopSessionAsync(h, ct);
+        // The merged fix goes into the HUD before the answer, so "fixed" on the card is true in game.
+        var sync = await SyncMainAsync(h, ct);
         await FinishAsync(h, t.LastText, failed, error, ct);
+        await TellSyncFailedAsync(h, sync, ct);
         if (!failed) await StopSessionAsync(h, ct);
         SaveHandler(h);
         if (h.Stopped) RemoveWorktree(h);
@@ -742,14 +749,55 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         catch { return true; }   // can't tell: leave the lock alone
     }
 
-    private static (int Code, string Output) Git(string dir, string args)
+    internal static (int Code, string Output) Git(string dir, string args, int timeoutMs = 30000)
     {
         var psi = new ProcessStartInfo("git", $"-C \"{dir}\" {args}") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        psi.Environment["GIT_TERMINAL_PROMPT"] = "0";   // a credential prompt would hang with no one to answer it
         using var p = Process.Start(psi)!;
         var o = p.StandardOutput.ReadToEndAsync();
         var e = p.StandardError.ReadToEndAsync();
-        if (!p.WaitForExit(30000)) { try { p.Kill(true); } catch { } return (-1, "git timed out"); }
+        if (!p.WaitForExit(timeoutMs)) { try { p.Kill(true); } catch { } return (-1, $"git {args.Split(' ')[0]} timed out after {timeoutMs / 1000} s"); }
         return (p.ExitCode, o.Result + e.Result);
+    }
+
+    // ── Bringing a handler's merged fix into the HUD ─────────────────
+
+    /// <summary>Once per handler, when it ended: the main checkout pulled and Whats A Route reloaded when origin/main moved
+    /// (MainSync). Handlers can't do it themselves (worktree isolation refuses commands aimed at the main checkout). Kept
+    /// in state.json, so a step retried after a bridge failure doesn't run it again.</summary>
+    private async Task<MainSync.Outcome?> SyncMainAsync(FeedbackHandlerState h, CancellationToken ct)
+    {
+        if (h.Sync != null) return h.SyncFailed == true ? new MainSync.Outcome(true, h.Sync, h.Sync, h.SyncFix) : null;
+        if (Repo() is not { } repo) { h.Sync = "skipped: the main scaffolding checkout is unknown"; SaveHandler(h); return null; }
+        MainSync.Outcome o;
+        // The sync can take minutes (fetch, pull, a compile): the status file keeps being written meanwhile, or
+        // feedback_dispatcher would call this dispatcher not running.
+        (_status, _why) = ("syncing", $"bringing #{h.Seq}'s merged fix into the HUD (pull, submodule update, reload)");
+        using var beat = new CancellationTokenSource();
+        var beating = Task.Run(async () =>
+        {
+            while (!beat.IsCancellationRequested) { WriteStatus(); try { await Task.Delay(1000, beat.Token); } catch (OperationCanceledException) { } }
+        });
+        try { o = await Task.Run(() => MainSync.RunAsync(bridges, _game, repo, ct), ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            o = new MainSync.Outcome(true, $"syncing the main checkout failed: {ex.Message.Split('\n')[0]}", $"syncing the main checkout failed: {ex.Message.Split('\n')[0]}");
+        }
+        finally { beat.Cancel(); await beating; }
+        Console.Error.WriteLine($"[Dispatch] #{h.Seq}: sync: {o.Summary}");
+        h.Sync = o.Summary;
+        h.SyncFailed = o.Failed;
+        h.SyncFix = o.Fix;
+        SaveHandler(h);
+        return o.Failed ? o : null;
+    }
+
+    /// <summary>A failed sync goes on the card after the handler's answer (so it is the line left showing), by the
+    /// dispatcher that said the answer.</summary>
+    private async Task TellSyncFailedAsync(FeedbackHandlerState h, MainSync.Outcome? failed, CancellationToken ct)
+    {
+        if (failed == null || !h.Replied) return;
+        await ReplyAsync(h.Seq, "failed", MainSync.FailText(h.Seq, failed), ct);
     }
 
     // ── Replies, failures, status ────────────────────────────────────
