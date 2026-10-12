@@ -31,7 +31,7 @@ public static class MainSync
         string? after, before;
         bool pulled;
         IDisposable srcLock;
-        try { srcLock = HudSource.Lock(repo, $"F8 sync of {Plugin}", TimeSpan.FromSeconds(120)); }
+        try { srcLock = await HudSource.LockAsync(repo, $"F8 sync of {Plugin}", TimeSpan.FromSeconds(120), ct); }
         catch (IOException ex) { return Fail(Line(ex.Message), "Nothing changed: the next fix's sync, or tools\\hud-live.ps1 sync, brings it."); }
         using (srcLock)
         {
@@ -59,13 +59,20 @@ public static class MainSync
             if (before == pointer)
                 return new Outcome(false, pulled ? $"pulled {src}; {Plugin} unchanged at {Short(before)}" : $"{src} and {Plugin} ({Short(before)}) are up to date");
 
-            // A live deploy_plugin deploy of the plugin (another session trying a commit in the HUD) is left alone.
-            var owner = DeployIncidents.Owner(Plugin);
-            if (owner.Incident != null && !owner.Orphaned)
+            // A live deploy_plugin deploy of the plugin (another session trying a commit in the HUD) is left alone: live by
+            // its lease, or recorded in the submodule with no lease at all (its board write failed: deploy_plugin treats
+            // that as live too). Only an orphaned lease (its session gone) is replaced.
+            var owner = DeployIncidents.Owner(Plugin, sub);
+            var recorded = PluginGit.ReadState(sub);
+            if ((owner.Incident != null && !owner.Orphaned) || (owner.Incident == null && recorded != null))
+            {
+                var who = owner.Incident != null ? owner.Owner : recorded!.By;
+                var why = owner.Incident != null ? owner.Why : "recorded in the submodule, no lease on the incident board";
                 return pulled
-                    ? Fail($"{owner.Owner} has a deploy of {Plugin} in {src} ({owner.Why}), so the submodule was not updated",
-                        $"Once {owner.Owner} restores it (deploy_plugin action=restore), tools\\hud-live.ps1 sync (or the next fix's sync) brings the fix.")
-                    : new Outcome(false, $"{src} is up to date; {Plugin} is held by {owner.Owner}'s deploy");
+                    ? Fail($"{who} has a deploy of {Plugin} in {src} ({why}), so the submodule was not updated",
+                        $"Once {who}'s deploy is restored (deploy_plugin action=restore), tools\\hud-live.ps1 sync (or the next fix's sync) brings the fix.")
+                    : new Outcome(false, $"{src} is up to date; {Plugin} is held by {who}'s deploy");
+            }
 
             var update = FeedbackDispatcher.Git(repo, $"submodule update -- \"{SubmodulePath}\"", 120_000);
             if (update.Code != 0)
@@ -75,7 +82,7 @@ public static class MainSync
             // An orphaned deploy it just replaced: its record and its lease go, so restore can't later undo the fix.
             if (PluginGit.ReadState(sub) is { } orphan)
             {
-                try { PluginGit.WriteState(sub, null); DeployIncidents.Restored(Plugin, $"{orphan.By}'s orphaned deploy replaced by the F8 sync ({Short(after)})"); }
+                try { PluginGit.WriteState(sub, null); DeployIncidents.Restored(Plugin, $"{orphan.By}'s orphaned deploy replaced by the F8 sync ({Short(after)})", sub); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Console.Error.WriteLine($"[Dispatch] sync: clearing {orphan.By}'s orphaned deploy record: {ex.Message}"); }
             }
         }

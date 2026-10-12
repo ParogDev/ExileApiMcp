@@ -50,15 +50,26 @@ public static class DeployIncidents
         catch { return null; }
     }
 
-    public static OwnerState Owner(string folder) => Owner(IncidentStore.Read(), folder, IncidentStore.ReadHeartbeats());
+    /// <param name="dir">The copy of the folder asked about (the HUD source's plugin folder); a deploy recorded for another
+    /// copy (the other tree, after or during a cutover to hud-live) doesn't hold this one. Null: any copy.</param>
+    public static OwnerState Owner(string folder, string? dir = null) => Owner(IncidentStore.Read(), folder, IncidentStore.ReadHeartbeats(), dir);
 
-    public static OwnerState Owner(IncidentFile f, string folder, Dictionary<string, DateTime> beats)
+    public static OwnerState Owner(IncidentFile f, string folder, Dictionary<string, DateTime> beats, string? dir = null)
     {
         var i = IncidentLogic.OpenByKey(f, Key(folder));
         if (i == null) return new OwnerState(null, true, "no deploy on the incident board");
+        if (!IsFor(i, dir)) return new OwnerState(null, true, $"the deploy on the board is in another tree ({i.Get("mainPath")})");
         var (orphaned, why) = Judge(i, beats.TryGetValue(i.Id, out var b) ? b : null, PidAlive, DateTime.UtcNow);
         return new OwnerState(i, orphaned, why);
     }
+
+    /// <summary>The deploy incident is about this copy of the folder: its mainPath names <paramref name="dir"/>, or it names
+    /// none (raised before the board recorded it), or no copy was asked about.</summary>
+    public static bool IsFor(Incident i, string? dir) =>
+        dir == null || i.Get("mainPath")?.ToString() is not { Length: > 0 } at || SamePath(at, dir);
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>A deploy happened: this session owns deploy:&lt;folder&gt; now (an earlier owner's incident is resolved as taken over).</summary>
     public static Incident Deployed(string folder, string commit, string? subject, string? beforeBranch, string beforeSha, List<string> games,
@@ -91,7 +102,12 @@ public static class DeployIncidents
         return inc;
     }
 
-    public static void Restored(string folder, string note) => IncidentStore.ResolveKeys([Key(folder)], note);
+    /// <summary>Resolve deploy:&lt;folder&gt;, unless it is recorded for another copy of the folder than <paramref name="dir"/>.</summary>
+    public static void Restored(string folder, string note, string? dir = null)
+    {
+        if (dir != null && IncidentLogic.OpenByKey(IncidentStore.Read(), Key(folder)) is { } i && !IsFor(i, dir)) return;
+        IncidentStore.ResolveKeys([Key(folder)], note);
+    }
 
     /// <summary>The ids of the open deploy incidents this process owns (the monitor beats for them). On the shared HTTP server
     /// every caller's deploy carries this pid and the caller's label, while the monitor runs as no caller: it beats them all
@@ -152,33 +168,37 @@ public static class DeployIncidents
             // The plugin folders the HUDs compile (junction targets); with no junction at all, the main checkout's plugins.
             var dirs = HudSource.Links().Where(l => l.Root != null).Select(l => l.Target)
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            if (dirs.Count == 0 && MainRoot() is { } main && Directory.Exists(Path.Combine(main, "Plugins")))
+            var fromJunctions = dirs.Count > 0;
+            if (!fromJunctions && MainRoot() is { } main && Directory.Exists(Path.Combine(main, "Plugins")))
                 dirs = Directory.GetDirectories(Path.Combine(main, "Plugins")).ToList();
             if (dirs.Count == 0) return;
             var board = IncidentStore.Read();
+            // The commit each tree records per plugin (one ls-tree per tree): a plugin at it needs no merge-base process.
+            var pointers = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
             foreach (var dir in dirs)
             {
                 var folder = Path.GetFileName(dir);
-                var src = HudSource.CheckoutOf(dir) is { } root ? HudSource.Describe(root) : "the HUD source";
+                var root = HudSource.CheckoutOf(dir);
+                var src = root != null ? HudSource.Describe(root) : "the HUD source";
                 if (!PluginGit.IsRepo(dir)) continue;
                 var (branch, sha) = ReadHeadFile(dir);
                 var open = IncidentLogic.OpenByKey(board, Key(folder));
                 // A deploy recorded for another copy of this folder (a half-done cutover: the other tree) is not this one's.
-                if (open?.Get("mainPath")?.ToString() is { Length: > 0 } at
-                    && !string.Equals(Path.GetFullPath(at).TrimEnd('\\'), Path.GetFullPath(dir).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
-                    continue;
+                if (open != null && !IsFor(open, dir)) continue;
                 if (branch != null)
                 {
-                    if (open != null) Restored(folder, $"{folder} in {src} is back on {branch}");
+                    if (open != null) Restored(folder, $"{folder} in {src} is back on {branch}", dir);
                     continue;
                 }
                 if (sha == null) continue;
                 var state = PluginGit.ReadState(dir);
-                var onMain = PluginGit.Run(dir, "merge-base", "--is-ancestor", sha, "origin/main");
+                if (root != null && !pointers.ContainsKey(root)) pointers[root] = Pointers(root);
+                var atPointer = root != null && pointers[root].TryGetValue(folder, out var ptr) && ptr == sha;
+                var onMain = atPointer ? new PluginGit.GitResult(0, "", "") : PluginGit.Run(dir, "merge-base", "--is-ancestor", sha, "origin/main");
                 if (open != null)
                 {
                     // hud-live's plugins sit detached at origin/main commits: one back there with no deploy recorded is restored.
-                    if (onMain.Code == 0 && state == null) Restored(folder, $"{folder} in {src} is back at {Short(sha)} on origin/main, no deploy recorded");
+                    if (onMain.Code == 0 && state == null) Restored(folder, $"{folder} in {src} is back at {Short(sha)} on origin/main, no deploy recorded", dir);
                     continue;
                 }
                 if (onMain.Code == 0) continue;   // e.g. a plain submodule update: detached at the recorded commit
@@ -203,8 +223,25 @@ public static class DeployIncidents
                 });
                 Console.Error.WriteLine($"[Incidents] orphaned deploy: {folder} detached at {Short(sha)}");
             }
+            // Deploys into a tree no HUD compiles any more (its junctions were cut over to hud-live): they hold nothing.
+            if (fromJunctions)
+                foreach (var i in board.Incidents.Where(i => i.IsOpen && i.Kind == "deploy").ToList())
+                    if (i.Get("mainPath")?.ToString() is { Length: > 0 } at && !dirs.Any(d => SamePath(d, at)) && i.Get("plugin")?.ToString() is { Length: > 0 } plugin)
+                        Restored(plugin, $"no HUD compiles {at} any more (its junction points elsewhere, e.g. after tools\\hud-live.ps1 cutover); the folder there was left as it is", at);
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Incidents] deploy scan failed: {ex.Message}"); }
+    }
+
+    /// <summary>The commit a checkout records for each plugin submodule (git ls-tree HEAD -- Plugins/), by folder.</summary>
+    private static Dictionary<string, string> Pointers(string root)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var ls = PluginGit.Run(root, "ls-tree", "HEAD", "--", "Plugins/");
+        if (!ls.Ok) return map;
+        foreach (var line in ls.Out.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            if (line.Split('\t', 2) is [var meta, var path] && meta.Split(' ') is [_, "commit", var sha])
+                map[Path.GetFileName(path.Trim())] = sha;
+        return map;
     }
 
     public static DateTime? ParseIso(JToken? t) =>

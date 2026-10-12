@@ -422,8 +422,11 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             var hud = Path.GetDirectoryName(bridges.Resolve(_game).BridgeDir.TrimEnd('\\'));
             var link = new DirectoryInfo(Path.Combine(hud!, "Plugins", "Source", "Whats A Route")).LinkTarget;
             var main = link == null ? null : Path.GetDirectoryName(Path.GetDirectoryName(link.TrimEnd('\\')));
-            // After the cutover the junction points into hud-live, which is no place for handler worktrees.
-            return main != null && Directory.Exists(Path.Combine(main, ".git")) && Hud.HudSource.Kind(main) == "main-checkout" ? main : null;
+            // After the cutover the junction points into hud-live, which is no place for handler worktrees: the main checkout
+            // it was made from (hud-live.ps1 init records it), else the checkout this server runs from.
+            if (main == null || !Directory.Exists(Path.Combine(main, ".git"))) return null;
+            if (Hud.HudSource.Kind(main) == "main-checkout") return main;
+            return Hud.HudSource.MainCheckoutOf(main) ?? DeployIncidents.MainRoot();
         }
         catch { return null; }
     }

@@ -67,8 +67,11 @@ public static class DeployTools
         var edited = Path.Combine(here, "Plugins", folder);
         var installs = HudDevTools.Installs(bridges, null);
         // The tree the HUD compiles this folder from, read off its junction (hud-live after the cutover, the main checkout
-        // before). No junction for it: the main checkout, as before hud-live, and the warning below says so.
-        var srcRoot = HudSource.RootFor(folder, installs.Select(h => (h.Game, h.Root)));
+        // before): the game asked for first, so a half-done cutover deploys where that HUD looks. No junction for it: the
+        // main checkout, as before hud-live, and the warning below says so.
+        var wanted = game?.Trim().ToLowerInvariant();
+        var srcRoot = HudSource.RootFor(folder, installs.Where(h => string.IsNullOrEmpty(wanted) || h.Game == wanted).Select(h => (h.Game, h.Root)))
+                      ?? HudSource.RootFor(folder, installs.Select(h => (h.Game, h.Root)));
         if (srcRoot == null)
         {
             var common = PluginGit.Run(here, "rev-parse", "--path-format=absolute", "--git-common-dir");
@@ -103,13 +106,13 @@ public static class DeployTools
         if (!inMain && PluginGit.ReadHead(edited, out _) is { } editedHead) r.Edited = Checkout(edited, editedHead);
 
         // The deploy lease on the incident board: who owns it, and whether its session is gone (orphaned).
-        var owner = DeployIncidents.Owner(folder);
+        var owner = DeployIncidents.Owner(folder, main);
         if (owner.Incident == null && state != null)
         {
             // No lease on the board: the scan raises a deploy left detached off origin/main as orphaned. Anything else
             // without a lease (the deployer's board write failed, or it runs a build without the board) is treated as live.
             DeployIncidents.Scan(force: true);
-            owner = DeployIncidents.Owner(folder);
+            owner = DeployIncidents.Owner(folder, main);
         }
         if (owner.Incident != null) r.Incident = IncidentTools.View(owner.Incident, Incidents.IncidentStore.ReadHeartbeats());
         string? takeover = null;
@@ -182,10 +185,11 @@ public static class DeployTools
         var g = PickGames(r, game);
         try
         {
-            leaseId = await Lease(bridges, g.FirstOrDefault(), $"deploying {folder} {Short(r.Edited.Commit)} from {SessionIdentity.Label}", ct);
-            // One change to the HUD source at a time (hud-live.ps1 sync, the F8 sync, other deploys).
-            try { srcLock = HudSource.Lock(srcRoot, $"deploy_plugin {folder} {Short(r.Edited.Commit)}", LockWait); }
+            // One change to the HUD source at a time (hud-live.ps1 sync, the F8 sync, other deploys). Taken before the
+            // reload lease, so waiting for it never holds another agent's restart back.
+            try { srcLock = await HudSource.LockAsync(srcRoot, $"deploy_plugin {folder} {Short(r.Edited.Commit)}", LockWait, ct); }
             catch (IOException ex) { return Finish(r, "refused", false, $"{ex.Message}. Nothing was touched: try again in a minute."); }
+            leaseId = await Lease(bridges, g.FirstOrDefault(), $"deploying {folder} {Short(r.Edited.Commit)} from {SessionIdentity.Label}", ct);
             if (PluginGit.ReadHead(main, out _) is { } now && now.Sha != mainHead.Sha)
                 return Finish(r, "refused", false, $"{folder} in {src} moved to {Short(now.Sha)} while this deploy waited (a sync or another deploy). Nothing was touched: run deploy_plugin again.");
             // Fetch the worktree's HEAD by path (a local fetch: no remote, no push), then check it out detached.
@@ -241,7 +245,7 @@ public static class DeployTools
             // Nothing recorded and not detached off origin/main: no deploy to hold (a submodule update leaves it detached
             // at the recorded commit, which is not a deploy).
             if (mainHead.Branch != null || PluginGit.Run(main, "merge-base", "--is-ancestor", mainHead.Sha, "origin/main").Code == 0)
-                try { DeployIncidents.Restored(r.Plugin, $"{r.Plugin} in {src} is at {Short(mainHead.Sha)}{(mainHead.Branch != null ? $" on {mainHead.Branch}" : " (on origin/main)")}"); }
+                try { DeployIncidents.Restored(r.Plugin, $"{r.Plugin} in {src} is at {Short(mainHead.Sha)}{(mainHead.Branch != null ? $" on {mainHead.Branch}" : " (on origin/main)")}", main); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { r.Warnings.Add($"The incident board wasn't updated ({ex.Message})."); }
             return Finish(r, "unchanged", true, $"Nothing deployed into {r.Plugin} in {src}: it is at {Short(mainHead.Sha)}{(mainHead.Branch != null ? $" on {mainHead.Branch}" : " (detached; deploy_plugin recorded nothing to return to: switch it back by hand, or deploy over it)")}.");
         }
@@ -252,19 +256,30 @@ public static class DeployTools
         var g = PickGames(r, game);
         string? leaseId = null;
         IDisposable? srcLock = null;
+        // hud-live follows origin/main: its syncs left this plugin alone while it was deployed, so restore goes to the
+        // commit hud-live records now, not the one it had before the deploy.
+        var toPointer = r.SourceTree == "hud-live" && state.BeforeBranch == null && r.Pointer != null;
+        var target = toPointer ? r.Pointer! : state.BeforeSha;
         try
         {
-            leaseId = await Lease(bridges, g.FirstOrDefault(), $"restoring {r.Plugin} to {state.BeforeBranch ?? Short(state.BeforeSha)}", ct);
             if (r.Source != null)
-                try { srcLock = HudSource.Lock(r.Source, $"deploy_plugin restore {r.Plugin}", LockWait); }
+                try { srcLock = await HudSource.LockAsync(r.Source, $"deploy_plugin restore {r.Plugin}", LockWait, ct); }
                 catch (IOException ex) { return Finish(r, "refused", false, $"{ex.Message}. Nothing was touched: try again in a minute."); }
+            leaseId = await Lease(bridges, g.FirstOrDefault(), $"restoring {r.Plugin} to {state.BeforeBranch ?? Short(target)}", ct);
+            if (toPointer && !PluginGit.Run(main, "cat-file", "-e", target + "^{commit}").Ok)
+            {
+                var fetched = PluginGit.Run(main, "fetch", "--quiet", "origin");
+                if (!fetched.Ok) return Finish(r, "failed", false, $"hud-live records {Short(target)} for {r.Plugin}, which its checkout doesn't have, and git fetch failed: {fetched.Err}");
+            }
             var co = state.BeforeBranch != null && PluginGit.Run(main, "rev-parse", "--verify", "--quiet", $"refs/heads/{state.BeforeBranch}").Ok
                 ? PluginGit.Run(main, "checkout", "--quiet", state.BeforeBranch)
-                : PluginGit.Run(main, "checkout", "--quiet", "--detach", state.BeforeSha);
+                : PluginGit.Run(main, "checkout", "--quiet", "--detach", target);
             if (!co.Ok) return Finish(r, "failed", false, $"git checkout in {src} failed (still at {Short(mainHead.Sha)}): {co.Err}");
             PluginGit.WriteState(main, null);
-            var back = state.BeforeBranch ?? Short(state.BeforeSha);
-            try { DeployIncidents.Restored(r.Plugin, $"restored to {back} by {SessionIdentity.Label}" + (takeover != null ? $" ({takeover})" : "")); }
+            var back = state.BeforeBranch ?? Short(target);
+            if (toPointer && target != state.BeforeSha)
+                r.Warnings.Add($"Restored to {Short(target)}, the commit hud-live records now (it was at {Short(state.BeforeSha)} before the deploy; syncs moved on meanwhile).");
+            try { DeployIncidents.Restored(r.Plugin, $"restored to {back} by {SessionIdentity.Label}" + (takeover != null ? $" ({takeover})" : ""), main); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { r.Warnings.Add($"Restored, but the incident board wasn't updated ({ex.Message})."); }
             r.Incident = null;
             r.Before = r.Main;

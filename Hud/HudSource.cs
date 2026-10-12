@@ -19,20 +19,11 @@ public static class HudSource
     /// <summary>One Plugins\Source junction: the folder it shows the HUD, the folder it points at, and the checkout holding it.</summary>
     public sealed record Link(string Game, string Folder, string LinkPath, string Target, string? Root);
 
-    /// <summary>The HUD folders, from the same settings as BridgeRegistry (POE1_BRIDGE_DIR / POE2_BRIDGE_DIR / BRIDGE_DIR):
-    /// each HUD is the parent of its bridge folder.</summary>
+    /// <summary>The HUD folders, from BridgeRegistry's layout: each HUD is the parent of its bridge folder.</summary>
     public static List<(string Game, string Root)> HudRoots()
     {
-        var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        var dirs = Environment.GetEnvironmentVariable("BRIDGE_DIR") is { Length: > 0 } legacy
-            ? [("auto", legacy)]
-            : new List<(string, string)>
-            {
-                ("poe1", Environment.GetEnvironmentVariable("POE1_BRIDGE_DIR") ?? Path.Combine(docs, "PoeHelper", "claude-bridge")),
-                ("poe2", Environment.GetEnvironmentVariable("POE2_BRIDGE_DIR") ?? Path.Combine(docs, "halp2", "claude-bridge")),
-            };
         var list = new List<(string, string)>();
-        foreach (var (game, dir) in dirs)
+        foreach (var (game, dir) in Bridge.BridgeRegistry.Layout())
             if (Path.GetDirectoryName(Path.GetFullPath(dir.TrimEnd('\\', '/'))) is { } root && Directory.Exists(root)) list.Add((game, root));
         return list;
     }
@@ -85,6 +76,20 @@ public static class HudSource
         return Directory.Exists(dotGit) ? "main-checkout" : "other";
     }
 
+    /// <summary>The main scaffolding checkout a hud-live clone was made from (hud-live.ps1 init records it in its marker),
+    /// else null.</summary>
+    public static string? MainCheckoutOf(string root)
+    {
+        try
+        {
+            var marker = Path.Combine(root, ".git", HudLiveMarker);
+            if (!File.Exists(marker)) return null;
+            var main = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(marker))["mainCheckout"]?.ToString();
+            return main is { Length: > 0 } && Directory.Exists(Path.Combine(main, ".git")) ? main : null;
+        }
+        catch { return null; }
+    }
+
     /// <summary>"hud-live (path)" / "the main checkout (path)": how results name the tree.</summary>
     public static string Describe(string root) => Kind(root) switch
     {
@@ -95,10 +100,10 @@ public static class HudSource
 
     /// <summary>
     /// Exclusive lock on changes to a HUD source tree: &lt;root&gt;\.git\hexile-hud-source.lock, opened without write
-    /// sharing and holding who has it. Waits up to <paramref name="wait"/>, then throws an IOException naming the holder.
-    /// The OS releases it when the holder dies.
+    /// sharing and holding who has it. Waits up to <paramref name="wait"/>, then throws an IOException naming the holder
+    /// (or naming the access problem at once). The OS releases it when the holder dies.
     /// </summary>
-    public static IDisposable Lock(string root, string what, TimeSpan wait)
+    public static async Task<IDisposable> LockAsync(string root, string what, TimeSpan wait, CancellationToken ct = default)
     {
         var gitDir = PluginGit.Run(root, "rev-parse", "--absolute-git-dir");
         if (!gitDir.Ok) throw new IOException($"{root}: no git dir for the HUD source lock ({gitDir.Err})");
@@ -116,7 +121,11 @@ public static class HudSource
                 fs.SetLength(0); fs.Write(bytes); fs.Flush();
                 return fs;
             }
-            catch (IOException) when (DateTime.UtcNow < deadline) { Thread.Sleep(250); }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new IOException($"the HUD source lock {path} can't be opened ({ex.Message}): made read-only, or by an elevated process? Delete it (nothing holds it then) and try again.", ex);
+            }
+            catch (IOException) when (DateTime.UtcNow < deadline) { await Task.Delay(250, ct); }
             catch (IOException)
             {
                 throw new IOException($"{Describe(root)} is locked by another change for over {(int)wait.TotalSeconds} s: {Holder(path) ?? "holder unknown"}");

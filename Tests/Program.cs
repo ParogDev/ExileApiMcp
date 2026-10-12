@@ -712,14 +712,14 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
         var repo = Path.Combine(tmp, "repo");
         Directory.CreateDirectory(repo);
         ExileApiMcp.Hud.PluginGit.Run(repo, "init", "-q");
-        using (ExileApiMcp.Hud.HudSource.Lock(repo, "first change", TimeSpan.FromSeconds(1)))
+        using (ExileApiMcp.Hud.HudSource.LockAsync(repo, "first change", TimeSpan.FromSeconds(1)).GetAwaiter().GetResult())
         {
             string? why = null;
-            try { using var second = ExileApiMcp.Hud.HudSource.Lock(repo, "second change", TimeSpan.FromMilliseconds(600)); }
+            try { using var second = ExileApiMcp.Hud.HudSource.LockAsync(repo, "second change", TimeSpan.FromMilliseconds(600)).GetAwaiter().GetResult(); }
             catch (IOException ex) { why = ex.Message; }
             Check("hud source lock: a second change is refused, naming the first", why != null && why.Contains("first change"), why);
         }
-        using (ExileApiMcp.Hud.HudSource.Lock(repo, "after release", TimeSpan.FromSeconds(1))) Check("hud source lock: free again once released", true);
+        using (ExileApiMcp.Hud.HudSource.LockAsync(repo, "after release", TimeSpan.FromSeconds(1)).GetAwaiter().GetResult()) Check("hud source lock: free again once released", true);
     }
     finally { try { Directory.Delete(tmp, true); } catch { } }
 }
