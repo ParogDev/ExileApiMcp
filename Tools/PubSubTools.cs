@@ -23,7 +23,9 @@ public static class PubSubTools
     [Description("Events HUD plugins published through the AI Bridge (AIBridge.Publish) after sequence number since, each with its " +
                  "claims (who took it, once per stage). Kinds so far: feedback (Whats A Route's F8 press: verdict, note, route state), " +
                  "route (its trace: area, quest state with text, objective, door, boss-fight, boss-dead, quest-item-taken, " +
-                 "route-reloaded), feedback.reply (answers shown above the route card), pubsub.claim / pubsub.release. Kept across " +
+                 "route-reloaded), feedback.reply (answers shown above the route card, with the press's Stage), feedback.capture " +
+                 "(what the player did after a 'watch what I do next' press, Ref = the press), route.agent / route.agent.progress " +
+                 "(agent routes), work (agents' work items), pubsub.claim / pubsub.release. Kept across " +
                  "HUD restarts (<BridgeDirectory>\\pubsub\\events.jsonl).")]
     public static async Task<CallToolResult> PubSubEvents(BridgeRegistry bridges,
         [Description("Only events after this sequence number (0 = all the bridge keeps, up to 2000)")] long since = 0,
@@ -83,24 +85,43 @@ public static class PubSubTools
 
     [McpServerTool(Name = "feedback_reply", Title = "Tell the player (route card)", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(PubSubPublishResult))]
-    [Description("Show a line above Whats A Route's card, answering F8 press #seq (kind feedback.reply). status working keeps it " +
-                 "up until the next reply (use it when a fix takes more than a minute); done shows it ~25 s and tells the " +
-                 "dispatcher the player already has the answer (it then doesn't repeat the handler's final message); failed is a " +
-                 "problem the player should know about. Plain language that says what to do. Handlers end with their final " +
-                 "message instead of calling this with done.")]
+    [Description("Move F8 press #seq along and tell the player (kind feedback.reply: the bridge's work strip and the line above Whats " +
+                 "A Route's card). stage = where the press is: Investigating (looking at the game; set for you on your first game " +
+                 "read), Fixing (changing route data or code: say it, the server can't see your edits), LiveFix (a fix is in " +
+                 "route.live.json: the player can try it now), Reviewing (set for you by mark_reviewed), Merging (PR and CI; pass " +
+                 "pr), Deploying, Verifying, Done, Failed. Stages only move forward; yours always win over the inferred ones. text = " +
+                 "one or two plain sentences that say what to do now; detail = the longer why (hover); ask = the one line you need " +
+                 "from the player (the bridge shows 'needs you' only while you hold an ask, a guided step or a Manual route step). " +
+                 "Done tells the dispatcher the player already has the answer (it won't repeat your final message, and skips its " +
+                 "verification watch). status working | done | failed is the old form (no stage: working keeps the current stage).")]
     public static async Task<CallToolResult> FeedbackReply(BridgeRegistry bridges,
         [Description("The press's bridge sequence number (the brief's #)")] long seq,
-        [Description("One or two short plain sentences for the player")] string text,
-        [Description("working | done | failed (default working)")] string status = "working",
+        [Description("One or two short plain sentences for the player (<= 400 chars; default a line for the stage)")] string? text = null,
+        [Description("Investigating | Fixing | LiveFix | Reviewing | Merging | Deploying | Verifying | Done | Failed (Queued, Claimed, Reading, Dropped are the dispatcher's)")] string? stage = null,
+        [Description("Legacy: working | done | failed. Without stage: done -> Done, failed -> Failed, working keeps the current stage")] string? status = null,
+        [Description("The longer why, <= 400 chars (shown on hover)")] string? detail = null,
+        [Description("What you need from the player, <= 120 chars (shown while you hold an ask / step / Manual route step)")] string? ask = null,
+        [Description("The pull request, once there is one: {repo, url, number, checks: pending | green | red}")] F8PrRef? pr = null,
+        [Description("What it waits on besides the player: None | Session | Ci | Review | OtherAgent | Restart (Player is set by the bridge)")] string? waitingOn = null,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
-        if (status is not ("working" or "done" or "failed")) throw new McpException($"status must be working, done or failed, not '{status}'.");
-        var (_, r) = await bridges.CallAsync(game ?? "poe2", "pubsub.publish", new JObject
+        if (status != null && status is not ("working" or "done" or "failed")) throw new McpException($"status must be working, done or failed, not '{status}'.");
+        string? s = null;
+        if (stage != null)
         {
-            ["kind"] = FeedbackKit.ReplyKind,
-            ["data"] = new JObject { ["ref"] = seq, ["status"] = status, ["text"] = FeedbackKit.Clip(text, 400) },
-        }, ct);
+            s = F8.Stage(stage) ?? throw new McpException($"stage must be one of {string.Join(" | ", F8.Stages)}, not '{stage}'.");
+            if (s == "Pressed") throw new McpException("Pressed is the bridge's own stage (it sets it when the press arrives).");
+        }
+        if (waitingOn != null && F8.WaitingOn(waitingOn) == null)
+            throw new McpException($"waitingOn must be one of {string.Join(" | ", F8.WaitingOns.Where(x => x != "Player"))}, not '{waitingOn}'.");
+        if (F8.WaitingOn(waitingOn) == "Player")
+            throw new McpException("waitingOn Player is the bridge's to set: it derives it from your open ask (ask_user), guided step or Manual route step.");
+        if (s == null && status is "done" or "failed") s = F8.StageFromStatus(status);
+        // The old form "working": keep the stage the press is at (C5 would read it as Investigating, a step back from Fixing).
+        s ??= await F8Replies.CurrentStageAsync(bridges, game, seq, ct) is { } cur && F8.Rank(cur) >= F8.Rank("Investigating") && !F8.IsFinal(cur) ? cur : "Investigating";
+        if (string.IsNullOrWhiteSpace(text) && stage == null) throw new McpException("text is required without a stage: what the player should read.");
+        var r = await F8Replies.PublishAsync(bridges, game, F8.Reply(seq, s, text, detail, ask, pr, waitingOn, status), null, ct);
         return Published(r);
     }
 
@@ -164,7 +185,7 @@ public static class PubSubTools
             var what = e.Kind switch
             {
                 "feedback" or "route" => $"{S("Event")} {S("AreaName")} {S("Label")} {S("Note")}".Trim(),
-                "feedback.reply" => $"#{S("ref")} {S("status")}: {S("text")}",
+                "feedback.reply" => $"#{S("Ref") ?? S("ref")} {S("Stage") ?? S("status")}: {S("Text") ?? S("text")}",
                 _ => FeedbackKit.Clip(e.Data?.GetRawText(), 160),
             };
             var claims = e.Claims is { Count: > 0 } c ? $" [claimed: {string.Join(", ", c.Select(kv => $"{kv.Key} by {kv.Value.By}"))}]" : "";

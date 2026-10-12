@@ -28,6 +28,10 @@ public sealed class SessionsView
     public List<IncidentView>? Incidents { get; set; }
     /// <summary>How this server's own label was decided (stdio servers; null for a shared server's caller, named by its headers).</summary>
     public SessionIdentityInfo? Identity { get; set; }
+    /// <summary>Active work items with no session row of their own (an F8 press before its handler said hello), when the bridge lists them.</summary>
+    public List<AgentWork>? Work { get; set; }
+    /// <summary>Items that ended in the last 10 min (Done / Failed / Dropped), newest first.</summary>
+    public List<AgentWork>? Recent { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -83,6 +87,8 @@ public sealed class SessionInfo
     public int? Hue { get; set; }
     /// <summary>Its attention items: what it waits to show the player, and where each stands (0 = on the card).</summary>
     public List<AttentionQueueEntry>? Queued { get; set; }
+    /// <summary>Its work items on the agents board (bridge work.set; F8 items it owns), when the bridge has them.</summary>
+    public List<AgentWork>? Work { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 

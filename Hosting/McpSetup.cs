@@ -239,6 +239,10 @@ internal static class McpSetup
                 try
                 {
                     var result = await next(request, ct);
+                    // C4: an F8 handler's (route-f8-<seq>) game reads and mark_reviewed move its press forward (fire and forget).
+                    if (result.IsError != true && CallerIdentity.Current?.Label is { } caller && caller.StartsWith("route-f8-", StringComparison.Ordinal)
+                        && request.Services?.GetService(typeof(BridgeRegistry)) is BridgeRegistry f8Bridges)
+                        ExileApiMcp.Dispatch.F8Replies.Infer(f8Bridges, caller, name);
                     if (result.IsError == true || name != "stats_ui_state")
                         Console.Error.WriteLine($"[call] {name} {sw.ElapsedMilliseconds}ms{(result.IsError == true ? " isError" : "")}");
                     return result;

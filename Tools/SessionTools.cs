@@ -74,6 +74,15 @@ public static class SessionTools
         return line;
     }
 
+    /// <summary>A bridge work[] array as typed items (unreadable entries skipped: the text never fails over them).</summary>
+    private static List<AgentWork> Work(JToken? arr)
+    {
+        var list = new List<AgentWork>();
+        foreach (var w in (arr as JArray ?? []).OfType<JObject>())
+            try { list.Add(Dto.From<AgentWork>(w)); } catch (Exception ex) when (ex is System.Text.Json.JsonException or McpException) { }
+        return list;
+    }
+
     private static string SessionsText(JObject o)
     {
         var lines = new List<string>();
@@ -94,7 +103,13 @@ public static class SessionTools
             // Its attention items: what it waits to show the player (position 0 = on the card now).
             foreach (var q in (s["queued"] as JArray ?? []).OfType<JObject>())
                 lines.Add($"    {(q["position"]?.Value<int>() == 0 ? "on the card" : $"#{q["position"]} in line")}: {q["kind"]} {q["title"]} ({q["id"]}{(q["mergedInto"] != null ? $", shares {q["mergedInto"]}" : "")})");
+            // Its rows on the agents board (bridge work items).
+            foreach (var w in Work(s["work"])) lines.Add($"    work: {AgentStatusTools.WorkLine(w)}");
         }
+        if (Work(o["work"]) is { Count: > 0 } loose) lines.Add("Work with no session yet: " + string.Join("; ", loose.Select(AgentStatusTools.WorkLine)));
+        if (Work(o["recent"]) is { Count: > 0 } recent)
+            lines.Add("Recent: " + string.Join("; ", recent.Take(6).Select(w => $"{(w.Seq is { } q ? $"F8 #{q}" : w.Title ?? w.Key)} {w.Stage}" +
+                                                                               (w.UpdatedAt is { } at ? $" {(int)(DateTimeOffset.UtcNow - at).TotalMinutes} min ago" : ""))));
         if (o["mcpRollout"] is JObject ro)
         {
             static string Names(JToken? t) => string.Join(", ", (t as JArray ?? []).Select(x => x.ToString()));
