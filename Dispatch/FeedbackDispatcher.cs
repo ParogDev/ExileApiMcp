@@ -13,7 +13,7 @@ namespace ExileApiMcp.Dispatch;
 ///
 /// Whats A Route publishes each F8 press as a "feedback" event through the AI Bridge (AIBridge.Publish; bridge
 /// Shared/PubSub.cs). This service, hosted by the shared HTTP server (127.0.0.1:50910, which follows mcp_deploy and stays
-/// up while a HUD is: see KeepAliveAsync), reads them (pubsub.events, as subscriber "route-dispatcher"), claims each one
+/// up while this service runs: see KeepAliveAsync), reads them (pubsub.events, as subscriber "route-dispatcher"), claims each one
 /// exactly once (pubsub.claim stage handle, with a ttl so a dispatcher that dies doesn't hold it forever; a second
 /// dispatcher, e.g. the draining worker of a swap, gets "claimed"), says "Claude is on it" on the card (feedback.reply
 /// status claimed), writes the handler's brief and starts it in the main checkout with the scrubbed environment, outside
@@ -40,7 +40,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
 {
     public const string Subscriber = "route-dispatcher", IncidentKey = "feedback-dispatch:machine";
     private static readonly TimeSpan PressMaxAge = TimeSpan.FromHours(2), HandlerMaxRun = TimeSpan.FromMinutes(40),
-        RetryEvery = TimeSpan.FromMinutes(1), KeepAliveAfterBridge = TimeSpan.FromMinutes(20), AdoptEvery = TimeSpan.FromSeconds(10);
+        RetryEvery = TimeSpan.FromMinutes(1), AdoptEvery = TimeSpan.FromSeconds(10);
 
     private readonly string _game = Environment.GetEnvironmentVariable("HEXILE_DISPATCH_GAME") is { Length: > 0 } g ? g : "poe2";
     private readonly CallerIdentity _as = new("route-dispatcher", null, null) { Infra = true };   // not an agent on the HUD's chip
@@ -51,7 +51,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     private readonly HashSet<long> _toldQueued = new(), _toldFailed = new();
     private readonly List<JObject> _replies = new();                     // recent feedback.reply events (the last answers)
     private readonly List<JObject> _trace = new();                       // recent route + feedback events, for briefs
-    private DateTime _nextEnvCheck = DateTime.MinValue, _nextStart = DateTime.MinValue, _nextAdopt = DateTime.MinValue, _bridgeOkAt = DateTime.MinValue;
+    private DateTime _nextEnvCheck = DateTime.MinValue, _nextStart = DateTime.MinValue, _nextAdopt = DateTime.MinValue;
     private (string? Exe, bool LoggedIn, string? Why, string? Fix, string? Login) _env;
     private FeedbackHandlerState? _running;
     private string _status = "starting", _why = "";
@@ -128,7 +128,6 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             return;
         }
         if (_bridgeBrokenRaised && _env.Why == null) { _bridgeBrokenRaised = false; IncidentStore.ResolveKeys([IncidentKey], $"the {_game} bridge has pub/sub"); }
-        _bridgeOkAt = DateTime.UtcNow;
         var seq = r["seq"]?.Value<long>() ?? 0;
         if (seq < _cursor) { _cursor = 0; _presses.Clear(); return; }   // the bridge's log was reset: read it again
         foreach (var e in (r["events"] as JArray ?? []).OfType<JObject>())
@@ -917,17 +916,15 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     /// this dispatcher not running otherwise).</summary>
     private async Task<T> WithBeatAsync<T>(Func<Task<T>> work, CancellationToken ct)
     {
-        _busy = true;   // KeepAliveAsync holds the shared server up meanwhile: an idle exit would cut a merge half way
         using var beat = new CancellationTokenSource();
         var beating = Task.Run(async () =>
         {
             while (!beat.IsCancellationRequested) { WriteStatus(); try { await Task.Delay(1000, beat.Token); } catch (OperationCanceledException) { } }
         });
         try { return await Task.Run(work, ct); }
-        finally { beat.Cancel(); await beating; _busy = false; }
+        finally { beat.Cancel(); await beating; }
     }
 
-    private volatile bool _busy;
 
     private static bool ProcessRuns(int pid)
     {
@@ -1111,12 +1108,15 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         catch { }
     }
 
-    // ── Keeping the shared server up while a HUD is ──────────────────
+    // ── Keeping the shared server up while the dispatcher runs ───────
 
     /// <summary>
     /// The shared server stops after 20 min without a connection (Supervisor --idle-exit). A press must find a dispatcher,
-    /// so while a HUD bridge answered in the last 20 min (or a handler runs) this holds one connection to the server's own
-    /// public port: a request to /keepalive that the server answers after 5 min (or when it stops), then the next one.
+    /// so while this dispatcher runs it holds one connection to the server's own public port: a request to /keepalive that
+    /// the server answers after 5 min (or when it stops), then the next one. Always, not only while a HUD answers: nothing
+    /// outside the Claude app can start the server again (tools\mcp-http-lib.ps1, virtualized %LOCALAPPDATA%), so a HUD
+    /// turned off for 20 min and started again found no dispatcher (2026-10-12, press #1065). The server still ends with
+    /// the Claude app; a press made then says so on the card (Whats A Route: no listener).
     /// </summary>
     private async Task KeepAliveAsync(CancellationToken stop)
     {
@@ -1126,13 +1126,9 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         {
             try
             {
-                if (DateTime.UtcNow - _bridgeOkAt < KeepAliveAfterBridge || _running != null || _busy)
-                {
-                    using var req = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/keepalive?sec=300");
-                    req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", LocalHttpSecurity.LoadOrCreateToken());
-                    using var _ = await http.SendAsync(req, stop);
-                }
-                else await Task.Delay(10_000, stop);
+                using var req = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/keepalive?sec=300");
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", LocalHttpSecurity.LoadOrCreateToken());
+                using var _ = await http.SendAsync(req, stop);
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
             catch (Exception ex) { Console.Error.WriteLine($"[Dispatch] keepalive: {ex.Message}"); try { await Task.Delay(10_000, stop); } catch { break; } }

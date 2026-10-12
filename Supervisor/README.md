@@ -55,7 +55,7 @@ finishes running requests (shutdown timeout 65 min) and exits.
 detached from the caller's process tree, windowless, working directory `%LOCALAPPDATA%\ExileApiMcp\http`, log `server.log`
 there. It runs with `--idle-exit 20`: once no connection has been open for 20 minutes the supervisor stops its workers and
 exits. A running request holds its connection, so a blocking `observe_wait` / `incident_wait` / `experiment_queue_wait`
-counts as activity, and so does an open control center. The next call starts it again, on whatever is deployed then.
+counts as activity, and so does an open control center and the F8 dispatcher (it holds a `/keepalive` while it runs, so in practice the shared server stops only with the Claude app). The next call starts it again, on whatever is deployed then.
 Nobody starts or stops it by hand.
 
 ## Identity and status
