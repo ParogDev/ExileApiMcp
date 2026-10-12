@@ -26,8 +26,9 @@ namespace ExileApiMcp.Dispatch;
 /// Both start slim (FeedbackKit.SlimArguments): the standing brief as the system prompt, no CLAUDE.md or memory, only the
 /// tools a route fix needs. The final message goes to the card once (pubsub.claim stage reply first, and not at all when
 /// the handler already said done), and the worktree is removed when it holds no unmerged work. Before that answer, the
-/// handler's merged fix is brought into the HUD (MainSync: pull the main checkout, update Whats A Route, reload_plugin):
-/// handlers stop at "merged", since Claude Code's worktree isolation refuses every command aimed at the main checkout.
+/// handler's merged fix is brought into the HUD (MainSync: pull the HUD source, i.e. Whats A Route's junction target,
+/// hud-live or the main checkout; update Whats A Route; reload_plugin): handlers stop at "merged", since Claude Code's
+/// worktree isolation refuses every command aimed outside their worktree.
 ///
 /// One handler at a time (they share route.live.json): later presses wait, and the card says so. Every link that can break
 /// is said on the card and raised as incident feedback-dispatch:machine (CLI not found, not logged in, the session
@@ -421,9 +422,26 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
             var hud = Path.GetDirectoryName(bridges.Resolve(_game).BridgeDir.TrimEnd('\\'));
             var link = new DirectoryInfo(Path.Combine(hud!, "Plugins", "Source", "Whats A Route")).LinkTarget;
             var main = link == null ? null : Path.GetDirectoryName(Path.GetDirectoryName(link.TrimEnd('\\')));
-            return main != null && Directory.Exists(Path.Combine(main, ".git")) ? main : null;
+            // After the cutover the junction points into hud-live, which is no place for handler worktrees: the main checkout
+            // it was made from (hud-live.ps1 init records it), else the checkout this server runs from.
+            if (main == null || !Directory.Exists(Path.Combine(main, ".git"))) return null;
+            if (Hud.HudSource.Kind(main) == "main-checkout") return main;
+            return Hud.HudSource.MainCheckoutOf(main) ?? DeployIncidents.MainRoot();
         }
         catch { return null; }
+    }
+
+    /// <summary>The tree the HUD compiles Whats A Route from (its junction's target: hud-live after tools\hud-live.ps1
+    /// cutover, the main checkout before), which the post-handler sync updates; else the main checkout.</summary>
+    private string? HudSourceRepo()
+    {
+        try
+        {
+            var hud = Path.GetDirectoryName(bridges.Resolve(_game).BridgeDir.TrimEnd('\\'));
+            if (hud != null && Hud.HudSource.RootFor(MainSync.Plugin, [(_game, hud)]) is { } root) return root;
+        }
+        catch { }
+        return Repo();
     }
 
     /// <summary>The handler's MCP config: the shared server, as caller route-f8-&lt;seq&gt; working in its worktree. Tools that
@@ -886,7 +904,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
         if (merging)
         {
             // The merged fix into the HUD, as after a handler that merged itself.
-            var sync = await WithBeatAsync(() => MainSync.RunAsync(bridges, _game, Repo()!, ct), ct);
+            var sync = await WithBeatAsync(() => MainSync.RunAsync(bridges, _game, HudSourceRepo()!, ct), ct);
             h.Sync = sync.Summary; h.SyncFailed = sync.Failed; h.SyncFix = sync.Fix;
             SaveHandler(h);
             await ReplyAsync(h.Seq, sync.Failed ? "failed" : "done", sync.Failed ? $"#{h.Seq}: {text}; " + MainSync.FailText(h.Seq, sync) : $"#{h.Seq}: {text}; {sync.Summary}.", ct);
@@ -941,7 +959,7 @@ public sealed class FeedbackDispatcher(BridgeRegistry bridges, IHostApplicationL
     private async Task<MainSync.Outcome?> SyncMainAsync(FeedbackHandlerState h, CancellationToken ct)
     {
         if (h.Sync != null) return h.SyncFailed == true ? new MainSync.Outcome(true, h.Sync, h.Sync, h.SyncFix) : null;
-        if (Repo() is not { } repo) { h.Sync = "skipped: the main scaffolding checkout is unknown"; SaveHandler(h); return null; }
+        if (HudSourceRepo() is not { } repo) { h.Sync = "skipped: the HUD source (Whats A Route's junction target) and the main scaffolding checkout are unknown"; SaveHandler(h); return null; }
         MainSync.Outcome o;
         // The sync can take minutes (fetch, pull, a compile): the status file keeps being written meanwhile, or
         // feedback_dispatcher would call this dispatcher not running.

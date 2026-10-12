@@ -233,10 +233,12 @@ public sealed class HudSourcePluginStatus
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
-/// <summary>What a source plugin folder holds: the junction's target (the scaffolding main checkout) and its git HEAD.</summary>
+/// <summary>What a source plugin folder holds: the junction's target (in the HUD source tree) and its git HEAD.</summary>
 public sealed class HudPluginSource
 {
     public string Path { get; set; } = "";
+    /// <summary>The tree the target is in: hud-live | main-checkout | worktree | other (Hud/HudSource.cs).</summary>
+    public string? Tree { get; set; }
     /// <summary>Short commit of HEAD.</summary>
     public string? Commit { get; set; }
     /// <summary>null: detached (e.g. a deploy_plugin deploy).</summary>
@@ -264,6 +266,8 @@ public sealed class HudPluginsInstall
 {
     public string Game { get; set; } = "";
     public string HudRoot { get; set; } = "";
+    /// <summary>The tree(s) the HUD's Plugins\Source junctions point into, with how many plugins each.</summary>
+    public string? CompilesFrom { get; set; }
     public HudRunInfo Run { get; set; } = new();
     public List<HudSourcePluginStatus> Plugins { get; set; } = [];
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }

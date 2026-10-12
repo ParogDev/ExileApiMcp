@@ -49,16 +49,21 @@ public sealed class BridgeRegistry : IDisposable
     {
         var port = int.TryParse(Environment.GetEnvironmentVariable("BRIDGE_PORT"), out var p) ? p : 50900;
         _port = port;
-        var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-
-        if (Environment.GetEnvironmentVariable("BRIDGE_DIR") is { Length: > 0 } legacyDir)
-            _layout.Add(("auto", legacyDir));
-        else
-        {
-            _layout.Add(("poe1", Environment.GetEnvironmentVariable("POE1_BRIDGE_DIR") ?? Path.Combine(docs, "PoeHelper", "claude-bridge")));
-            _layout.Add(("poe2", Environment.GetEnvironmentVariable("POE2_BRIDGE_DIR") ?? Path.Combine(docs, "halp2", "claude-bridge")));
-        }
+        _layout.AddRange(Layout());
         foreach (var (game, dir) in _layout) _bridges.Add(new BridgeClient(game, dir, port));
+    }
+
+    /// <summary>The bridge folders by game, from the environment (see the class summary). Static, so code without a registry
+    /// (the orphaned-deploy scan, Hud/HudSource.cs) finds the same HUDs.</summary>
+    public static List<(string Game, string Dir)> Layout()
+    {
+        var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (Environment.GetEnvironmentVariable("BRIDGE_DIR") is { Length: > 0 } legacyDir) return [("auto", legacyDir)];
+        return
+        [
+            ("poe1", Environment.GetEnvironmentVariable("POE1_BRIDGE_DIR") ?? Path.Combine(docs, "PoeHelper", "claude-bridge")),
+            ("poe2", Environment.GetEnvironmentVariable("POE2_BRIDGE_DIR") ?? Path.Combine(docs, "halp2", "claude-bridge")),
+        ];
     }
 
     /// <summary>The bridges for whoever is calling: the caller's own connections on the shared HTTP server when the request

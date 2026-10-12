@@ -15,15 +15,19 @@ public sealed class DeployResult
     /// <summary>deployed | restored | unchanged | status | refused | failed.</summary>
     public string Status { get; set; } = "";
     public bool Ok { get; set; }
-    /// <summary>The HUD game(s) whose Plugins\Source junction points at the main checkout's folder.</summary>
+    /// <summary>The HUD game(s) whose Plugins\Source junction points at the HUD source's folder.</summary>
     public List<string> Games { get; set; } = [];
+    /// <summary>The HUD source tree: the checkout the HUD's junction for this folder points into (Hud/HudSource.cs).</summary>
+    public string? Source { get; set; }
+    /// <summary>hud-live | main-checkout | worktree | other.</summary>
+    public string? SourceTree { get; set; }
     /// <summary>This session's copy (the worktree's submodule).</summary>
     public DeployCheckout? Edited { get; set; }
-    /// <summary>The main checkout's copy, which the HUD compiles.</summary>
+    /// <summary>The HUD source's copy, which the HUD compiles (named "main" from before hud-live).</summary>
     public DeployCheckout? Main { get; set; }
-    /// <summary>The main checkout before this deploy (what restore returns to).</summary>
+    /// <summary>The HUD source's copy before this deploy (what restore returns to).</summary>
     public DeployCheckout? Before { get; set; }
-    /// <summary>The scaffolding main checkout's recorded submodule commit: when Main differs, the parent shows the plugin as modified.</summary>
+    /// <summary>The submodule commit the HUD source records: when Main differs, it shows the plugin as modified.</summary>
     public string? Pointer { get; set; }
     /// <summary>Who deployed what (the state kept for restore), null when nothing is deployed.</summary>
     public DeployStateInfo? Deployed { get; set; }
