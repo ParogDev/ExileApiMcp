@@ -77,6 +77,15 @@ In the Hexile scaffolding the shared server on 50910 starts on demand: `tools\mc
 `X-Hexile-Agent` header (`X-Hexile-Branch` and `X-Hexile-Cwd` optional, all URI-escaped): the HUD then shows that agent in
 `hud_sessions`, on the guide card and in the agent log, with its own bridge connection (`Hosting/CallerIdentity.cs`).
 Requests without it are the server's own identity (`HEXILE_AGENT`, "control center" for the shared one).
+A caller counts as an agent on the HUD's chip only while it calls: a minute timer (`Bridge/BridgeRegistry.cs`) sends
+`session.touch` on the connections of a caller whose HTTP request is still running (incident_wait, a long observe_wait;
+POST requests counted per caller in `CallerIdentity.Enter`) and closes those of a caller idle for 30 min. The bridge stops
+counting an mcp-http caller after 10 min without a call (`hud_sessions` shows it `stale`) unless it holds a lease. A worker
+the supervisor retires closes its idle callers at once.
+The server's own identity and the F8 route-dispatcher say `role: infra` in their hello: the shared server's machinery, not
+agents. A stdio server asks its client for its roots on the first call even when its cwd has a branch: Claude Code starts
+it in the project folder (the main checkout) while the session works in a worktree, so it would read "main"; a root in
+another checkout gives it that checkout's branch as its label (`SessionIdentity.AdoptRoots`).
 
 For your own server (MCP development, or outside the scaffolding):
 ```

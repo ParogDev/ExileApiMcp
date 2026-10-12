@@ -49,6 +49,8 @@ static void DrainOnSupervisorSignal(WebApplication app) => _ = Task.Run(async ()
     string? line;
     while ((line = await Console.In.ReadLineAsync()) != null && line.Trim() != "drain") { }
     Console.Error.WriteLine("[ExileApiMcp] the supervisor retired this worker (a newer build took over, or it stops): finishing running requests, then exiting");
+    // Callers with nothing running here leave the HUD now instead of staying on this build until the last long call ends.
+    (app.Services.GetService(typeof(ExileApiMcp.Bridge.BridgeRegistry)) as ExileApiMcp.Bridge.BridgeRegistry)?.Retire();
     app.Lifetime.StopApplication();
 });
 

@@ -296,6 +296,16 @@ Start Port    End Port
         && SessionIdentity.IdOf(CallerIdentity.FromHeaders("main", null, @"C:\repo")!) != SessionIdentity.IdOf(CallerIdentity.FromHeaders("main", null, @"C:\elsewhere")!));
     Check("caller: the id doesn't depend on the server's pid (stable across an idle restart)", System.Text.RegularExpressions.Regex.IsMatch(SessionIdentity.IdOf(c!), "^route-act2 ü#http-[0-9a-f]{8}$") && SessionIdentity.IdOf(c!) == SessionIdentity.IdOf(CallerIdentity.FromHeaders(c!.Label, null, c.Cwd + "\\")!));
     reg.Dispose();
+    // The HUD counts agents by role and by whether a call is open (bridge Shared/Sessions.cs PresentLocked).
+    Check("caller: an agent caller's hello says role agent", ch["role"]?.ToString() == "agent");
+    Check("caller: an infra caller's hello says role infra", SessionIdentity.HelloParams(new CallerIdentity("route-dispatcher", null, null) { Infra = true })["role"]?.ToString() == "infra");
+    var cid = SessionIdentity.IdOf(c!);
+    var e1 = CallerIdentity.Enter(cid); var e2 = CallerIdentity.Enter(cid);
+    var two = CallerIdentity.OpenCalls(cid);
+    e1.Dispose(); e1.Dispose();   // twice: counted once
+    var one = CallerIdentity.OpenCalls(cid);
+    e2.Dispose();
+    Check("caller: open calls counted per caller, each leave once", two == 2 && one == 1 && CallerIdentity.OpenCalls(cid) == 0 && CallerIdentity.OpenCalls("nobody") == 0, $"{two} {one}");
 }
 
 // ── F8 dispatcher: CLI discovery, handler command line, environment, brief, result parsing (Dispatch/FeedbackKit.cs) ──

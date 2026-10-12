@@ -11,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.76.1";
+    public const string Version = "3.77.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -117,7 +117,7 @@ internal static class McpSetup
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             var r = await server.RequestRootsAsync(new ListRootsRequestParams(), cts.Token);
             if (!SessionIdentity.AdoptRoots(r.Roots.Select(x => x.Uri)))
-                Console.Error.WriteLine($"[Session] none of the client's {r.Roots.Count} root(s) is a git checkout; keeping '{SessionIdentity.Label}'");
+                Console.Error.WriteLine($"[Session] none of the client's {r.Roots.Count} root(s) names another git checkout; keeping '{SessionIdentity.Label}'");
         }
         catch (Exception ex)
         {
