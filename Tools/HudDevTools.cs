@@ -231,6 +231,13 @@ public static partial class HudDevTools
         var hud = Installs(bridges, bridge.Game == "auto" ? game : bridge.Game).FirstOrDefault();
         if (last["error"] is { } err && hud != null) result["error"] = Clip(hud.ForAgent(err.ToString()));
         else if (last["error"] != null) result["error"] = last["error"];
+        // Newer bridges check after a good compile that the new instance loaded and initialised (error not_loaded /
+        // not_initialised / init_failed, with message), and name PluginBridge methods still answering from the old one.
+        foreach (var key in new[] { "message", "via", "instances", "initialized", "staleBridgeMethods" })
+            if (last[key] is { Type: not JTokenType.Null } v) result[key] = v;
+        if (last["warnings"] is JArray { Count: > 0 } warnings) result["warnings"] = warnings;
+        else if (last["initialized"] == null && result["ok"]?.Value<bool>() == true)
+            result["warnings"] = new JArray("This bridge build doesn't confirm the plugin initialised after the reload: if it doesn't seem to Tick, check loggedSinceReload for its Initialise line, and update Whats An AI Bridge.");
 
         // Give the plugin a moment to initialise, then report what it logged since the reload started.
         if (hud != null)
@@ -253,8 +260,11 @@ public static partial class HudDevTools
         if (result["ok"]?.Value<bool>() == false)
         {
             result["error"] ??= "reload failed";
-            // The HUD unloads the old assembly before compiling, so a failed reload leaves the plugin off.
-            result["note"] = "The plugin stays unloaded until it compiles: fix the diagnostics and call reload_plugin again.";
+            // The HUD unloads the old assembly before compiling, so a failed reload leaves the plugin off. A failure
+            // after the compile (not_loaded, not_initialised, init_failed) carries its own message instead.
+            if (result["message"] == null)
+                result["note"] = "The plugin stays unloaded until it compiles: fix the diagnostics and call reload_plugin again." +
+                                 (result["staleBridgeMethods"] != null ? " Meanwhile its PluginBridge methods (staleBridgeMethods) answer from the unloaded instance." : "");
             var diags = new JArray();
             var text = string.Join("\n", (result["loggedSinceReload"] as JArray ?? []).Select(x => x["message"]?.ToString()));
             foreach (System.Text.RegularExpressions.Match m in CompilerDiagnostic().Matches(text))

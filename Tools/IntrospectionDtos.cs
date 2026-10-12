@@ -67,6 +67,8 @@ public sealed class BridgeCallResult
     /// <summary>How long the call took inside the HUD.</summary>
     public double? Ms { get; set; }
     public string? Note { get; set; }
+    /// <summary>Set when the method belongs to a plugin instance that is no longer loaded: the result is that old instance's state.</summary>
+    public string? Stale { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -80,5 +82,7 @@ public sealed class BridgeMethodInfo
     public string? DeclaredIn { get; set; }
     /// <summary>Set instead of the above when the registered value is not a delegate.</summary>
     public string? ValueType { get; set; }
+    /// <summary>Set when the delegate belongs to a plugin instance that is no longer loaded (reloaded or failed to compile): it answers from that instance's stale state.</summary>
+    public string? Stale { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
