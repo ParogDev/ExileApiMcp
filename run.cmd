@@ -13,6 +13,9 @@ rem
 rem stdio starts the last good build immediately and refreshes the build in the background for the
 rem next start: clients such as Claude Desktop probe and restart servers within a second, and a
 rem server that is still building misses that window. --http (and the first ever start) build first.
+rem --disable-build-servers: clients launch this inside the Claude app's MSIX package (virtualized %LOCALAPPDATA%); a
+rem build server left running there would be reused by builds outside it, which then resolve paths in the wrong view
+rem (deploy.ps1 has the incident).
 setlocal
 set "PROJ=%~dp0"
 set "LAUNCH=%PROJ%bin\launch"
@@ -25,11 +28,11 @@ for %%A in (%*) do if /i "%%A"=="--http" set "FAST="
 
 if defined FAST (
   echo [ExileApiMcp] starting the last build; refreshing it in the background for the next start 1>&2
-  start "" /b cmd /c "dotnet build "%PROJ%ExileApiMcp.csproj" -c Debug -nologo -v q -o "%BUILD%" <nul >nul 2>&1 & dotnet build "%SUPPROJ%" -c Debug -nologo -v q -o "%BUILD%\supervisor" <nul >nul 2>&1"
+  start "" /b cmd /c "dotnet build "%PROJ%ExileApiMcp.csproj" -c Debug -nologo -v q --disable-build-servers -o "%BUILD%" <nul >nul 2>&1 & dotnet build "%SUPPROJ%" -c Debug -nologo -v q --disable-build-servers -o "%BUILD%\supervisor" <nul >nul 2>&1"
 ) else (
-  dotnet build "%PROJ%ExileApiMcp.csproj" -c Debug -nologo -v q -o "%BUILD%" 1>&2
+  dotnet build "%PROJ%ExileApiMcp.csproj" -c Debug -nologo -v q --disable-build-servers -o "%BUILD%" 1>&2
   if errorlevel 1 echo [ExileApiMcp] build failed - starting the last good build 1>&2
-  dotnet build "%SUPPROJ%" -c Debug -nologo -v q -o "%BUILD%\supervisor" 1>&2
+  dotnet build "%SUPPROJ%" -c Debug -nologo -v q --disable-build-servers -o "%BUILD%\supervisor" 1>&2
   if errorlevel 1 echo [ExileApiMcp] supervisor build failed - starting the last good one 1>&2
 )
 if not exist "%BUILD%\ExileApiMcp.dll" (
