@@ -52,7 +52,9 @@ public static class SessionIdentity
     /// <summary>The client's own session id (the Claude Code session id the hooks see), or null when the client gives none:
     /// a shared-server caller's X-Hexile-Session header, else the tool call's _meta conversation id, else a stdio server's
     /// CLAUDE_CODE_SESSION_ID / CLAUDE_SESSION_ID. Incident answers and labels use it.</summary>
-    public static string? ClientSession => CallerIdentity.Current is { } c ? c.ClientSessionId : RequestSession.Value?.Id ?? (Kind == "mcp" ? EnvSession().Id : null);
+    // The env id wins over _meta: a Claude Code stdio server's env id is the one its hooks use, so one session never
+    // answers under two ids.
+    public static string? ClientSession => CallerIdentity.Current is { } c ? c.ClientSessionId : (Kind == "mcp" ? EnvSession().Id : null) ?? RequestSession.Value?.Id;
 
     /// <summary>The session id that is the same inside a tool call and in the background monitor: the HTTP caller's header,
     /// else a stdio server's env id, never a per-request _meta id. Deploy leases record it (ownerSession) and server beats
@@ -62,7 +64,7 @@ public static class SessionIdentity
     /// <summary>Where a stdio server's client session id came from (env var name, or the request's _meta key), or null:
     /// mcp_status shows it, so whether the client passes its session id is visible, not assumed.</summary>
     public static string? ClientSessionSource => CallerIdentity.Current is { } c ? (c.ClientSessionId != null ? "header " + CallerIdentity.SessionHeader : null)
-        : RequestSession.Value is { } m ? "_meta " + m.Key : Kind == "mcp" ? EnvSession().Name : null;
+        : (Kind == "mcp" ? EnvSession().Name : null) ?? (RequestSession.Value is { } m ? "_meta " + m.Key : null);
 
     // A per-conversation id the client put in the tool call's _meta, for the request being handled (UseRequestMeta).
     private static readonly AsyncLocal<(string Key, string Id)?> RequestSession = new();
@@ -81,7 +83,8 @@ public static class SessionIdentity
     public static void UseRequestMeta(IReadOnlyCollection<KeyValuePair<string, string?>>? meta)
     {
         if (CallerIdentity.Current != null) return;   // an HTTP caller names itself in headers
-        FirstMetaKeys ??= meta?.Select(kv => kv.Key).ToArray() ?? [];
+        // The first call that carries _meta at all (a call without any says nothing about what the client can send).
+        if (FirstMetaKeys == null && meta is { Count: > 0 }) FirstMetaKeys = meta.Select(kv => kv.Key).ToArray();
         RequestSession.Value = meta is { Count: > 0 } ? PickMetaSession(meta) : null;
     }
 
