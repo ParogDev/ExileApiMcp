@@ -44,8 +44,8 @@ public static class WatchTools
         var snapParams = new JObject
         {
             ["path"] = expression, ["depth"] = depth, ["maxNodes"] = maxNodes, ["components"] = components,
-            // Each sample is one main-thread request: keep it well inside the interval.
-            ["timeMs"] = Math.Clamp(intervalMs / 2, 10, 250),
+            // Each sample is one main-thread request: at most a fifth of the interval (a cut sample says so in lastTruncation).
+            ["timeMs"] = Math.Clamp(intervalMs / 5, 10, 100),
         };
         var sw = Stopwatch.StartNew();
         var diff = new WatchDiff();
