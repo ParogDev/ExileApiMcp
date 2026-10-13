@@ -51,7 +51,7 @@ public static class DeployIncidents
     /// <summary>The deploy's owner label: its "owner" field, else who raised it.</summary>
     public static string OwnerLabel(Incident i) => i.Get("owner")?.ToString() is { Length: > 0 } o ? o : i.RaisedBy;
 
-    /// <summary>The client session that deployed (SessionIdentity.ClientSession at deploy time), or null (older deploys, or a
+    /// <summary>The client session that deployed (SessionIdentity.ServerSession at deploy time), or null (older deploys, or a
     /// server that knew no client session id).</summary>
     public static string? OwnerSession(Incident i) => i.Get("ownerSession")?.ToString() is { Length: > 0 } s ? s : null;
 
@@ -88,7 +88,7 @@ public static class DeployIncidents
     {
         if (SessionIdentity.Kind == "mcp-http") return [];
         var me = SessionIdentity.Label;
-        var session = SessionIdentity.ClientSession;
+        var session = SessionIdentity.ServerSession;
         var board = IncidentStore.Read();
         var candidates = board.Incidents.Where(i => i.IsOpen && i.Kind == "deploy" && i.OwnerPid is { } p && p != SessionIdentity.Pid
                                                     && SameOwner(i, me, session)
@@ -166,7 +166,7 @@ public static class DeployIncidents
                 Fix = $"{me} runs deploy_plugin plugin=\"{folder}\" action=restore when done. If {me}'s session is gone (orphaned), any session may restore it or deploy over it.",
                 Fields =
                 {
-                    ["owner"] = me, ["ownerPid"] = SessionIdentity.Pid, ["ownerSession"] = SessionIdentity.ClientSession, ["plugin"] = folder, ["commit"] = commit,
+                    ["owner"] = me, ["ownerPid"] = SessionIdentity.Pid, ["ownerSession"] = SessionIdentity.ServerSession, ["plugin"] = folder, ["commit"] = commit,
                     ["mainPath"] = mainPath, ["beforeBranch"] = beforeBranch, ["beforeCommit"] = beforeSha, ["heartbeatAt"] = IsoUtcConverter.Iso(now),
                 },
             }, me, now);
@@ -188,7 +188,7 @@ public static class DeployIncidents
     /// for as long as the server runs (once it stops after being idle, they are orphaned like any dead session's).</summary>
     public static List<string> Mine(IncidentFile f) =>
         f.Incidents.Where(i => i.IsOpen && i.Kind == "deploy" && i.OwnerPid == SessionIdentity.Pid
-                               && (SessionIdentity.Kind == "mcp-http" || SameOwner(i, SessionIdentity.Label, SessionIdentity.ClientSession))).Select(i => i.Id).ToList();
+                               && (SessionIdentity.Kind == "mcp-http" || SameOwner(i, SessionIdentity.Label, SessionIdentity.ServerSession))).Select(i => i.Id).ToList();
 
     // ── The scan: HUD-source submodules detached off origin/main with no deploy on the board ──
 

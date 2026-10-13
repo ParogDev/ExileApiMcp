@@ -1086,9 +1086,11 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check("distinct: two main-checkout callers are two HUD sessions",
         SessionIdentity.IdOf(CallerIdentity.FromHeaders("main", null, @"C:\repo", "aaaa1111")!) != SessionIdentity.IdOf(CallerIdentity.FromHeaders("main", null, @"C:\repo", "bbbb2222")!));
     static KeyValuePair<string, string?> M(string k, string? v) => new(k, v);
-    Check("meta: a session / conversation id key is picked", SessionIdentity.PickMetaSession([M("progressToken", "7"), M("claudecode/sessionId", "abc")]) is { Key: "claudecode/sessionId", Id: "abc" }
-        && SessionIdentity.PickMetaSession([M("conversation_id", " c1 ")])?.Id == "c1");
-    Check("meta: nothing else is", SessionIdentity.PickMetaSession([M("progressToken", "7"), M("sessionId", null), M("session", "x")]) == null);
+    Check("meta: a session / conversation id key is picked", SessionIdentity.PickMetaSession([M("progressToken", "7"), M("claudecode/sessionId", "abcd1234-5")]) is { Key: "claudecode/sessionId", Id: "abcd1234-5" }
+        && SessionIdentity.PickMetaSession([M("conversation_id", " c1234567x ")])?.Id == "c1234567x");
+    Check("meta: nothing else is (other keys, parentSessionId, short or empty values)", SessionIdentity.PickMetaSession([M("progressToken", "7"), M("sessionId", null), M("session", "abcdefgh12"),
+        M("parentSessionId", "abcdefgh12"), M("x.traceSessionId", "abcdefgh12"), M("conversationId", "a-b-c")]) == null);
+    Check("session-like: 8+ letters/digits", SessionIdentity.IsSessionLike("bd3b164e-1243") && !SessionIdentity.IsSessionLike("a") && !SessionIdentity.IsSessionLike("--------"));
 }
 
 // ── Outage drivers: one runner, and the stop re-checks the board ──

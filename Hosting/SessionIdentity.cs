@@ -23,7 +23,11 @@ public static class SessionIdentity
     private static string _label = MakeLabel(_branch, _cwd);
     public static string Cwd => CallerIdentity.Current is { } c ? c.Cwd ?? _cwd : _cwd;
     public static string? Branch => CallerIdentity.Current is { } c ? c.Branch : _branch;
-    public static string Label => CallerIdentity.Current?.Label ?? (RequestSession.Value is { } m ? Distinct(_label, m.Id) : _label);
+    public static string Label => CallerIdentity.Current?.Label ?? _label;
+    /// <summary>The name an incident answer carries: <see cref="Label"/>, made distinct by a tool call's _meta conversation id
+    /// on a shared server ("Claude Desktop:&lt;8&gt;"). Only answers: deploys, leases and the bridge keep Label, which the
+    /// background monitor sees too.</summary>
+    public static string ResponseLabel => CallerIdentity.Current?.Label ?? (RequestSession.Value is { } m ? Distinct(_label, m.Id) : _label);
     /// <summary>The session's process: the supervisor (Supervisor/README.md) when there is one, so a swap to a newly deployed
     /// build stays the same session to the HUD; else this process.</summary>
     public static readonly int Pid = int.TryParse(Environment.GetEnvironmentVariable("HEXILE_SESSION_PID"), out var sp) && sp > 0 ? sp : Environment.ProcessId;
@@ -46,9 +50,14 @@ public static class SessionIdentity
     public static string ResponseId => ClientSession ?? (CallerIdentity.Current is { } c ? IdOf(c) : _id);
 
     /// <summary>The client's own session id (the Claude Code session id the hooks see), or null when the client gives none:
-    /// a shared-server caller's X-Hexile-Session header, else a stdio server's CLAUDE_CODE_SESSION_ID / CLAUDE_SESSION_ID.
-    /// Deploy leases record it (ownerSession), so ownership follows the session, not a server pid.</summary>
+    /// a shared-server caller's X-Hexile-Session header, else the tool call's _meta conversation id, else a stdio server's
+    /// CLAUDE_CODE_SESSION_ID / CLAUDE_SESSION_ID. Incident answers and labels use it.</summary>
     public static string? ClientSession => CallerIdentity.Current is { } c ? c.ClientSessionId : RequestSession.Value?.Id ?? (Kind == "mcp" ? EnvSession().Id : null);
+
+    /// <summary>The session id that is the same inside a tool call and in the background monitor: the HTTP caller's header,
+    /// else a stdio server's env id, never a per-request _meta id. Deploy leases record it (ownerSession) and server beats
+    /// carry it, so the monitor's Mine / Adopt see the same id a deploy was stamped with.</summary>
+    public static string? ServerSession => CallerIdentity.Current is { } c ? c.ClientSessionId : Kind == "mcp" ? EnvSession().Id : null;
 
     /// <summary>Where a stdio server's client session id came from (env var name, or the request's _meta key), or null:
     /// mcp_status shows it, so whether the client passes its session id is visible, not assumed.</summary>
@@ -65,28 +74,34 @@ public static class SessionIdentity
     /// <summary>
     /// A shared stdio server (the Claude desktop app runs one for all its conversations, Code tab included) gets no
     /// per-conversation id from MCP itself. When the client puts one in a tool call's _meta (any string value whose key names
-    /// a session or conversation id), the call runs as that session: incident answers and deploy leases carry it and the
-    /// label becomes "Claude Desktop:&lt;short id&gt;". Without one, every conversation stays this server's one identity.
+    /// a session or conversation id), the call runs as that session: incident answers carry it and the label becomes
+    /// "Claude Desktop:&lt;short id&gt;". Deploy leases don't (ServerSession: the monitor can't see a per-request id).
+    /// Without one, every conversation stays this server's one identity.
     /// </summary>
-    public static void UseRequestMeta(IEnumerable<KeyValuePair<string, string?>>? meta)
+    public static void UseRequestMeta(IReadOnlyCollection<KeyValuePair<string, string?>>? meta)
     {
-        var list = meta?.ToList() ?? [];
-        FirstMetaKeys ??= list.Select(kv => kv.Key).ToArray();
-        RequestSession.Value = CallerIdentity.Current != null ? null : PickMetaSession(list);
+        if (CallerIdentity.Current != null) return;   // an HTTP caller names itself in headers
+        FirstMetaKeys ??= meta?.Select(kv => kv.Key).ToArray() ?? [];
+        RequestSession.Value = meta is { Count: > 0 } ? PickMetaSession(meta) : null;
     }
 
-    /// <summary>The _meta entry naming the conversation (pure: tests call it): a key ending in sessionId / session_id /
-    /// conversationId / conversation_id (any prefix, any case) with a non-empty string value.</summary>
+    /// <summary>The _meta entry naming the conversation (pure: tests call it): a key whose last segment (after '/' or '.')
+    /// is exactly sessionId / session_id / conversationId / conversation_id (any case; parentSessionId is not one), with a
+    /// value of 8-100 chars holding at least 8 letters or digits.</summary>
     public static (string Key, string Id)? PickMetaSession(IEnumerable<KeyValuePair<string, string?>> meta)
     {
         foreach (var (k, v) in meta)
         {
-            var key = k.Replace("_", "").Replace("-", "");
-            if (v is { Length: > 0 } && v.Length <= 100 && (key.EndsWith("sessionid", StringComparison.OrdinalIgnoreCase) || key.EndsWith("conversationid", StringComparison.OrdinalIgnoreCase)))
-                return (k, v.Trim());
+            var last = k[(Math.Max(k.LastIndexOf('/'), k.LastIndexOf('.')) + 1)..].Replace("_", "").Replace("-", "");
+            if ((last.Equals("sessionid", StringComparison.OrdinalIgnoreCase) || last.Equals("conversationid", StringComparison.OrdinalIgnoreCase))
+                && IsSessionLike(v))
+                return (k, v!.Trim());
         }
         return null;
     }
+
+    /// <summary>Long enough to tell sessions apart: 8-100 chars after trimming, at least 8 of them letters or digits.</summary>
+    public static bool IsSessionLike(string? v) => v?.Trim() is { Length: >= 8 and <= 100 } t && t.Count(char.IsAsciiLetterOrDigit) >= 8;
 
     // A method, not a static field: MakeLabel needs it while the static fields above are still being initialized.
     private static (string? Name, string? Id) EnvSession()

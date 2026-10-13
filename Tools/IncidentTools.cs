@@ -99,7 +99,9 @@ public static class IncidentTools
         {
             // Without a client session id, every conversation of a shared server answers as one: the tag keys this one.
             var tag = SessionIdentity.ClientSession == null && !string.IsNullOrWhiteSpace(sessionTag) ? sessionTag.Trim() : null;
-            if (tag is { Length: > 100 }) tag = tag[..100];
+            // Too short to tell sessions apart ("a" would merge with every other "a"): refused, not silently widened.
+            if (tag != null && !SessionIdentity.IsSessionLike(tag))
+                throw new McpException($"sessionTag '{tag}' is too short to name one conversation: give 8-100 chars with at least 8 letters or digits (your Claude Code session id, CLAUDE_CODE_SESSION_ID, is one)");
             var i = IncidentStore.Respond(target, status.Trim().ToLowerInvariant(), note,
                 minutes is { } m && m > 0 ? DateTime.UtcNow.AddMinutes(Math.Min(m, 7 * 24 * 60)) : null,
                 who: tag != null ? SessionIdentity.Distinct(SessionIdentity.Label, tag) : null, sessionId: tag);

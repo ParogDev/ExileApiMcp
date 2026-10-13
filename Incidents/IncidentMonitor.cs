@@ -201,7 +201,7 @@ public sealed class IncidentMonitor(BridgeRegistry bridges, IncidentWatcher watc
     {
         // Who runs under which label and client session (per pid), then take over this session's deploys whose owner process
         // died (a server restart, a resumed session): DeployIncidents.Judge doesn't call them orphaned while this server beats.
-        IncidentStore.BeatServer(Hosting.SessionIdentity.Pid, Hosting.SessionIdentity.Label, Hosting.SessionIdentity.Kind, Hosting.SessionIdentity.ClientSession);
+        IncidentStore.BeatServer(Hosting.SessionIdentity.Pid, Hosting.SessionIdentity.Label, Hosting.SessionIdentity.Kind, Hosting.SessionIdentity.ServerSession);
         DeployIncidents.Adopt();
         var board = IncidentStore.Read();
         var mine = DeployIncidents.Mine(board);

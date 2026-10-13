@@ -308,7 +308,7 @@ public static class IncidentStore
         Update(f =>
         {
             var i = IncidentLogic.Find(f, idOrKey) ?? throw new ArgumentException(NotFound(f, idOrKey));
-            IncidentLogic.Respond(i, who ?? Hosting.SessionIdentity.Label, status, note, until, DateTime.UtcNow, sessionId ?? Hosting.SessionIdentity.ResponseId);
+            IncidentLogic.Respond(i, who ?? Hosting.SessionIdentity.ResponseLabel, status, note, until, DateTime.UtcNow, sessionId ?? Hosting.SessionIdentity.ResponseId);
             return i;
         });
 
