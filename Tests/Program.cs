@@ -897,6 +897,13 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check("availability: an open outage is not now user-restart with its id", L(fo) is { State: "notNow", Reason: "user-restart", OutageId: "i-1" });
     var fo2 = F(null, "unavailable"); fo2.OutageId = "i-2"; fo2.OutagePhase = "down"; fo2.HudAlive = false;
     Check("availability: an outage without a file (older bridge) still says user-restart", L(fo2) is { Reason: "user-restart", OutageId: "i-2" });
+    var fo3 = F(S("loading", 4, inGame: true)); fo3.OutageId = "i-3"; fo3.OutagePhase = "holding";
+    Check("availability: an announced/holding outage leaves a normal load a load", L(fo3) is { State: "notNow", Reason: "loading" } fhl && fhl.OutageId == null, L(fo3)?.Reason);
+    var fo4 = F(S("menu", 30)); fo4.OutageId = "i-4"; fo4.OutagePhase = "announced";
+    Check("availability: an announced outage at the menu is the menu", L(fo4) is { Reason: "menu" });
+    var fp = F(S("starting", 10)); fp.HudStartedAt = now.AddSeconds(-10); fp.State!.PrevCloseReason = "user-restart";
+    Check("availability: prevCloseReason reads and shows in the starting text", L(fp) is { Reason: "starting" } sp && sp.Detail.Contains("previous HUD closed: user-restart")
+        && ExileApiMcp.Bridge.HudStateReader.Parse("""{ "phase": "starting", "prevCloseReason": "crash" }""")!.PrevCloseReason == "crash", L(fp)?.Detail);
 
     var parsed = ExileApiMcp.Bridge.HudStateReader.Parse("""{ "schema": 1, "game": "poe2", "phase": "loading", "since": "2026-10-11T11:59:56Z", "heartbeat": "2026-10-11T11:59:59Z", "inGame": true, "lastArea": "Clearfell", "lastLoadMs": 3100, "startup": { "sec": 41.2 }, "future": 7 }""");
     Check("hud-state.json: parsed, times UTC, unknown fields kept", parsed is { Phase: "loading", LastArea: "Clearfell", LastLoadMs: 3100, InGame: true }
@@ -1047,6 +1054,28 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     var (orph, why) = DeployIncidents.Judge(i, now, (_, _) => false, now, (_, _) => 200);
     Check("same label: owner gone but its label's server beats -> not orphaned, it adopts", !orph && why.Contains("pid 200"), why);
     Check("same label: no such server -> orphaned as before", DeployIncidents.Judge(i, now, (_, _) => false, now, (_, _) => null).Orphaned);
+    Check("same label: a live but silent owner stays orphaned (Adopt takes dead pids only)",
+        DeployIncidents.Judge(i, now.AddMinutes(-11), (_, _) => true, now, (_, _) => 200).Orphaned);
+}
+
+// ── Outage drivers: one runner, and the stop re-checks the board ──
+{
+    var f = new IncidentFile { Rev = 1 };
+    var (o, _) = OutageLogic.Raise(f, "poe2", "patch", "a#1", "A", 100, now);
+    Func<int, bool?> alive = _ => true;
+    Check("outage driver: the owner's own server may run it", OutageLogic.DrivenElsewhere(o, 100, 5000, alive) == null);
+    Check("outage driver: another server refuses while the owner lives", OutageLogic.DrivenElsewhere(o, 200, 6000, alive) is { } w1 && w1.Contains("owner pid 100"));
+    Check("outage driver: a dead owner lets another server run it", OutageLogic.DrivenElsewhere(o, 200, 6000, p => p != 100) == null);
+    o.Set("runnerPid", 5000);
+    Check("outage driver: another live worker of the same session refuses", OutageLogic.DrivenElsewhere(o, 100, 5001, alive) is { } w2 && w2.Contains("runner pid 5000")
+        && OutageLogic.DrivenElsewhere(o, 100, 5000, alive) == null && OutageLogic.DrivenElsewhere(o, 100, 5001, p => p != 5000) == null);
+    Check("outage stop: not before the countdown", OutageLogic.WhyNotStop(o) is { } n0 && n0.Contains("announced"));
+    OutageLogic.BeginCountdown(o, "t", now, now.AddSeconds(8));
+    Check("outage stop: counting down, nothing else -> stop", OutageLogic.WhyNotStop(o) == null);
+    var oi = OutageLogic.Info(o)!; oi.Answer = "notNow"; OutageLogic.SetInfo(o, oi);
+    Check("outage stop: Cancel recorded -> no stop", OutageLogic.WhyNotStop(o) is { } n1 && n1.Contains("Cancel"));
+    OutageLogic.SetPhase(o, "cancelled", "t", now, "cancelled: test");
+    Check("outage stop: resolved -> no stop", OutageLogic.WhyNotStop(o) is { } n2 && n2.Contains("resolved") && OutageLogic.WhyNotStop(null) != null, OutageLogic.WhyNotStop(o));
 }
 
 

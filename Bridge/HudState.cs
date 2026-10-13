@@ -35,6 +35,8 @@ public sealed class HudStateFile
     public double? TypicalStartupSec { get; set; }
     public List<double>? RecentStartupSec { get; set; }
     public string? CloseReason { get; set; }
+    /// <summary>The previous HUD's closeReason, carried into this file at starting (newer bridges; diagnosis text only).</summary>
+    public string? PrevCloseReason { get; set; }
     [JsonExtensionData] public IDictionary<string, JToken>? Extra { get; set; }
 
     /// <summary>In game for "back" decisions: inGame, or phase ready.</summary>
@@ -105,13 +107,14 @@ public static class HudAvailabilityLogic
     public static readonly TimeSpan MainThreadFrozen = TimeSpan.FromSeconds(5);
     /// <summary>A HUD start, measured on PoE2 (research/hud-startup-timing.md): usually ~35 s, up to ~100 s; stuck after 150 s with no listener.</summary>
     public const double StartupUsualSec = 35, StartupMaxSec = 100, StartupStuckSec = 150;
-    public static readonly string[] OutageHoldingPhases = ["announced", "holding", "down", "waitingGame"];
 
     public static HudAvailability? Diagnose(HudAvailabilityFacts f)
     {
         var s = f.State;
         var G = f.Game == "poe1" ? "PoE1" : f.Game == "poe2" ? "PoE2" : f.Game;
-        var outage = f.OutageId != null && (f.OutagePhase == null || OutageHoldingPhases.Contains(f.OutagePhase));
+        // Only once the HUD is stopping or stopped (down / waitingGame; unreadable phase too) is it the user's restart: in
+        // announced / holding the HUD still runs and a load is just a load.
+        var outage = f.OutageId != null && f.OutagePhase is null or "down" or "waitingGame";
         if (outage && (s == null || f.HudAlive == false || !s.IsInGame || s.Phase is not "ready"))
             return NotNow(f, "user-restart", s,
                 $"the user is restarting {G} (game and HUD) by hand: outage {f.OutageId} is at phase {f.OutagePhase ?? "?"}; it resolves by itself once the game is back in",
@@ -211,7 +214,7 @@ public static class HudAvailabilityLogic
         var usual = s?.TypicalStartupSec ?? StartupUsualSec;
         var expected = inSec < usual ? usual - inSec : StartupMaxSec - inSec;
         return NotNow(f, "starting", s,
-            $"the {G} HUD is starting, usually ~{usual:0} s, up to ~{StartupMaxSec:0} s; {inSec:0} s in ({evidence})",
+            $"the {G} HUD is starting, usually ~{usual:0} s, up to ~{StartupMaxSec:0} s; {inSec:0} s in ({evidence}{(s?.PrevCloseReason != null ? $"; the previous HUD closed: {s.PrevCloseReason}" : "")})",
             "pubsub_wait kinds=hud.phase, or retry when it is up", sinceOverride: inSec, expected: Math.Max(1, expected));
     }
 

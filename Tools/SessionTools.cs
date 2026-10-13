@@ -393,7 +393,7 @@ public static class SessionTools
         return call;
     }
 
-    /// <summary>mode=user: raise (or join) the outage, show the card, start the runner, answer at once.</summary>
+    /// <summary>mode=user: raise (or join) the outage; a new one shows the card and starts the runner here. Answers at once.</summary>
     private static async Task<CallToolResult> UserRestart(BridgeRegistry bridges, string g, string reason, CancellationToken ct)
     {
         var (inc, created) = Incidents.IncidentStore.Update(f =>
@@ -404,7 +404,8 @@ public static class SessionTools
         var (busy, ready, answer, readinessNote) = await Incidents.OutageRunner.ReadinessAsync(bridges, g, inc.Id, info.RequestedBy, ct);
         if (readinessNote != null) notes.Add(readinessNote);
         Incidents.IncidentStore.Update(f => Incidents.IncidentLogic.Find(f, inc.Id) is { IsOpen: true } i && Incidents.OutageLogic.SetParticipants(i, answer, busy, ready, DateTime.UtcNow));
-        Incidents.OutageRunner.Start(bridges, g, inc.Id);
+        // Join only when it was already announced: its owner's runner drives it (or a monitor adopts it once that owner is gone).
+        if (created && Incidents.OutageRunner.Start(bridges, g, inc.Id) is { } startNote) notes.Add($"runner not started here: {startNote}");
         static RestartOutageSession View(Incidents.OutageSession s) => new() { Session = s.Session, Label = s.Label, Doing = s.Doing, Lease = s.Lease };
         var result = new RestartResult
         {

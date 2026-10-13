@@ -38,8 +38,9 @@ public static class DeployIncidents
         var alive = pidAlive(pid.Value, i.RaisedAt);
         var beat = heartbeat ?? ParseIso(i.Get("heartbeatAt")) ?? i.RaisedAt;
         var stale = beat is { } b && now - b > HeartbeatStale;
-        if ((alive == false || stale) && sameLabelServer?.Invoke(owner, pid.Value) is { } other)
-            return (false, $"owner process {pid} ({owner}) is {(alive == false ? "gone" : "silent")}, but a server with the same label (pid {other}) beats: it adopts the deploy");
+        // Only a dead owner: Adopt takes dead pids only, so a live-but-silent owner stays orphaned by its stale heartbeat below.
+        if (alive == false && sameLabelServer?.Invoke(owner, pid.Value) is { } other)
+            return (false, $"owner process {pid} ({owner}) is gone, but a server with the same label (pid {other}) beats: it adopts the deploy");
         if (alive == false) return (true, $"owner process {pid} ({owner}) is gone");
         if (stale)
             return (true, $"no heartbeat from {owner} (pid {pid}) for {(int)(now - beat!.Value).TotalMinutes} min");

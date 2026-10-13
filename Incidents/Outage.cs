@@ -238,6 +238,32 @@ public static class OutageLogic
         return (busy, ready);
     }
 
+    /// <summary>The worker process that drives the outage (runnerPid), or null.</summary>
+    public static int? RunnerPid(Incident i) => i.Get("runnerPid")?.Type == JTokenType.Integer ? i.Get("runnerPid")!.Value<int>() : null;
+
+    /// <summary>
+    /// Who else drives this outage: null when this process may (owner = this session's pid or dead / unrecorded, runner = this
+    /// process or dead / unrecorded), else the link that says no. Liveness unknown (null) counts as alive.
+    /// </summary>
+    public static string? DrivenElsewhere(Incident i, int sessionPid, int processId, Func<int, bool?> alive)
+    {
+        if (i.OwnerPid is { } owner && owner != sessionPid && alive(owner) != false) return $"owner pid {owner} (another server) is alive";
+        if (RunnerPid(i) is { } runner && runner != processId && alive(runner) != false) return $"runner pid {runner} (another worker) is alive";
+        return null;
+    }
+
+    /// <summary>The stop may still run: open, phase down, counting down (not stopped yet), no Cancel recorded. Else why not.</summary>
+    public static string? WhyNotStop(Incident? i)
+    {
+        if (i == null) return "the outage is gone from the board";
+        if (!i.IsOpen) return $"the outage is {i.State}";
+        if (Info(i) is not { } o) return "the outage field is unreadable";
+        if (o.Phase != "down") return $"phase is {o.Phase}, not down";
+        if (o.StoppedAt != null) return "already stopped";
+        if (o.Answer == "notNow") return "the user pressed Cancel";
+        return null;
+    }
+
     private static string? Str(JToken? t) => t == null || t.Type == JTokenType.Null ? null : t is JArray a ? string.Join("; ", a.Select(x => x.ToString())) : t.ToString();
 }
 
@@ -259,20 +285,30 @@ public static class OutageRunner
 
     public static bool IsRunning(string id) => Running.TryGetValue(id, out var t) && !t.IsCompleted;
 
-    private static int? RunnerPid(Incident i) => i.Get("runnerPid")?.Type == JTokenType.Integer ? i.Get("runnerPid")!.Value<int>() : null;
+    private static int? RunnerPid(Incident i) => OutageLogic.RunnerPid(i);
 
-    public static void Start(BridgeRegistry bridges, string game, string id)
+    /// <summary>Runs the outage here; refused (null returned is success, else the reason) when another live server owns it or
+    /// another live worker already runs it: two runners would each defer to the other's runnerPid and nobody would drive it.</summary>
+    public static string? Start(BridgeRegistry bridges, string game, string id)
     {
-        if (IsRunning(id)) return;
+        if (IsRunning(id)) return null;
         // The worker process that runs it (a supervised session's pid stays the supervisor's across hot swaps, so the old
-        // worker and the new one would both drive it): the other one steps back (RunAsync, AdoptOrphans).
-        IncidentStore.Update(f => { if (IncidentLogic.Find(f, id) is { IsOpen: true } i) i.Set("runnerPid", Environment.ProcessId); return 0; });
+        // worker and the new one would both drive it): stamped only when nobody else live drives it (RunAsync, AdoptOrphans).
+        var refused = IncidentStore.Update(f =>
+        {
+            if (IncidentLogic.Find(f, id) is not { IsOpen: true } i) return "the outage is not open";
+            if (OutageLogic.DrivenElsewhere(i, SessionIdentity.Pid, Environment.ProcessId, p => DeployIncidents.PidAlive(p, null)) is { } why) return why;
+            i.Set("runnerPid", Environment.ProcessId);
+            return null;
+        });
+        if (refused != null) { Console.Error.WriteLine($"[Outage] {id}: not started here: {refused}"); return refused; }
         Running[id] = Task.Run(async () =>
         {
             try { await RunAsync(bridges, game, id); }
             catch (Exception ex) { Console.Error.WriteLine($"[Outage] {id} runner failed: {ex.GetType().Name}: {ex.Message}"); }
             finally { Running.TryRemove(id, out _); }
         });
+        return null;
     }
 
     /// <summary>Busy / ready and the card's answer, best effort (empty lists when the bridge can't say).</summary>
@@ -346,8 +382,8 @@ public static class OutageRunner
                 if (info?.Phase is "announced" or "holding" or "cancelled" || info is { Phase: "down", StoppedAt: null }) await SetCardAsync(bridges, game, id, "cancelled", info.Reason, info.RequestedByLabel, true, ct);
                 return;
             }
-            if (inc.OwnerPid is { } owner && owner != SessionIdentity.Pid && DeployIncidents.PidAlive(owner, null) != false) return;   // another server drives it
-            if (RunnerPid(inc) is { } runner && runner != Environment.ProcessId && DeployIncidents.PidAlive(runner, null) != false) return;   // a newer worker of this session took over
+            // Another server drives it, or another worker of this session took over.
+            if (OutageLogic.DrivenElsewhere(inc, SessionIdentity.Pid, Environment.ProcessId, p => DeployIncidents.PidAlive(p, null)) != null) return;
             var now = DateTime.UtcNow;
             switch (info.Phase)
             {
@@ -397,8 +433,9 @@ public static class OutageRunner
                     // Counting down to stopAt: Cancel on the card (outage.answer notNow) still cancels, re-checked at stopAt itself.
                     if (info.StopAt.Value > now)
                     {
+                        // Sleep to stopAt, then go round again: the board is re-read (resolved / cancelled / another driver / Cancel recorded).
                         try { await Task.Delay(info.StopAt.Value - now + TimeSpan.FromMilliseconds(100), ct); } catch (OperationCanceledException) { return; }
-                        now = DateTime.UtcNow;
+                        continue;
                     }
                     if (since == long.MaxValue) since = 0;
                     var (answer, next) = await AnswerAsync(bridges, game, id, since, ct);
@@ -418,6 +455,12 @@ public static class OutageRunner
                         return;
                     }
                     if (step != OutageStep.Stop) break;
+                    // Last look at the board right before the stop: the answer calls above took time.
+                    if (OutageLogic.WhyNotStop(IncidentLogic.Find(IncidentStore.Read(), id)) is { } whyNot)
+                    {
+                        Console.Error.WriteLine($"[Outage] {id}: no stop at stopAt: {whyNot}");
+                        continue;   // the loop head takes the card down / follows the new phase
+                    }
                     var (code, output) = await Tools.SessionTools.RunRestartScriptAsync(game, info.RequestedByLabel ?? SessionIdentity.Label, info.Reason ?? "user restart",
                         60, stopOnly: true, force: false, kind: "user", outageId: id, ct);   // -Outage skips the coordination by itself
                     if (code == 0)
