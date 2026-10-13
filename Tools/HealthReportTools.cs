@@ -208,7 +208,12 @@ public static class HealthReportTools
             foreach (var p in (r["problems"] as JArray ?? []).Select(x => x.ToString()).Where(x => x.Contains(" BROKEN: ") || x.Contains(" blocked: ")))
                 findings.Add($"bridge reflection link {p}: fix the link in the bridge's Shared/HudLinks.cs (rows: bridge method reflection.preflight)");
         }
-        catch (McpException ex) { sb.AppendLine($"Reflection preflight: hello failed ({ex.Message})"); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // The report goes on without it; the failure is in the report, not swallowed.
+            o["reflectionError"] = $"{ex.GetType().Name}: {ex.Message}";
+            sb.AppendLine($"Reflection preflight: hello failed ({ex.GetType().Name}: {ex.Message})");
+        }
         return findings;
     }
 

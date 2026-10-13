@@ -512,6 +512,8 @@ public sealed class BridgeReflectionPreflight
     /// <summary>Needs a broken link.</summary>
     public int? Blocked { get; set; }
     public List<string>? Problems { get; set; }
+    /// <summary>Links broken at the previous load's check that work now.</summary>
+    public List<string>? Recovered { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
