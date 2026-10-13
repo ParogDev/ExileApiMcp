@@ -680,6 +680,8 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check("lint reflection: Activator.CreateInstance and DynamicInvoke from Render", refl.Any(f => f.Call == "Activator.CreateInstance") && refl.Any(f => f.Call == "Delegate.DynamicInvoke"), Dump());
     Check("lint reflection: a dynamic call site", refl.Any(f => f.Call.StartsWith("dynamic (Binder.", StringComparison.Ordinal) && f.Method == "LintFixturePlugin.Render"), Dump());
     Check("lint reflection: an async method's body (state machine MoveNext) is on the path", refl.Any(f => f.Call == "Type.GetField" && f.Chain?.StartsWith("LintFixturePlugin.Tick > LintFixturePlugin.TickAsync > <TickAsync>d__", StringComparison.Ordinal) == true && f.Chain.EndsWith(".MoveNext", StringComparison.Ordinal)), Dump());
+    Check("lint reflection: an async lambda's body is on the path", refl.Any(f => f.Call == "Type.GetMethods" && f.Chain?.StartsWith("LintFixturePlugin.Render > ", StringComparison.Ordinal) == true), Dump());
+    Check("lint reflection: an uncalled async overload is not linked to the called one", !refl.Any(f => f.Call == "Type.GetConstructor"), Dump());
     Check("lint reflection: Type.GetProperty in Initialise (not per frame) is not reported", !refl.Any(f => f.Method == "LintFixturePlugin.Initialise"), Dump());
 }
 
@@ -1186,6 +1188,16 @@ internal sealed class LintFixturePlugin
         _ = f.DynamicInvoke();
         dynamic d = this;
         _ = d.Value;
+        Func<Task> later = async () => { await Task.Yield(); _ = typeof(LintFixturePlugin).GetMethods(); };
+        _ = later();
+        Load(1);
+    }
+    private void Load(int _) { }
+    // Never called: its state machine must not be linked to the Load(int) overload Render calls.
+    private async Task Load()
+    {
+        await Task.Yield();
+        _ = typeof(LintFixturePlugin).GetConstructor(Type.EmptyTypes);
     }
 }
 

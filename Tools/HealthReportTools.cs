@@ -161,8 +161,12 @@ public static class HealthReportTools
                 actions.Add(Action($"Lint {src!.Folder}", "hud_plugin_lint", new JObject { ["plugin"] = src.Folder }));
                 try
                 {
-                    var hot = PluginLint.Lint(dll).Where(f => f.InLoop && f.CostNs > 0).OrderByDescending(f => f.CostNs * f.Count).Take(3).ToList();
+                    var all = PluginLint.Lint(dll);
+                    var hot = all.Where(f => f.InLoop && f.CostNs > 0).OrderByDescending(f => f.CostNs * f.Count).Take(3).ToList();
                     if (hot.Count > 0) sb.AppendLine($"Lint {src!.Folder}: " + string.Join("; ", hot.Select(f => $"{f.Method} {f.Call} in a loop (~{f.CostNs:N0} ns)")));
+                    var refl = all.Where(f => f.Kind == "reflection").ToList();
+                    if (refl.Count > 0)
+                        sb.AppendLine($"Lint {src!.Folder}: {refl.Count} reflection site(s) on Tick/Render paths, e.g. {refl[0].Call} via {refl[0].Chain} (cache a delegate)");
                     foreach (var f in hot)
                         lint.Add(new JObject { ["plugin"] = src!.Folder, ["method"] = f.Method, ["call"] = f.Call, ["count"] = f.Count, ["costNs"] = f.CostNs, ["advice"] = f.Advice });
                 }

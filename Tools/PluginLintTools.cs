@@ -40,11 +40,10 @@ public static class PluginLintTools
                 List<PluginLint.Finding> findings;
                 try { findings = PluginLint.Lint(dll); }
                 catch (Exception ex) { sb.AppendLine($"{hud.Game} {src.Folder}: could not read {Path.GetFileName(dll)}: {ex.Message}"); continue; }
-                var hot = findings.Where(f => f.InLoop).ToList();
                 var refl = findings.Where(f => f.Kind == "reflection").ToList();
                 var other = findings.Where(f => f.Kind != "reflection").ToList();
                 var jit = PluginLint.JitOptimized(dll);
-                sb.AppendLine($"{hud.Game} {src.Folder}: {findings.Count} expensive call site(s) on Tick/Render paths, {hot.Count} in loops/lambdas, {refl.Count} reflection");
+                sb.AppendLine($"{hud.Game} {src.Folder}: {other.Count} expensive call site(s) on Tick/Render paths, {other.Count(f => f.InLoop)} in loops/lambdas; {refl.Count} reflection site(s)");
                 if (!jit) sb.AppendLine($"  JIT  {PluginLint.JitAdvice}");
                 // Reflection lines carry their call chain; the fix (cache a delegate) is the same for each. A chain through a
                 // once-only guard (a Bind() that caches) or a request handler is a lead, not proof of per-frame cost.

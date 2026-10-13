@@ -117,24 +117,32 @@ public static class PluginLint
                 if (mdef.RelativeVirtualAddress == 0) continue;
                 calls[mh] = Scan(pe.GetMethodBody(mdef.RelativeVirtualAddress).GetILBytes());
             }
-        // Async methods and iterators (coroutines): the body is MoveNext of a nested <Method>d__N type that the stub never
-        // calls directly. Add that edge (as a non-call, like ldftn) so their bodies are on the path too.
-        foreach (var th in md.TypeDefinitions)
-        {
-            var type = md.GetTypeDefinition(th);
-            foreach (var nh in type.GetNestedTypes())
+        // Async methods, async lambdas/local functions and iterators (coroutines): the body is MoveNext of a compiler-made
+        // state machine type that the stub never calls directly. The stub names it in its [AsyncStateMachine] /
+        // [IteratorStateMachine] / [AsyncIteratorStateMachine] attribute; add that edge (as a non-call, like ldftn) so the
+        // bodies are on the path too. Matched per stub, so overloads don't cross-link.
+        var typesByName = md.TypeDefinitions.GroupBy(FullName, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        foreach (var mh in calls.Keys)
+            foreach (var ah in md.GetMethodDefinition(mh).GetCustomAttributes())
             {
-                var nested = md.GetTypeDefinition(nh);
-                var nestedName = md.GetString(nested.Name);
-                var end = nestedName.IndexOf(">d__", StringComparison.Ordinal);
-                if (!nestedName.StartsWith('<') || end < 2) continue;
-                var owner = nestedName[1..end];
-                var moveNext = nested.GetMethods().FirstOrDefault(m => md.GetString(md.GetMethodDefinition(m).Name) == "MoveNext");
-                if (moveNext.IsNil) continue;
-                foreach (var mh in type.GetMethods())
-                    if (md.GetString(md.GetMethodDefinition(mh).Name) == owner && calls.TryGetValue(mh, out var list))
-                        list.Add((MetadataTokens.GetToken(moveNext), 0, false, true));
+                var attr = md.GetCustomAttribute(ah);
+                if (AttributeTypeName(md, attr.Constructor) is not ("AsyncStateMachineAttribute" or "IteratorStateMachineAttribute" or "AsyncIteratorStateMachineAttribute")) continue;
+                var blob = md.GetBlobReader(attr.Value);
+                if (blob.ReadUInt16() != 1 || blob.ReadSerializedString() is not { } smName) continue;
+                // A serialized type name may carry ", Assembly..." after the type; nested types are joined with '+'.
+                var comma = smName.IndexOf(", ", StringComparison.Ordinal);
+                if (comma > 0) smName = smName[..comma];
+                if (!typesByName.TryGetValue(smName, out var sm)) continue;
+                var moveNext = md.GetTypeDefinition(sm).GetMethods().FirstOrDefault(m => md.GetString(md.GetMethodDefinition(m).Name) == "MoveNext");
+                if (!moveNext.IsNil) calls[mh].Add((MetadataTokens.GetToken(moveNext), 0, false, true));
             }
+        string FullName(TypeDefinitionHandle th)
+        {
+            var t = md.GetTypeDefinition(th);
+            var outer = t.GetDeclaringType();
+            if (!outer.IsNil) return FullName(outer) + "+" + md.GetString(t.Name);
+            var ns = md.GetString(t.Namespace);
+            return ns.Length == 0 ? md.GetString(t.Name) : ns + "." + md.GetString(t.Name);
         }
 
         // Reachable from Tick/Render through the plugin's own methods (MethodDef targets, incl. ldftn for lambdas).
