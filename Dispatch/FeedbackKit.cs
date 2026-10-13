@@ -126,7 +126,7 @@ public static class FeedbackKit
     {
         var d = press["data"] as JObject ?? new JObject();
         var seq = press["seq"]?.Value<long>() ?? 0;
-        var what = d["Note"] is { Type: JTokenType.String } n && n.ToString().Trim().Length > 0 ? n.ToString() : d["Event"]?.ToString() ?? "feedback";
+        var what = F8.Note(d) ?? F8.What(d);
         var all = Regex.Replace(what.Trim(), @"\s+", " ");
         var head = string.Join(' ', all.Split(' ').Take(7));
         if (head.Length > 48) head = head[..48].TrimEnd();
@@ -312,29 +312,33 @@ public static class FeedbackKit
     /// <summary>The handler's brief: the press, what the route was doing, the trace since the previous press, the last
     /// answers, and where the standing brief and the reply path are.</summary>
     public static string Brief(JObject press, IReadOnlyList<JObject> trace, IReadOnlyList<JObject> lastReplies, string standingBrief,
-        string liveDir, long? previousPress)
+        string liveDir, long? previousPress, string? reopenedAnswer = null)
     {
         var d = press["data"] as JObject ?? new JObject();
         var seq = press["seq"]?.Value<long>() ?? 0;
         var sb = new StringBuilder();
         sb.AppendLine($"# F8 press #{seq} ({Time(press["at"])} UTC)");
         sb.AppendLine();
-        sb.AppendLine($"- Verdict: **{d["Event"]}**" + (d["Note"] is { Type: JTokenType.String } n ? $" - the player wrote: \"{n}\"" : " (no note)"));
+        // The player's own words and picks first: they say where to look and what not to waste time on.
+        var section = F8.PressSection(d, seq, reopenedAnswer);
+        if (section.Length > 0) { sb.Append(section); sb.AppendLine(); }
+        sb.AppendLine($"- Asked: **{F8.What(d)}**" + (F8.Note(d) is { } n ? $" - the player wrote: \"{n}\"" : " (no note)"));
         sb.AppendLine($"- Area: {d["AreaName"]} ({d["Area"]}), step index {d["StepIndex"]}: {d["Label"]} (target {d["Target"]})");
         if (d["PlayerGrid"] is JArray g) sb.AppendLine($"- Player grid cell: [{string.Join(", ", g)}]");
         sb.AppendLine($"- Bridge event #{seq}; feedback.jsonl line #{d["Seq"]}.");
         sb.AppendLine();
         sb.AppendLine("## First");
         sb.AppendLine($"1. The standing brief (the user's rules, the fix flow, how to reply) is in your system prompt; read `{standingBrief}` only if it is not.");
-        sb.AppendLine($"2. Show the player you are on it when it takes more than a minute: MCP `feedback_reply seq={seq} status=working text=\"...\"`.");
-        sb.AppendLine($"3. Live route fixes: `{Path.Combine(liveDir, "route.live.json")}` (reloaded within 0.5 s). Another handler or agent may edit it too: read it right before you write, change only your entries.");
-        sb.AppendLine("4. End with one or two plain sentences for the player (shown above the route card); they say what to do now.");
+        sb.AppendLine($"2. Report your stage: MCP `feedback_reply seq={seq} stage=<Fixing | LiveFix | Merging ...> text=\"...\"` (Investigating and Reviewing are set for you; Fixing and LiveFix are not: say them). LiveFix = the player can try it now.");
+        sb.AppendLine("3. Need the player? 'Where' is a route step (`route_agent action=set ref=" + seq + "`), 'what' is an instruction (a guided step), 'which' is an ask (`ask_user`).");
+        sb.AppendLine($"4. Live route fixes: `{Path.Combine(liveDir, "route.live.json")}` (reloaded within 0.5 s). Another handler or agent may edit it too: read it right before you write, change only your entries.");
+        sb.AppendLine("5. End with one or two plain sentences for the player (shown above the route card); they say what to do now. After a fix the dispatcher watches the route for 3 min to confirm it.");
         sb.AppendLine();
         if (lastReplies.Count > 0)
         {
             sb.AppendLine("## What the last handlers answered");
             foreach (var r in lastReplies)
-                sb.AppendLine($"- #{r["data"]?["ref"]} ({Time(r["at"])}): {Clip(r["data"]?["text"]?.ToString(), 300)}");
+                sb.AppendLine($"- #{F8.ReplyRef(r["data"])} ({Time(r["at"])}): {Clip(F8.ReplyText(r["data"]), 300)}");
             sb.AppendLine();
         }
         sb.AppendLine(previousPress is { } p ? $"## Trace since the previous press (#{p})" : "## Recent trace");
@@ -353,6 +357,12 @@ public static class FeedbackKit
     {
         var d = e["data"] as JObject ?? new JObject();
         var sb = new StringBuilder($"{Time(e["at"])} {d["Event"]}");
+        if (e["kind"]?.ToString() == PressKind)
+        {
+            sb.Append($" (F8 #{e["seq"]}: {F8.What(d)}");
+            if (F8.PressRef(d) is { } pr) sb.Append($", about #{pr}: {F8.Verdict(d) ?? "?"}");
+            sb.Append(')');
+        }
         if (d["AreaName"] is { Type: JTokenType.String } a) sb.Append($" in {a} ({d["Area"]})");
         if (d["Label"] is { Type: JTokenType.String } l && l.ToString().Length > 0) sb.Append($" step '{l}'");
         if (d["Target"] is { Type: JTokenType.String } t && t.ToString().Length > 0) sb.Append($" target {t}");

@@ -263,11 +263,11 @@ public static class FeedbackSessions
         foreach (var e in replyEvents)
         {
             var d = e["data"] as JObject;
-            if (d?["ref"]?.Type is not (JTokenType.Integer or JTokenType.Float) || !bySeq.TryGetValue(d["ref"]!.Value<long>(), out var s)) continue;
+            if (F8.ReplyRef(d) is not { } refSeq || !bySeq.TryGetValue(refSeq, out var s)) continue;
             replies++;
             s.Replies.Add(new FeedbackReply
             {
-                Seq = e["seq"]?.Value<long>() ?? 0, At = FeedbackKit.At(e["at"]), Status = d["status"]?.ToString(), Text = d["text"]?.ToString(), Source = e["source"]?.ToString(),
+                Seq = e["seq"]?.Value<long>() ?? 0, At = FeedbackKit.At(e["at"]), Status = (d!["status"] ?? d["Status"])?.ToString(), Stage = F8.Stage(d["Stage"]?.ToString()), Text = F8.ReplyText(d), Source = e["source"]?.ToString(),
             });
         }
         foreach (var s in sessions)
