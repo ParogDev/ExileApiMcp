@@ -43,6 +43,8 @@ public static class HealthReportTools
         var desk = DesktopState.Read();
         o["desktop"] = desk;
         sb.AppendLine(desk["warning"] is { } w ? $"Screen: {w}" : "Screen: display on, game in front.");
+        var reflectionFindings = await ReflectionPreflight(bridges, game, o, sb, ct);
+        if (reflectionFindings.Count > 0) o["findings"] = new JArray(reflectionFindings);   // kept when the trace is skipped below
 
         // A trace with the game behind another window measures a hidden overlay: check first instead of tracing and warning after.
         if (await FocusGate.WaitAsync(bridges, game, "hud_health_report", waitForGameSec, ct) is { } notInFront)
@@ -97,7 +99,7 @@ public static class HealthReportTools
         string S(string k, string s = "avg") => r[k]?[s]?.ToString() ?? "-";
         var fps = r["hudFps"]?.Value<double>() ?? 0;
         sb.AppendLine($"Frames: {fps} fps, interval {S("frameIntervalMs")} ms (max {S("frameIntervalMs", "max")}, sd {S("frameIntervalMs", "sd")}); work {S("updateMs")} ms = plugins {S("pluginsMs")} + HUD core {S("coreMs")}");
-        var findings = new List<string>();
+        var findings = new List<string>(reflectionFindings);
         // A measurement with the game in the background measures a hidden overlay and, often, a game capped to 30 fps.
         if (r["foreground"]?["share"]?.Value<double?>() is { } share && share < 0.95)
         {
@@ -183,6 +185,31 @@ public static class HealthReportTools
         actions.Add(Action("Check drawing lag", "overlay_accuracy", new JObject()));
         o["actions"] = actions;
         return (o, sb.ToString());
+    }
+
+    /// <summary>
+    /// The bridge's reflection preflight (hello.reflection): HUD internals the bridge reaches by reflection, checked when it
+    /// loaded. Copied into the report as reflection, one text line, and a finding per broken link. Older bridges have none.
+    /// </summary>
+    private static async Task<List<string>> ReflectionPreflight(BridgeRegistry bridges, string? game, JObject o, StringBuilder sb, CancellationToken ct)
+    {
+        var findings = new List<string>();
+        try
+        {
+            var (_, hello) = await bridges.QueryAsync(game, "hello", ct);
+            if (hello["reflection"] is not JObject r) return findings;
+            o["reflection"] = r;
+            var broken = r["broken"]?.Value<int?>() ?? 0;
+            var blocked = r["blocked"]?.Value<int?>() ?? 0;
+            var changed = r["changedFrom"]?.Value<string>() is { } from ? $" (HUD build changed since the last check, was {from})" : "";
+            sb.AppendLine(broken + blocked == 0
+                ? $"Reflection preflight: {r["ok"]}/{r["targets"]} HUD internals ok{changed}."
+                : $"Reflection preflight: {broken} broken, {blocked} blocked of {r["targets"]} HUD internals{changed}.");
+            foreach (var p in (r["problems"] as JArray ?? []).Select(x => x.ToString()).Where(x => x.Contains(" BROKEN: ") || x.Contains(" blocked: ")))
+                findings.Add($"bridge reflection link {p}: fix the link in the bridge's Shared/HudLinks.cs (rows: bridge method reflection.preflight)");
+        }
+        catch (McpException ex) { sb.AppendLine($"Reflection preflight: hello failed ({ex.Message})"); }
+        return findings;
     }
 
     private static JObject Action(string label, string tool, JObject args) => new() { ["label"] = label, ["tool"] = tool, ["args"] = args };
