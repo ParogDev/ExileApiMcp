@@ -1174,6 +1174,26 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
         && ExileApiMcp.Tools.HealthReportTools.ReflectionLine(crashed).StartsWith("Reflection preflight: did not run (preflight failed"), ExileApiMcp.Tools.HealthReportTools.ReflectionLine(crashed));
     var typed = ExileApiMcp.Tools.Dto.From<ExileApiMcp.Tools.HealthReport>(new JObject { ["reflection"] = bad, ["findings"] = new JArray(f) });
     Check("reflection: HealthReport.Reflection is the same object the findings came from", typed.Reflection?.Broken == 1 && typed.Reflection.Blocked == 3 && typed.Findings?.Count == 4);
+
+    // Typed rows win over the problem text: classification by each row's status, counts from broken / blocked.
+    var rows = JObject.Parse("""{"targets":24,"ok":21,"broken":1,"notNow":1,"blocked":1,"problems":["misleading text with BROKEN: in it"],"links":[{"id":"a.b","status":"broken","type":"T","member":"_m","expected":"field of X","found":"no such member","feature":"gc.pool"},{"id":"c.d","status":"blocked","found":"needs a.b, which is broken"},{"id":"e.f","status":"not_now","note":"has a BROKEN: word"}]}""");
+    var rf = ExileApiMcp.Tools.HealthReportTools.ReflectionFindings(rows);
+    Check("reflection: typed rows -> one finding per broken / blocked row, not_now none", rf.Count == 2
+        && rf[0].StartsWith("bridge reflection link a.b BROKEN: T: expected field of X; no such member (breaks gc.pool)") && rf[1].StartsWith("bridge reflection link c.d blocked:"), string.Join(" | ", rf));
+    var allOkRows = JObject.Parse("""{"targets":24,"ok":17,"broken":0,"notNow":7,"blocked":0,"problems":["x BROKEN: y"],"links":[{"id":"h.d","status":"not_now","note":"n"}]}""");
+    Check("reflection: zero broken / blocked counts -> no finding whatever the text says", ExileApiMcp.Tools.HealthReportTools.ReflectionFindings(allOkRows).Count == 0);
+    var shortRows = JObject.Parse("""{"targets":24,"ok":22,"broken":2,"notNow":0,"blocked":0,"problems":[],"links":[{"id":"a.b","status":"broken"}]}""");
+    Check("reflection: rows missing for a count -> named", ExileApiMcp.Tools.HealthReportTools.ReflectionFindings(shortRows).Count == 2);
+
+    // hello without a usable reflection is a finding, never silence.
+    var errHello = JObject.Parse("""{"error":"not_ready","message":"HUD starting"}""");
+    Check("reflection: hello error object -> unavailable with the error", ExileApiMcp.Tools.HealthReportTools.ReflectionOf(errHello, out var why1) == null
+        && why1!.Contains("hello returned an error: not_ready (HUD starting)") && ExileApiMcp.Tools.HealthReportTools.UnavailableFinding(why1).StartsWith("bridge reflection preflight unavailable: hello returned an error"), why1);
+    Check("reflection: hello without reflection -> predates preflight", ExileApiMcp.Tools.HealthReportTools.ReflectionOf(JObject.Parse("""{"game":"poe2"}"""), out var why2) == null
+        && why2 == "bridge has no reflection field (predates preflight)", why2);
+    Check("reflection: hello with reflection -> that object", ExileApiMcp.Tools.HealthReportTools.ReflectionOf(new JObject { ["reflection"] = rows }, out var why3) == rows && why3 == null);
+    var typedRows = ExileApiMcp.Tools.Dto.From<ExileApiMcp.Tools.BridgeReflectionPreflight>(rows);
+    Check("reflection: typed links rows parse", typedRows.Links?.Count == 3 && typedRows.Links[0].Status == "broken" && typedRows.Links[1].Found == "needs a.b, which is broken");
 }
 
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");

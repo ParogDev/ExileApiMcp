@@ -514,6 +514,25 @@ public sealed class BridgeReflectionPreflight
     public List<string>? Problems { get; set; }
     /// <summary>Links broken at the previous load's check that work now.</summary>
     public List<string>? Recovered { get; set; }
+    /// <summary>The rows that aren't ok (hello) or every row (reflection.preflight); absent on bridges before the typed rows.</summary>
+    public List<BridgeReflectionLink>? Links { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>One reflection target of the bridge's preflight.</summary>
+public sealed class BridgeReflectionLink
+{
+    public string? Id { get; set; }
+    /// <summary>ok | broken (gone after an update) | not_now (there, value not set yet) | blocked (needs a broken link).</summary>
+    public string? Status { get; set; }
+    public string? Type { get; set; }
+    public string? Member { get; set; }
+    public string? Expected { get; set; }
+    /// <summary>Broken: what the type has instead; blocked: which link it needs.</summary>
+    public string? Found { get; set; }
+    public string? Note { get; set; }
+    /// <summary>What stops working while it is broken.</summary>
+    public string? Feature { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
