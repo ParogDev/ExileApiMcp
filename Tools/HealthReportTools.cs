@@ -97,6 +97,14 @@ public static class HealthReportTools
         }
         catch (McpException ex) { sb.AppendLine($"Trace: bridge unreachable ({ex.Message})"); return (o, sb.ToString()); }
         o["trace"] = r;
+        // The trace loaded 0Harmony, and the bridge re-checks its Harmony / MonoMod links then: read hello again so those
+        // rows (not_now before the trace) are judged too, instead of being reported unchecked.
+        if ((o["reflection"]?["notNow"]?.Value<int?>() ?? 0) > 0)
+        {
+            var (o2, sb2) = (new JObject(), new StringBuilder());
+            var again = await ReflectionPreflight(bridges, game, o2, sb2, ct);
+            if (o2["reflection"] is JObject r2) { o["reflection"] = r2; reflectionFindings = again; sb.Append("After the trace: ").Append(sb2); }
+        }
 
         string S(string k, string s = "avg") => r[k]?[s]?.ToString() ?? "-";
         var fps = r["hudFps"]?.Value<double>() ?? 0;
@@ -228,7 +236,9 @@ public static class HealthReportTools
         var broken = r["broken"]?.Value<int?>() ?? 0;
         var blocked = r["blocked"]?.Value<int?>() ?? 0;
         var changed = r["changedFrom"]?.Value<string>() is { } from ? $" (HUD build changed since the last check, was {from})" : "";
-        // No targets checked: the bridge's preflight itself failed (its problems say why), never "ok".
+        // The bridge says its check failed: its counts are unknown, never "0 broken".
+        if (FailedError(r) is { } error) return $"Reflection preflight: FAILED ({error}); its counts are unknown.";
+        // No targets checked (a bridge before the failed flag): the bridge's preflight itself failed (its problems say why), never "ok".
         if ((r["targets"]?.Value<int?>() ?? 0) == 0)
             return $"Reflection preflight: did not run ({string.Join("; ", (r["problems"] as JArray ?? []).Select(x => x.ToString()).DefaultIfEmpty("no targets and no reason given"))}).";
         return broken + blocked == 0
@@ -255,6 +265,16 @@ public static class HealthReportTools
         return null;
     }
 
+    /// <summary>hello.reflection's error when the bridge flagged its check <c>failed</c> (the error, else its first problem), else null.</summary>
+    public static string? FailedError(JObject r) =>
+        r["failed"]?.Type == JTokenType.Boolean && r["failed"]!.Value<bool>()
+            ? r["error"]?.Value<string>() is { Length: > 0 } e ? e
+              : (r["problems"] as JArray)?.FirstOrDefault()?.ToString() is { } p ? (p.StartsWith(FailedPrefix, StringComparison.Ordinal) ? p[FailedPrefix.Length..] : p)
+              : "no error given"
+            : null;
+
+    private const string FailedPrefix = "preflight failed: ";
+
     public static string UnavailableFinding(string why) =>
         $"bridge reflection preflight unavailable: {why}; HUD-update drift isn't checked until the bridge reports it (update / reload the bridge, then bridge_status)";
 
@@ -265,6 +285,11 @@ public static class HealthReportTools
     {
         var findings = new List<string>();
         var problems = (r["problems"] as JArray ?? []).Select(x => x.ToString()).ToList();
+        if (FailedError(r) is { } error)
+        {
+            findings.Add($"preflight failed: {error} (bridge reflection preflight; its counts are unknown, not 0 broken: bridge method reflection.preflight refresh=true re-runs it; the bridge's Shared/Preflight.cs)");
+            return findings;
+        }
         if ((r["targets"]?.Value<int?>() ?? 0) == 0)
         {
             foreach (var p in problems)

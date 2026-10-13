@@ -1194,6 +1194,21 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check("reflection: hello with reflection -> that object", ExileApiMcp.Tools.HealthReportTools.ReflectionOf(new JObject { ["reflection"] = rows }, out var why3) == rows && why3 == null);
     var typedRows = ExileApiMcp.Tools.Dto.From<ExileApiMcp.Tools.BridgeReflectionPreflight>(rows);
     Check("reflection: typed links rows parse", typedRows.Links?.Count == 3 && typedRows.Links[0].Status == "broken" && typedRows.Links[1].Found == "needs a.b, which is broken");
+
+    // failed: true wins over every count: the report never reads it as "0 broken" or "ok".
+    var failed = JObject.Parse("""{"targets":24,"ok":24,"broken":0,"notNow":0,"blocked":0,"failed":true,"error":"InvalidOperationException: boom","problems":["preflight failed: InvalidOperationException: boom"]}""");
+    var ff = ExileApiMcp.Tools.HealthReportTools.ReflectionFindings(failed);
+    var fl = ExileApiMcp.Tools.HealthReportTools.ReflectionLine(failed);
+    Check("reflection: failed flag -> one finding 'preflight failed: <error>', line FAILED, never 0 broken / ok",
+        ff.Count == 1 && ff[0].StartsWith("preflight failed: InvalidOperationException: boom") && fl.StartsWith("Reflection preflight: FAILED (InvalidOperationException: boom)")
+        && !fl.Contains("0 broken") && !fl.Contains(" ok"), $"{fl} | {string.Join(" | ", ff)}");
+    var failedNoError = JObject.Parse("""{"targets":0,"failed":true,"problems":["preflight failed: X: y"]}""");
+    Check("reflection: failed without error -> its first problem", ExileApiMcp.Tools.HealthReportTools.ReflectionFindings(failedNoError).Single().StartsWith("preflight failed: X: y ("));
+    var notFailed = JObject.Parse("""{"targets":24,"ok":24,"broken":0,"notNow":0,"blocked":0,"failed":false,"problems":[]}""");
+    Check("reflection: failed false -> the normal ok line", ExileApiMcp.Tools.HealthReportTools.ReflectionFindings(notFailed).Count == 0
+        && ExileApiMcp.Tools.HealthReportTools.ReflectionLine(notFailed) == "Reflection preflight: 24/24 HUD internals ok.");
+    var typedFailed = ExileApiMcp.Tools.Dto.From<ExileApiMcp.Tools.BridgeReflectionPreflight>(failed);
+    Check("reflection: typed failed / error parse", typedFailed.Failed == true && typedFailed.Error == "InvalidOperationException: boom");
 }
 
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
