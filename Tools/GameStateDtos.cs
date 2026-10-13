@@ -497,9 +497,9 @@ public sealed class BridgeHello
 /// </summary>
 public sealed class BridgeReflectionPreflight
 {
-    /// <summary>HUD assembly version + module id, .NET, Harmony.</summary>
+    /// <summary>HUD assembly version + module id and the .NET runtime.</summary>
     public string? Stamp { get; set; }
-    /// <summary>The previous check's stamp when it differs: a HUD / .NET / Harmony update since.</summary>
+    /// <summary>The previous check's stamp when it differs: a HUD or .NET update since.</summary>
     public string? ChangedFrom { get; set; }
     public DateTimeOffset? CheckedAt { get; set; }
     public double? Ms { get; set; }
