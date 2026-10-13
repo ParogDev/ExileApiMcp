@@ -44,7 +44,9 @@ public static class HealthReportTools
         o["desktop"] = desk;
         sb.AppendLine(desk["warning"] is { } w ? $"Screen: {w}" : "Screen: display on, game in front.");
         var reflectionFindings = await ReflectionPreflight(bridges, game, o, sb, ct);
-        if (reflectionFindings.Count > 0) o["findings"] = new JArray(reflectionFindings);   // kept when the trace is skipped below
+        // Set now so every early return below (trace skipped, not started, interrupted, bridge unreachable) keeps them;
+        // the full path replaces it with a list that starts with the same findings.
+        if (reflectionFindings.Count > 0) o["findings"] = new JArray(reflectionFindings);
 
         // A trace with the game behind another window measures a hidden overlay: check first instead of tracing and warning after.
         if (await FocusGate.WaitAsync(bridges, game, "hud_health_report", waitForGameSec, ct) is { } notInFront)
@@ -198,15 +200,11 @@ public static class HealthReportTools
         {
             var (_, hello) = await bridges.QueryAsync(game, "hello", ct);
             if (hello["reflection"] is not JObject r) return findings;
+            // One source: report.reflection (HealthReport.Reflection) is this object, and the text line and the findings are
+            // derived from it (ReflectionFindings), so they can't disagree.
             o["reflection"] = r;
-            var broken = r["broken"]?.Value<int?>() ?? 0;
-            var blocked = r["blocked"]?.Value<int?>() ?? 0;
-            var changed = r["changedFrom"]?.Value<string>() is { } from ? $" (HUD build changed since the last check, was {from})" : "";
-            sb.AppendLine(broken + blocked == 0
-                ? $"Reflection preflight: {r["ok"]}/{r["targets"]} HUD internals ok{changed}."
-                : $"Reflection preflight: {broken} broken, {blocked} blocked of {r["targets"]} HUD internals{changed}.");
-            foreach (var p in (r["problems"] as JArray ?? []).Select(x => x.ToString()).Where(x => x.Contains(" BROKEN: ") || x.Contains(" blocked: ")))
-                findings.Add($"bridge reflection link {p}: fix the link in the bridge's Shared/HudLinks.cs (rows: bridge method reflection.preflight)");
+            sb.AppendLine(ReflectionLine(r));
+            findings.AddRange(ReflectionFindings(r));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -216,6 +214,23 @@ public static class HealthReportTools
         }
         return findings;
     }
+
+    /// <summary>The report's one line on hello.reflection.</summary>
+    public static string ReflectionLine(JObject r)
+    {
+        var broken = r["broken"]?.Value<int?>() ?? 0;
+        var blocked = r["blocked"]?.Value<int?>() ?? 0;
+        var changed = r["changedFrom"]?.Value<string>() is { } from ? $" (HUD build changed since the last check, was {from})" : "";
+        return broken + blocked == 0
+            ? $"Reflection preflight: {r["ok"]}/{r["targets"]} HUD internals ok{changed}."
+            : $"Reflection preflight: {broken} broken, {blocked} blocked of {r["targets"]} HUD internals{changed}.";
+    }
+
+    /// <summary>One finding per broken or blocked link of hello.reflection (not_now rows are not findings).</summary>
+    public static List<string> ReflectionFindings(JObject r) =>
+        (r["problems"] as JArray ?? []).Select(x => x.ToString()).Where(x => x.Contains(" BROKEN: ") || x.Contains(" blocked: "))
+            .Select(p => $"bridge reflection link {p}: fix the link in the bridge's Shared/HudLinks.cs (rows: bridge method reflection.preflight)")
+            .ToList();
 
     private static JObject Action(string label, string tool, JObject args) => new() { ["label"] = label, ["tool"] = tool, ["args"] = args };
 

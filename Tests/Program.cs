@@ -1160,6 +1160,19 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     }
 }
 
+// ── hud_health_report: the bridge's reflection preflight (hello.reflection) ──
+{
+    var ok = JObject.Parse("""{"targets":24,"ok":17,"broken":0,"notNow":7,"blocked":0,"problems":["harmony.detours not now: 0Harmony isn't loaded yet"]}""");
+    Check("reflection: all ok -> no findings, not_now isn't one", ExileApiMcp.Tools.HealthReportTools.ReflectionFindings(ok).Count == 0
+        && ExileApiMcp.Tools.HealthReportTools.ReflectionLine(ok) == "Reflection preflight: 17/24 HUD internals ok.");
+    var bad = JObject.Parse("""{"targets":24,"ok":20,"broken":1,"notNow":0,"blocked":3,"changedFrom":"ExileCore2 1.0 (aa)","problems":["runtime.pool_buckets BROKEN: SharedArrayPool: expected x; y (breaks gc.pool)","runtime.pool_partitions blocked: needs runtime.pool_buckets, which is broken","runtime.pool_arrays blocked: needs runtime.pool_partitions, which is broken","runtime.pool_count blocked: needs runtime.pool_partitions, which is broken"]}""");
+    var f = ExileApiMcp.Tools.HealthReportTools.ReflectionFindings(bad);
+    Check("reflection: a finding per broken / blocked link", f.Count == 4 && f[0].StartsWith("bridge reflection link runtime.pool_buckets BROKEN"), string.Join(" | ", f));
+    Check("reflection: line names the build change", ExileApiMcp.Tools.HealthReportTools.ReflectionLine(bad).Contains("1 broken, 3 blocked of 24") && ExileApiMcp.Tools.HealthReportTools.ReflectionLine(bad).Contains("was ExileCore2 1.0 (aa)"));
+    var typed = ExileApiMcp.Tools.Dto.From<ExileApiMcp.Tools.HealthReport>(new JObject { ["reflection"] = bad, ["findings"] = new JArray(f) });
+    Check("reflection: HealthReport.Reflection is the same object the findings came from", typed.Reflection?.Broken == 1 && typed.Reflection.Blocked == 3 && typed.Findings?.Count == 4);
+}
+
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures;
 
