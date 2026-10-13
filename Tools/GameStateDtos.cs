@@ -472,6 +472,8 @@ public sealed class BridgeStatusEntry
     public string? HudApiChanged { get; set; }
     /// <summary>Why the bridge is unreachable.</summary>
     public string? Error { get; set; }
+    /// <summary>The MCP's mirrored DTOs against this bridge's contract (Bridge/BridgeContract.cs): in_step, or the drift by field.</summary>
+    public BridgeContractStatus? Contract { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -487,6 +489,8 @@ public sealed class BridgeHello
     public List<string>? Unsupported { get; set; }
     /// <summary>The bridge's HUD-update drift preflight of this load (bridge Shared/Preflight.cs); absent on older bridges.</summary>
     public BridgeReflectionPreflight? Reflection { get; set; }
+    /// <summary>The bridge's DTO contract hash; bridge_status compares it with the MCP's snapshot (entry contract).</summary>
+    public BridgeContractSummary? Contract { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -519,6 +523,39 @@ public sealed class BridgeReflectionPreflight
     /// <summary>True when the check itself failed (nothing checked: the zero counts are unknown, never "0 broken"); absent otherwise.</summary>
     public bool? Failed { get; set; }
     /// <summary>Why the check failed (with <see cref="Failed"/>).</summary>
+    public string? Error { get; set; }
+    /// <summary>reflection.preflight simulateBroken: which link was resolved under a wrong name (a test of the failure path).</summary>
+    public string? Simulated { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>The MCP's mirrored DTOs against one live bridge's contract (Bridge/BridgeContract.cs; bridge_status, hud_health_report).</summary>
+public sealed class BridgeContractStatus
+{
+    /// <summary>in_step (the live hash is the MCP snapshot's, which its tests check) | checked (the hash moved: the live
+    /// schema was compared, see drift) | unknown (an older bridge without a contract, or the check failed: see error).</summary>
+    public string State { get; set; } = "unknown";
+    public string? LiveHash { get; set; }
+    public string? SnapshotHash { get; set; }
+    /// <summary>Declared mirror roots (the types they reach are compared too).</summary>
+    public int? Mirrors { get; set; }
+    /// <summary>"contract drift: McpType.field (bridge BridgeType): missing / extra / type mismatch (bridge X, MCP Y)" per difference.</summary>
+    public List<string>? Drift { get; set; }
+    public string? Error { get; set; }
+    /// <summary>The status in one line.</summary>
+    public string? Line { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>hello.contract: the bridge's DTO contract hash (bridge Shared/ContractSchema.cs); absent on older bridges.</summary>
+public sealed class BridgeContractSummary
+{
+    /// <summary>Format of the schema.</summary>
+    public int? Version { get; set; }
+    /// <summary>Equal to the MCP's snapshot hash = the contract its tests checked.</summary>
+    public string? Hash { get; set; }
+    public int? TypeCount { get; set; }
+    /// <summary>Types the bridge could not reflect, or why the schema failed.</summary>
     public string? Error { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

@@ -149,6 +149,10 @@ public static class BridgeTools
                 entry["status"] = "connected";
                 entry["port"] = b.Port;
                 entry["hello"] = await b.SendRequestAsync("query", new JObject { ["type"] = "hello" }, ct);
+                // The MCP's mirrored DTOs against this bridge's contract: free when the hash is the snapshot's, one
+                // contract.schema call (cached per hash) when it moved; each drift names type, field and both shapes.
+                var contract = await ExileApiMcp.Bridge.BridgeContract.LiveAsync(b, entry["hello"], ct);
+                entry["contract"] = JObject.Parse(System.Text.Json.JsonSerializer.Serialize(contract, Dto.Options));
                 // Facts verified on the other game but not this one: check them before relying on them here.
                 if (FindingsTools.ToCheck(b.Game) is { Count: > 0 } pending)
                     entry["findingsToCheck"] = $"{pending.Count} finding(s) verified on another game but not on {b.Game}: {string.Join(", ", pending)}. " +

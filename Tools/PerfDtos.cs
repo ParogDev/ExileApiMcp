@@ -133,6 +133,8 @@ public sealed class HealthReport
     public BridgeReflectionPreflight? Reflection { get; set; }
     /// <summary>Why reflection is missing: the hello that carries it failed.</summary>
     public string? ReflectionError { get; set; }
+    /// <summary>The MCP's mirrored DTOs against the bridge's contract (hello.contract): a finding per drifted field.</summary>
+    public BridgeContractStatus? Contract { get; set; }
     public List<string>? Findings { get; set; }
     public List<PerfPlugin>? Plugins { get; set; }
     public List<PerfLint>? Lint { get; set; }
