@@ -383,6 +383,8 @@ public sealed class HudLintPlugin
     public bool JitOptimized { get; set; } = true;
     /// <summary>How to fix it, when JitOptimized is false.</summary>
     public string? JitAdvice { get; set; }
+    /// <summary>Once-only reflection sites (cache fills behind a guard): listed in Findings only with includeOnceOnly=true.</summary>
+    public int OnceOnly { get; set; }
     public List<HudLintFinding> Findings { get; set; } = [];
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
