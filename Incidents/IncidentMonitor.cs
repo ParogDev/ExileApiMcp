@@ -134,6 +134,7 @@ public sealed class IncidentMonitor(BridgeRegistry bridges, IncidentWatcher watc
                 foreach (var b in bridges.Bridges) IncidentAuto.CheckRestartState(b);
                 await CheckBridges(stop);
                 CheckPorts();
+                OutageRunner.AdoptOrphans(bridges);   // the user's planned restart goes on when the server that announced it is gone
                 if (tick % 3 == 0) Beat();
                 if (tick % 30 == 0) await Task.Run(() => DeployIncidents.Scan(force: true), stop);
             }
@@ -198,6 +199,10 @@ public sealed class IncidentMonitor(BridgeRegistry bridges, IncidentWatcher watc
 
     private static void Beat()
     {
+        // Who runs under which label (per pid), then take over this label's deploys whose owner process died (a session or
+        // server restart on the same checkout): DeployIncidents.Judge doesn't call them orphaned while this server beats.
+        IncidentStore.BeatServer(Hosting.SessionIdentity.Pid, Hosting.SessionIdentity.Label, Hosting.SessionIdentity.Kind);
+        DeployIncidents.Adopt();
         var board = IncidentStore.Read();
         var mine = DeployIncidents.Mine(board);
         if (mine.Count == 0) return;

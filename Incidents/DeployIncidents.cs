@@ -23,17 +23,76 @@ public static class DeployIncidents
         public string? Owner => Incident?.Get("owner")?.ToString() ?? Incident?.RaisedBy;
     }
 
-    /// <summary>Is this deploy incident's owner gone? Pure given the facts (pid liveness is passed in for tests).</summary>
-    public static (bool Orphaned, string Why) Judge(Incident i, DateTime? heartbeat, Func<int, DateTime?, bool?> pidAlive, DateTime now)
+    /// <summary>
+    /// Is this deploy incident's owner gone? Pure given the facts (pid liveness is passed in for tests). A deploy whose owner
+    /// process died is not orphaned while another server with the owner's label beats (<paramref name="sameLabelServer"/>:
+    /// the label's live server pid other than the owner's, or null): that is the same agent after a session or server
+    /// restart, and its monitor adopts the deploy (<see cref="Adopt"/>).
+    /// </summary>
+    public static (bool Orphaned, string Why) Judge(Incident i, DateTime? heartbeat, Func<int, DateTime?, bool?> pidAlive, DateTime now,
+        Func<string, int, int?>? sameLabelServer = null)
     {
         var pid = i.OwnerPid;
         if (pid == null) return (true, "no owner process recorded (found by the scan, or deployed before the board existed)");
+        var owner = OwnerLabel(i);
         var alive = pidAlive(pid.Value, i.RaisedAt);
-        if (alive == false) return (true, $"owner process {pid} ({i.Get("owner") ?? i.RaisedBy}) is gone");
         var beat = heartbeat ?? ParseIso(i.Get("heartbeatAt")) ?? i.RaisedAt;
-        if (beat is { } b && now - b > HeartbeatStale)
-            return (true, $"no heartbeat from {i.Get("owner") ?? i.RaisedBy} (pid {pid}) for {(int)(now - b).TotalMinutes} min");
-        return (false, $"owner {i.Get("owner") ?? i.RaisedBy} (pid {pid}) is alive, last heartbeat {IncidentLogic.Ago(beat, now)}");
+        var stale = beat is { } b && now - b > HeartbeatStale;
+        if ((alive == false || stale) && sameLabelServer?.Invoke(owner, pid.Value) is { } other)
+            return (false, $"owner process {pid} ({owner}) is {(alive == false ? "gone" : "silent")}, but a server with the same label (pid {other}) beats: it adopts the deploy");
+        if (alive == false) return (true, $"owner process {pid} ({owner}) is gone");
+        if (stale)
+            return (true, $"no heartbeat from {owner} (pid {pid}) for {(int)(now - beat!.Value).TotalMinutes} min");
+        return (false, $"owner {owner} (pid {pid}) is alive, last heartbeat {IncidentLogic.Ago(beat, now)}");
+    }
+
+    /// <summary>The deploy's owner label: its "owner" field, else who raised it.</summary>
+    public static string OwnerLabel(Incident i) => i.Get("owner")?.ToString() is { Length: > 0 } o ? o : i.RaisedBy;
+
+    /// <summary>Servers that beat within this long count as alive for the same-label rule.</summary>
+    public static readonly TimeSpan ServerBeatFresh = TimeSpan.FromMinutes(2);
+
+    /// <summary>The live server (fresh beat, process alive) with this label other than <paramref name="ownerPid"/>, from the per-pid sidecar.</summary>
+    public static int? SameLabelServer(string label, int ownerPid) =>
+        SameLabelServer(IncidentStore.ReadServerBeats(), label, ownerPid, PidAlive, DateTime.UtcNow);
+
+    public static int? SameLabelServer(Dictionary<int, ServerBeat> beats, string label, int ownerPid, Func<int, DateTime?, bool?> pidAlive, DateTime now)
+    {
+        foreach (var (pid, b) in beats)
+            if (pid != ownerPid && string.Equals(b.Label, label, StringComparison.OrdinalIgnoreCase) && b.At is { } at && now - at < ServerBeatFresh
+                && b.Kind != "mcp-http" && pidAlive(pid, null) != false)
+                return pid;
+        return null;
+    }
+
+    /// <summary>
+    /// This server adopts the open deploys raised under its label whose owner process is gone (a session or server restart on
+    /// the same checkout): ownerPid becomes this server's, so it beats for them (stdio servers only: a shared server's deploys
+    /// carry its callers' labels). Returns the adopted ids.
+    /// </summary>
+    public static List<string> Adopt()
+    {
+        if (SessionIdentity.Kind == "mcp-http") return [];
+        var me = SessionIdentity.Label;
+        var board = IncidentStore.Read();
+        var candidates = board.Incidents.Where(i => i.IsOpen && i.Kind == "deploy" && i.OwnerPid is { } p && p != SessionIdentity.Pid
+                                                    && string.Equals(OwnerLabel(i), me, StringComparison.OrdinalIgnoreCase)
+                                                    && PidAlive(p, i.RaisedAt) == false).ToList();
+        if (candidates.Count == 0) return [];
+        return IncidentStore.Update(f =>
+        {
+            var done = new List<string>();
+            foreach (var c in candidates)
+            {
+                var cur = IncidentLogic.Find(f, c.Id);
+                if (cur is not { IsOpen: true } || cur.OwnerPid != c.OwnerPid) continue;   // raced with another server
+                cur.Set("adoptedFrom", cur.OwnerPid);
+                cur.Set("ownerPid", SessionIdentity.Pid);
+                done.Add(cur.Id);
+                Console.Error.WriteLine($"[Incidents] adopted deploy {cur.Key} from dead pid {c.OwnerPid} (same label {me})");
+            }
+            return done;
+        });
     }
 
     /// <summary>The process exists and started before the deploy (a reused pid started later); null when unknown.</summary>
@@ -59,7 +118,7 @@ public static class DeployIncidents
         var i = IncidentLogic.OpenByKey(f, Key(folder));
         if (i == null) return new OwnerState(null, true, "no deploy on the incident board");
         if (!IsFor(i, dir)) return new OwnerState(null, true, $"the deploy on the board is in another tree ({i.Get("mainPath")})");
-        var (orphaned, why) = Judge(i, beats.TryGetValue(i.Id, out var b) ? b : null, PidAlive, DateTime.UtcNow);
+        var (orphaned, why) = Judge(i, beats.TryGetValue(i.Id, out var b) ? b : null, PidAlive, DateTime.UtcNow, SameLabelServer);
         return new OwnerState(i, orphaned, why);
     }
 
@@ -257,7 +316,7 @@ public static class DeployIncidents
         if (i.Kind != "deploy" || !i.IsOpen) return;
         var beat = beats.TryGetValue(i.Id, out var b) ? b : (DateTime?)null;
         if (beat != null) view["heartbeatAt"] = IsoUtcConverter.Iso(beat.Value);
-        var (orphaned, why) = Judge(i, beat, PidAlive, DateTime.UtcNow);
+        var (orphaned, why) = Judge(i, beat, PidAlive, DateTime.UtcNow, SameLabelServer);
         view["orphaned"] = orphaned;
         view["ownerState"] = why;
     }

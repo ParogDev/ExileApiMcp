@@ -73,6 +73,16 @@ public sealed class IncidentResponse
     [JsonExtensionData] public IDictionary<string, JToken>? Extra { get; set; }
 }
 
+/// <summary>One server's entry in server-heartbeats.json (keyed by pid).</summary>
+public sealed class ServerBeat
+{
+    public string Label { get; set; } = "";
+    /// <summary>mcp | mcp-http.</summary>
+    public string? Kind { get; set; }
+    public DateTime? At { get; set; }
+    [JsonExtensionData] public IDictionary<string, JToken>? Extra { get; set; }
+}
+
 /// <summary>What a raise asks for; the store fills id, times and the raiser.</summary>
 public sealed class IncidentDraft
 {

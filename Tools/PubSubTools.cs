@@ -52,12 +52,13 @@ public static class PubSubTools
         CancellationToken ct = default)
     {
         var until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSec, 5, 3600));
+        var pause = new HudPause();   // a "not now" (load screen, restart) pauses the wait instead of failing it
         if (since <= 0) since = (await Events(bridges, game, long.MaxValue, kinds, 1, ct)).Seq;
         while (true)
         {
             PubSubEventsResult r;
             try { r = await Events(bridges, game, since, kinds, 500, ct); }
-            catch (McpException ex) when (ex is not PubSubBrokenException && DateTime.UtcNow < until) { await Task.Delay(5000, ct); continue; }   // HUD restarting
+            catch (McpException ex) when (ex is not PubSubBrokenException && (pause.Holds(ex) || DateTime.UtcNow < until)) { if (pause.Holds(ex)) until = pause.Extend(until, TimeSpan.FromSeconds(5)); await Task.Delay(5000, ct); continue; }   // HUD restarting; a "not now" pauses the wait
             if (r.Events.Count > 0) return Dto.Result(r, Summary(r));
             if (DateTime.UtcNow >= until)
             {

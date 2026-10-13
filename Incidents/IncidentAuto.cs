@@ -27,6 +27,8 @@ public static class IncidentAuto
         try
         {
             if (bridge.Game is not ("poe1" or "poe2")) return Suffix(null);
+            // The user's planned restart is under way: its outage incident already says why the bridge is down.
+            if (OutageLogic.OpenFor(IncidentStore.Read(), bridge.Game) != null) return Suffix(bridge.Game);
             var facts = BridgeDiagnosis.Gather(bridge, error);
             if (BridgeDiagnosis.Diagnose(facts) is { } v) RaiseVerdict(v, bridge.Game);
             return Suffix(bridge.Game);
@@ -185,6 +187,7 @@ public static class IncidentAuto
             var G = bridge.Game == "poe1" ? "PoE1" : "PoE2";
             var key = stopOnly ? $"bridge-down:{bridge.Game}" : $"hud-restart:{bridge.Game}";
             var board = IncidentStore.Read();
+            if (OutageLogic.OpenFor(board, bridge.Game) != null) return null;   // the user's planned restart: its outage incident tells the sessions
             var open = board.Incidents.FirstOrDefault(i => i.IsOpen && i.Key == key);
             if (open != null) return open;
             // Once per restart: an incident for this restart that was resolved already (the script's, or ours) stays resolved.

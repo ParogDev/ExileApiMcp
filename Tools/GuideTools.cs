@@ -90,12 +90,13 @@ public static class GuideTools
         CancellationToken ct = default)
     {
         var until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSec, 5, 3600));
+        var pause = new HudPause();   // a "not now" (load screen, restart) pauses the wait instead of failing it
         var started = DateTime.UtcNow;
         while (true)
         {
             JToken r;
             try { (_, r) = await bridges.CallAsync(game, "guide.user", new JObject { ["stepId"] = stepId }, ct); }
-            catch (McpException) when (DateTime.UtcNow < until) { await Task.Delay(3000, ct); continue; }   // HUD restarting
+            catch (McpException ex) when (pause.Holds(ex) || DateTime.UtcNow < until) { if (pause.Holds(ex)) until = pause.Extend(until, TimeSpan.FromMilliseconds(3000)); await Task.Delay(3000, ct); continue; }   // HUD restarting; a "not now" (load screen, restart) pauses the wait
             if (r is not JObject o || o["ok"]?.Value<bool>() != true)
                 throw new McpException("This HUD's bridge has no Done button (guide.user): update What's an AI Bridge and restart the HUD.");
             var mark = o["mark"]?.Type == JTokenType.String ? o["mark"]!.ToString() : null;
@@ -228,12 +229,13 @@ public static class GuideTools
         CancellationToken ct = default)
     {
         var until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSec, 5, 3600));
+        var pause = new HudPause();   // a "not now" (load screen, restart) pauses the wait instead of failing it
         var want = keys is { Length: > 0 } ? keys.ToHashSet(StringComparer.Ordinal) : null;
         while (true)
         {
             JToken r;
             try { (_, r) = await bridges.CallAsync(game, "guide.verdicts", new JObject { ["since"] = since ?? 0, ["limit"] = 300 }, ct); }
-            catch (McpException) when (DateTime.UtcNow < until) { await Task.Delay(3000, ct); continue; }   // HUD restarting
+            catch (McpException ex) when (pause.Holds(ex) || DateTime.UtcNow < until) { if (pause.Holds(ex)) until = pause.Extend(until, TimeSpan.FromMilliseconds(3000)); await Task.Delay(3000, ct); continue; }   // HUD restarting; a "not now" (load screen, restart) pauses the wait
             NeedVerdicts(r);
             var v = Dto.From<VerdictsResult>(r);
             // Without since: only answers given under your current highlight(s) count (a reused key answered last week does

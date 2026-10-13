@@ -1,6 +1,7 @@
 // Unit checks for the incident board (Incidents/): parsing, raise / respond / resolve / prune, the bridge diagnosis from
 // canned facts and netsh output, deploy orphan judgement, and the store's mutex + atomic writes against a temp folder.
 // No test framework: each Check prints pass/FAIL; the exit code is the number of failures.
+using ExileApiMcp.Bridge;
 using ExileApiMcp.Dispatch;
 using ExileApiMcp.Hosting;
 using ExileApiMcp.Incidents;
@@ -837,6 +838,208 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check("route_agent: progress outcome", AgentRouteKit.Outcome(["started", "step-done", "done"]) == ("done", false)
         && AgentRouteKit.Outcome(["started", "left"]) == (null, true) && AgentRouteKit.Outcome(["started", "left", "resumed"]) == (null, false)
         && AgentRouteKit.Outcome(["started", "expired"]) == ("expired", false) && AgentRouteKit.Outcome(["started", "replaced", "started"]) == (null, false));
+}
+
+
+// ── HUD availability: "not now" vs broken from hud-state.json (Bridge/HudState.cs) ──
+{
+    HudStateFile S(string phase, double sinceSec, bool inGame = false) => new()
+    {
+        Schema = 1, Game = "poe2", Phase = phase, Since = now.AddSeconds(-sinceSec), Heartbeat = now.AddSeconds(-1), TickAt = now.AddSeconds(-1),
+        InGame = inGame, Loading = phase == "loading", LastArea = "The Riverbank", LastLoadMs = 3400, GamePid = 11, HudPid = 22, TypicalStartupSec = 40,
+    };
+    ExileApiMcp.Bridge.HudAvailabilityFacts F(HudStateFile? s, string? reason = "hud_loading") => new()
+        { Game = "poe2", Now = now, State = s, ErrorReason = reason, GameAlive = true, HudAlive = true, HudStartedAt = now.AddHours(-1) };
+    var L = ExileApiMcp.Bridge.HudAvailabilityLogic.Diagnose;
+
+    Check("availability: no file, no outage = unknown (today's behaviour)", L(F(null)) == null);
+    var a1 = L(F(S("loading", 4, inGame: true)));
+    Check("availability: a 4 s load is not now, from the area, wait with area.ready",
+        a1 is { State: "notNow", Reason: "loading", From: "The Riverbank" } && a1.WaitWith!.Contains("area.ready") && a1.Detail.Contains("4 s") && a1.ExpectedBackSec == 1, a1?.Detail);
+    Check("availability: text says not now, normal", ExileApiMcp.Bridge.HudAvailabilityLogic.Text(a1!).StartsWith("Not now (normal): load screen"), ExileApiMcp.Bridge.HudAvailabilityLogic.Text(a1!));
+    Check("availability: a load over a minute with the game alive is broken stuckLoading", L(F(S("loading", 90, true))) is { State: "broken", Reason: "stuckLoading" });
+    var fg = F(S("ready", 30, true)); fg.GameAlive = false;
+    Check("availability: game process gone is broken gameGone", L(fg) is { State: "broken", Reason: "gameGone" });
+    var fh = F(S("closed", 30)); fh.HudAlive = false;
+    Check("availability: HUD gone with nothing announced is broken hudGone", L(fh) is { State: "broken", Reason: "hudGone" } h && h.WaitWith!.Contains("hud_restart"));
+    var fr = F(S("restarting", 20)); fr.HudAlive = false;
+    Check("availability: HUD closed for a restart 20 s ago is not now restarting", L(fr) is { State: "notNow", Reason: "restarting" });
+    var fu = F(S("user-restart", 200)); fu.HudAlive = false;
+    Check("availability: HUD closed for the user's restart is not now user-restart", L(fu) is { State: "notNow", Reason: "user-restart" });
+    var fs = F(S("closed", 600), "unavailable"); fs.HudStartedAt = now.AddSeconds(-12); fs.State!.Heartbeat = now.AddSeconds(-90);
+    var a2 = L(fs);
+    Check("availability: a HUD process newer than the heartbeat is starting (plugins compiling), typical 40 s, 12 s in",
+        a2 is { State: "notNow", Reason: "starting" } && a2.Detail.Contains("plugins compiling") && a2.ExpectedBackSec == 28 && a2.SinceSec == 12, a2?.Detail);
+    Check("availability: phase starting is not now starting", L(F(S("starting", 5), "unavailable")) is { State: "notNow", Reason: "starting" });
+    Check("availability: menu is not now, back when the user enters a character", L(F(S("menu", 30))) is { State: "notNow", Reason: "menu" } m && m.Detail.Contains("character"));
+    var ft = F(S("ready", 30, true), "hud_timeout"); ft.TickAgeMs = 8000;
+    Check("availability: ready but the main thread silent 8 s is broken frozen", L(ft) is { State: "broken", Reason: "frozen" });
+    Check("availability: ready and ticking is nothing to add", L(F(S("ready", 30, true), "hud_timeout")) == null);
+    var fb = F(S("ready", 30, true)); fb.State!.Heartbeat = now.AddSeconds(-40);
+    Check("availability: heartbeat 40 s old while the HUD runs is broken frozen", L(fb) is { State: "broken", Reason: "frozen" } fz && fz.Detail.Contains("heartbeat"));
+    var fo = F(S("menu", 30)); fo.OutageId = "i-1"; fo.OutagePhase = "waitingGame";
+    Check("availability: an open outage is not now user-restart with its id", L(fo) is { State: "notNow", Reason: "user-restart", OutageId: "i-1" });
+    var fo2 = F(null, "unavailable"); fo2.OutageId = "i-2"; fo2.OutagePhase = "down"; fo2.HudAlive = false;
+    Check("availability: an outage without a file (older bridge) still says user-restart", L(fo2) is { Reason: "user-restart", OutageId: "i-2" });
+
+    var parsed = ExileApiMcp.Bridge.HudStateReader.Parse("""{ "schema": 1, "game": "poe2", "phase": "loading", "since": "2026-10-11T11:59:56Z", "heartbeat": "2026-10-11T11:59:59Z", "inGame": true, "lastArea": "Clearfell", "lastLoadMs": 3100, "startup": { "sec": 41.2 }, "future": 7 }""");
+    Check("hud-state.json: parsed, times UTC, unknown fields kept", parsed is { Phase: "loading", LastArea: "Clearfell", LastLoadMs: 3100, InGame: true }
+        && parsed.Since == now.AddSeconds(-4) && parsed.Extra!.ContainsKey("startup") && parsed.Extra.ContainsKey("future"));
+    Check("hud-state.json: empty text is unknown", ExileApiMcp.Bridge.HudStateReader.Parse(" ") == null);
+
+    var loading = new ExileApiMcp.Bridge.BridgeException("poe2", "HUD is on a load screen", -32010, JObject.Parse("""{ "reason": "hud_loading", "sinceMs": 3100 }"""));
+    var timeout = new ExileApiMcp.Bridge.BridgeException("poe2", "timed out", -32000, JObject.Parse("""{ "reason": "hud_timeout", "tickAgeMs": 9000 }"""));
+    Check("bridge error: -32010 is a load screen (code alone too)", loading.IsHudLoading && loading.Reason == "hud_loading"
+        && new ExileApiMcp.Bridge.BridgeException("poe2", "x", -32010).IsHudLoading && !timeout.IsHudLoading && timeout.Reason == "hud_timeout"
+        && new ExileApiMcp.Bridge.BridgeException("poe2", "old bridge").Reason == null);
+
+    var pause = new ExileApiMcp.Bridge.HudPause();
+    var notNow = new ExileApiMcp.Bridge.HudUnavailableException(a1!, "x");
+    var broken = new ExileApiMcp.Bridge.HudUnavailableException(L(fg)!, "y");
+    var until = now.AddSeconds(10);
+    Check("pause: not now pauses and moves the deadline; broken and other errors don't",
+        pause.Holds(notNow) && pause.Extend(until, TimeSpan.FromSeconds(5)) == until.AddSeconds(5) && !pause.Holds(broken) && !pause.Holds(new ModelContextProtocol.McpException("z")));
+    pause.Extend(until, ExileApiMcp.Bridge.HudPause.Max);
+    Check("pause: capped at 10 min in all", !pause.Holds(notNow));
+}
+
+// ── "Back" means the game is in (IncidentAuto.BackVerdict) ──
+{
+    HudStateFile S(string phase, double sinceSec, bool inGame) => new() { Phase = phase, Since = now.AddSeconds(-sinceSec), Heartbeat = now.AddSeconds(-2), InGame = inGame };
+    Check("back: no file (older bridge) resolves on the answer", IncidentAuto.BackVerdict(null, "poe2", now).Resolve);
+    Check("back: in game resolves", IncidentAuto.BackVerdict(S("ready", 3, true), "poe2", now).Resolve);
+    var menu = IncidentAuto.BackVerdict(S("menu", 300, false), "poe2", now);
+    Check("back: at the menu keeps it open as 'HUD back, game not in yet (phase menu)'", !menu.Resolve && menu.KeepTitle == "PoE2 HUD back, game not in yet (phase menu)", menu.KeepTitle);
+    var late = IncidentAuto.BackVerdict(S("menu", 31 * 60, false), "poe2", now);
+    Check("back: 30 min at the menu resolves, saying so", late.Resolve && late.Note!.Contains("31 min"), late.Note);
+    var stale = S("menu", 60, false); stale.Heartbeat = now.AddMinutes(-5);
+    Check("back: a stale file (an older bridge answering now) resolves", IncidentAuto.BackVerdict(stale, "poe2", now).Resolve);
+}
+
+// ── Responses keyed by session id, "Label (2)" ──
+{
+    var i = new Incident { Id = "i-r", Kind = "custom", Key = "custom:x", Title = "x", State = "open" };
+    i.Responses.Add(new IncidentResponse { Who = "Claude Desktop", Status = "ok", At = now });   // written before ids existed
+    IncidentLogic.Respond(i, "Claude Desktop", "blocked", null, null, now, "Claude Desktop#100");
+    Check("respond: an id-less response under the same label is replaced", i.Responses.Count == 1 && i.Responses[0].SessionId == "Claude Desktop#100");
+    IncidentLogic.Respond(i, "Claude Desktop", "waiting", null, null, now, "Claude Desktop#200");
+    Check("respond: another session with the same label keeps its own response", i.Responses.Count == 2);
+    IncidentLogic.Respond(i, "Claude Desktop", "ok", "done", null, now, "Claude Desktop#100");
+    Check("respond: the same session replaces only its own", i.Responses.Count == 2 && i.Responses.Single(r => r.SessionId == "Claude Desktop#100").Status == "ok"
+        && i.Responses.Single(r => r.SessionId == "Claude Desktop#200").Status == "waiting");
+    var names = IncidentLogic.ResponseNames(i);
+    Check("respond: colliding labels display as 'Label' and 'Label (2)'", names.Count == 2 && names.Contains("Claude Desktop") && names.Contains("Claude Desktop (2)"), string.Join(",", names));
+    Check("respond: one line shows the display names", IncidentLogic.OneLine(i, now).Contains("Claude Desktop (2): "), IncidentLogic.OneLine(i, now));
+    var back = IncidentLogic.Parse(IncidentJson.Serialize(new IncidentFile { Incidents = [i] }));
+    Check("respond: sessionId round-trips; absent when none", back.Incidents[0].Responses.All(r => r.SessionId != null)
+        && !IncidentJson.Serialize(new IncidentResponse { Who = "a" }).Contains("sessionId"));
+    Check("display names: same id twice is one session", IncidentLogic.DisplayNames([("a", "1"), ("a", "1"), ("a", "2"), ("b", null)]).SequenceEqual(["a", "a", "a (2)", "b"]));
+}
+
+// ── Outage incidents (Incidents/Outage.cs) ──
+{
+    var f = new IncidentFile { Rev = 41 };
+    var (o, created) = OutageLogic.Raise(f, "poe2", "patch 0.4.1", "Claude Desktop#7", "Claude Desktop", 7, now);
+    var info = OutageLogic.Info(o)!;
+    Check("outage: raised as kind outage, key outage:poe2, phase announced, announcedRev = the write's rev",
+        created && o is { Kind: "outage", Key: "outage:poe2", Scope: "poe2" } && info is { Phase: "announced", AnnouncedRev: 42, StopOnly: true, RequestedByLabel: "Claude Desktop" } && o.OwnerPid == 7);
+    Check("outage: a second raise joins the open one", OutageLogic.Raise(f, "poe2", "again", "x#1", "x", 8, now) is { Created: false } again && again.Incident == o);
+    Check("outage: open for its game only", OutageLogic.OpenFor(f, "poe2") == o && OutageLogic.OpenFor(f, "poe1") == null);
+    OutageSession B(string id, string label) => new(id, label, "measuring", null);
+    Check("outage: busy agents hold an announced outage", OutageLogic.Decide(info, null, 1, null, null, now) == OutageStep.Hold);
+    info.Phase = "holding";
+    Check("outage: holding with busy agents waits", OutageLogic.Decide(info, null, 2, null, null, now) == OutageStep.None);
+    Check("outage: nobody busy stops the HUD", OutageLogic.Decide(info, null, 0, null, null, now) == OutageStep.Stop);
+    Check("outage: Restart now stops it over busy agents", OutageLogic.Decide(info, "now", 3, null, null, now) == OutageStep.Stop);
+    Check("outage: Not now cancels", OutageLogic.Decide(info, "notNow", 0, null, null, now) == OutageStep.Cancel);
+    info.Phase = "down"; info.PhaseAt = now.AddMinutes(-2);
+    var oldFile = new HudStateFile { Phase = "user-restart", Heartbeat = now.AddMinutes(-3) };
+    var menuFile = new HudStateFile { Phase = "menu", Heartbeat = now.AddSeconds(-1), Since = now.AddSeconds(-20) };
+    var readyFile = new HudStateFile { Phase = "ready", InGame = true, Heartbeat = now.AddSeconds(-1) };
+    Check("outage: down stays down on the old HUD's last file", OutageLogic.Decide(info, null, 0, oldFile, true, now) == OutageStep.None);
+    Check("outage: down -> waitingGame when a new bridge is at the menu", OutageLogic.Decide(info, null, 0, menuFile, true, now) == OutageStep.WaitingGame);
+    Check("outage: down -> back when the new bridge is in game", OutageLogic.Decide(info, null, 0, readyFile, true, now) == OutageStep.Back);
+    Check("outage: no HUD process, no progress", OutageLogic.Decide(info, null, 0, readyFile, false, now) == OutageStep.None);
+    info.Phase = "waitingGame";
+    Check("outage: waitingGame -> back on ready", OutageLogic.Decide(info, null, 0, readyFile, null, now) == OutageStep.Back
+                                                 && OutageLogic.Decide(info, null, 0, menuFile, true, now) == OutageStep.None);
+
+    Check("outage: participants recorded with unique display names", OutageLogic.SetParticipants(o, null, [B("a#1", "Claude Desktop")], [new("a#2", "Claude Desktop", null, null), new("w#3", "route-act2", null, null)], now)
+        && OutageLogic.Info(o)!.Participants["a#2"].Display == "Claude Desktop (2)" && OutageLogic.Info(o)!.Participants["a#1"].State == "busy");
+    Check("outage: the same readiness again writes nothing", !OutageLogic.SetParticipants(o, null, [B("a#1", "Claude Desktop")], [new("a#2", "Claude Desktop", null, null), new("w#3", "route-act2", null, null)], now.AddSeconds(2)));
+    Check("outage: holding phase", OutageLogic.SetPhase(o, "holding", "t", now) && OutageLogic.Info(o)!.Phase == "holding" && o.IsOpen && !OutageLogic.SetPhase(o, "holding", "t", now));
+    Check("outage: back resolves with resolution back", OutageLogic.SetPhase(o, "back", "t", now) && !o.IsOpen && o.Get("resolution")?.ToString() == "back"
+        && OutageLogic.Info(o)!.ClosedAt == now && OutageLogic.OpenFor(f, "poe2") == null);
+    var (o2, _) = OutageLogic.Raise(f, "poe2", "patch", "x#1", "x", 8, now);
+    Check("outage: cancelled resolves with the reason; a new raise after back is a new incident", o2 != o && OutageLogic.SetPhase(o2, "cancelled", "t", now, "cancelled: the user pressed Not now")
+        && o2.Get("resolution")?.ToString() == "cancelled: the user pressed Not now");
+    Check("outage: kind outage passes validation", IncidentDraft.Kinds.Contains("outage"));
+
+    var list = JObject.Parse("""
+    { "sessions": [
+        { "id": "a#1", "label": "route-act2", "connected": true, "doing": ["measuring perf"] },
+        { "id": "b#2", "label": "Claude Desktop", "connected": true, "doing": [], "queued": [ { "id": "q1" } ] },
+        { "id": "c#3", "label": "wisp", "connected": true, "leases": 1 },
+        { "id": "d#4", "label": "idle-one", "connected": true },
+        { "id": "e#5", "label": "control center", "connected": true, "infra": true },
+        { "id": "f#6", "label": "gone", "connected": false, "doing": ["x"] },
+        { "id": "me#9", "label": "me", "connected": true } ] }
+    """);
+    var (busy, ready) = OutageLogic.FromSessionList(list, "me#9");
+    Check("readiness: doing, an attention item or a lease is busy; other connected agents ready; infra, disconnected and the requester skipped",
+        busy.Select(b => b.Session).SequenceEqual(["a#1", "b#2", "c#3"]) && ready.Select(r => r.Session).SequenceEqual(["d#4"]) && busy[0].Doing == "measuring perf",
+        $"busy {string.Join(",", busy.Select(b => b.Session))} ready {string.Join(",", ready.Select(r => r.Session))}");
+    var st = OutageLogic.FromOutageState(JObject.Parse("""{ "id": "i-1", "phase": "holding", "answer": "now", "busy": [ { "session": "a#1", "label": "route-act2", "doing": "perf", "lease": "l-1" } ], "ready": [] }"""));
+    Check("readiness: the bridge's outage.state", st is { } s && s.Answer == "now" && s.Busy.Single().Lease == "l-1" && s.Ready.Count == 0);
+    Check("readiness: an older bridge's reply is no outage.state", OutageLogic.FromOutageState(JObject.Parse("""{ "game": "poe2", "query": "outage.state" }""")) == null);
+}
+
+// ── Deploys: a dead owner pid with a live same-label server is not orphaned ──
+{
+    var i = new Incident { Id = "i-d", Kind = "deploy", Key = "deploy:X", RaisedBy = "hud-not-now", RaisedAt = now.AddHours(-1), State = "open" };
+    i.Set("ownerPid", 100); i.Set("owner", "hud-not-now");
+    var beats = new Dictionary<int, ServerBeat>
+    {
+        [200] = new() { Label = "hud-not-now", Kind = "mcp", At = now.AddSeconds(-20) },
+        [300] = new() { Label = "other", Kind = "mcp", At = now.AddSeconds(-20) },
+        [400] = new() { Label = "hud-not-now", Kind = "mcp", At = now.AddMinutes(-5) },
+    };
+    Check("same label: a fresh beat of another pid with the label", DeployIncidents.SameLabelServer(beats, "hud-not-now", 100, (_, _) => true, now) == 200
+        && DeployIncidents.SameLabelServer(beats, "hud-not-now", 200, (_, _) => true, now) == null
+        && DeployIncidents.SameLabelServer(beats, "hud-not-now", 100, (p, _) => p != 200, now) == null);
+    var (orph, why) = DeployIncidents.Judge(i, now, (_, _) => false, now, (_, _) => 200);
+    Check("same label: owner gone but its label's server beats -> not orphaned, it adopts", !orph && why.Contains("pid 200"), why);
+    Check("same label: no such server -> orphaned as before", DeployIncidents.Judge(i, now, (_, _) => false, now, (_, _) => null).Orphaned);
+}
+
+
+// ── Store: outage on disk, responses by session id, server heartbeats (temp board) ──
+{
+    var dir = Path.Combine(Path.GetTempPath(), "hexile-incidents-test-" + Guid.NewGuid().ToString("N")[..8]);
+    Environment.SetEnvironmentVariable("HEXILE_INCIDENT_DIR", dir);
+    try
+    {
+        var (o, created) = IncidentStore.Update(f => OutageLogic.Raise(f, "poe1", "patch", "s#1", "s", 1234, DateTime.UtcNow));
+        var board = IncidentStore.Read();
+        var stored = IncidentLogic.Find(board, o.Id)!;
+        Check("store outage: written, announcedRev is the rev it was written at", created && OutageLogic.Info(stored)?.AnnouncedRev == board.Rev && stored.ChangedRev == board.Rev,
+            $"announcedRev {OutageLogic.Info(stored)?.AnnouncedRev} rev {board.Rev}");
+        Check("store outage: held for its game", OutageLogic.OpenFor(board, "poe1")?.Id == o.Id && ExileApiMcp.Tools.SessionTools.HeldBy("poe1") is { Error: "held_by_outage", Phase: "announced" } h && h.Id == o.Id);
+        IncidentStore.Respond(o.Id, "ok", null, null, "Claude Desktop", "cd#1");
+        IncidentStore.Respond(o.Id, "blocked", null, null, "Claude Desktop", "cd#2");
+        Check("store respond: two sessions, one label, two responses", IncidentLogic.Find(IncidentStore.Read(), o.Id)!.Responses.Count == 2);
+        IncidentStore.Update(f => IncidentLogic.Find(f, o.Id) is { } i && OutageLogic.SetPhase(i, "cancelled", "t", DateTime.UtcNow, "cancelled: test"));
+        Check("store outage: cancelled releases the hold", ExileApiMcp.Tools.SessionTools.HeldBy("poe1") == null);
+        IncidentStore.BeatServer(4242, "hud-not-now", "mcp");
+        IncidentStore.BeatServer(4243, "other", "mcp-http");
+        var beats = IncidentStore.ReadServerBeats();
+        Check("server beats: per pid with label and kind", beats.Count == 2 && beats[4242].Label == "hud-not-now" && beats[4243].Kind == "mcp-http" && beats[4242].At > DateTime.UtcNow.AddMinutes(-1));
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("HEXILE_INCIDENT_DIR", null);
+        try { Directory.Delete(dir, true); } catch { }
+    }
 }
 
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");

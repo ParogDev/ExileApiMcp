@@ -247,6 +247,16 @@ internal static class McpSetup
                         Console.Error.WriteLine($"[call] {name} {sw.ElapsedMilliseconds}ms{(result.IsError == true ? " isError" : "")}");
                     return result;
                 }
+                catch (HudUnavailableException ex) when (!ct.IsCancellationRequested)
+                {
+                    // The HUD can't answer: "not now" (a load, a restart, the user's planned restart) or broken, typed, so the
+                    // agent waits with the named tool instead of debugging a normal load screen (Bridge/HudState.cs).
+                    Console.Error.WriteLine($"[call] {name} {sw.ElapsedMilliseconds}ms {(ex.NotNow ? "not now" : "broken")}: {ex.Message}");
+                    var typed = new ExileApiMcp.Tools.HudUnavailableResult { Error = ex.NotNow ? "hud_not_now" : "hud_broken", Message = ex.Message, Availability = ex.Availability };
+                    var call = ExileApiMcp.Tools.Dto.Result(typed, ex.Message);
+                    call.IsError = true;
+                    return call;
+                }
                 catch (Exception ex) when (ex is McpException || ct.IsCancellationRequested)
                 {
                     // McpException: the SDK already shows its message. Cancellation: nobody is listening.

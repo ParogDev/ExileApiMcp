@@ -359,6 +359,43 @@ public static class IncidentStore
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return []; }
     }
 
+    // ── Server heartbeats (sidecar, per pid): which servers run under which label, for the deploy same-label rule ──
+
+    /// <summary>Per server pid: its label, kind and last beat (DeployIncidents.Judge: a dead owner pid isn't orphaned while a
+    /// same-label server beats).</summary>
+    public static string ServerBeatsPath => Path.Combine(Dir, "server-heartbeats.json");
+
+    public static Dictionary<int, ServerBeat> ReadServerBeats()
+    {
+        try
+        {
+            if (!File.Exists(ServerBeatsPath)) return [];
+            var d = JsonConvert.DeserializeObject<Dictionary<string, ServerBeat>>(ReadShared(ServerBeatsPath), IncidentJson.Settings) ?? [];
+            return d.Where(kv => int.TryParse(kv.Key, out _) && kv.Value != null).ToDictionary(kv => int.Parse(kv.Key), kv => kv.Value);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return []; }
+    }
+
+    /// <summary>This server beats (and beats older than an hour go), under the board's mutex. Best effort.</summary>
+    public static void BeatServer(int pid, string label, string kind)
+    {
+        Directory.CreateDirectory(Dir);
+        using var mutex = new Mutex(false, MutexName);
+        var owned = false;
+        try
+        {
+            try { owned = mutex.WaitOne(MutexTimeout); } catch (AbandonedMutexException) { owned = true; }
+            if (!owned) return;
+            var now = DateTime.UtcNow;
+            var beats = ReadServerBeats().Where(kv => kv.Value.At is { } at && now - at < TimeSpan.FromHours(1))
+                .ToDictionary(kv => kv.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), kv => kv.Value);
+            beats[pid.ToString(System.Globalization.CultureInfo.InvariantCulture)] = new ServerBeat { Label = label, Kind = kind, At = now };
+            WriteAtomic(ServerBeatsPath, JsonConvert.SerializeObject(beats, IncidentJson.Settings));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        finally { if (owned) mutex.ReleaseMutex(); }
+    }
+
     /// <summary>Beat for these incident ids (and drop beats of incidents no longer open), under the board's mutex.</summary>
     public static void Beat(IEnumerable<string> ids, IEnumerable<string> openIds)
     {

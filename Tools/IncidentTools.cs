@@ -125,20 +125,34 @@ public static class IncidentTools
     [Description("Block until the incident board's rev differs from since, then return what changed: push, not poll (a file watcher " +
                  "on the board). Returns at once when it already differs. Run it in the background through tools\\mcp-call.ps1 " +
                  "(-TimeoutSec above timeoutSec) to resume as soon as an outage is over, e.g. a HUD restart's incident resolves.")]
-    public static async Task<CallToolResult> IncidentWait(IncidentWatcher watcher,
+    public static async Task<CallToolResult> IncidentWait(IncidentWatcher watcher, IProgress<ProgressNotificationValue> progress,
         [Description("The board rev you last saw (incidents / an earlier incident_wait)")] int since,
-        [Description("Longest wait, seconds (1-3600, default 600)")] int timeoutSec = 600,
+        [Description("Longest wait, seconds (1-3600, default 300; a progress notification every 15 s while it waits)")] int timeoutSec = 300,
         CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
-        var changed = await watcher.WaitAsync(since, TimeSpan.FromSeconds(Math.Clamp(timeoutSec, 1, 3600)), ct);
+        var limit = TimeSpan.FromSeconds(Math.Clamp(timeoutSec, 1, 3600));
+        // Waited in 15 s slices, each ending with a progress notification: the client sees the wait is alive (and what is open).
+        var changed = false;
+        while (!changed && sw.Elapsed < limit)
+        {
+            var slice = limit - sw.Elapsed < TimeSpan.FromSeconds(15) ? limit - sw.Elapsed : TimeSpan.FromSeconds(15);
+            changed = await watcher.WaitAsync(since, slice, ct);
+            if (!changed && sw.Elapsed < limit)
+                progress?.Report(new ProgressNotificationValue
+                {
+                    Progress = (float)sw.Elapsed.TotalSeconds, Total = (float)limit.TotalSeconds,
+                    Message = $"Board unchanged at rev {since}, {(int)sw.Elapsed.TotalSeconds} of {(int)limit.TotalSeconds} s: " +
+                              (IncidentStore.Read().Incidents.Where(i => i.IsOpen).Select(i => $"[{i.Kind}] {i.Title}").FirstOrDefault() ?? "nothing open"),
+                });
+        }
         var board = IncidentStore.Read();
         var list = changed ? board.Incidents.Where(i => (i.ChangedRev ?? int.MaxValue) > since).OrderByDescending(i => i.IsOpen).ToList() : [];
         var result = new IncidentWaitResult
         {
             Changed = changed, Since = since, Rev = board.Rev, WaitedSec = Math.Round(sw.Elapsed.TotalSeconds, 1), Incidents = Views(list),
             Note = changed ? (board.Rev < since ? "The board's rev went back (the file was recreated): read it whole with incidents." : null)
-                : $"No change within {timeoutSec} s; call again with since={board.Rev}.",
+                : $"No change within {(int)limit.TotalSeconds} s; call again with since={board.Rev}.",
         };
         var text = changed
             ? $"Board changed: rev {since} -> {board.Rev} after {result.WaitedSec} s\n{Lines(list)}"
@@ -163,6 +177,11 @@ public static class IncidentTools
     {
         var o = JsonConvert.DeserializeObject<JObject>(IncidentJson.SerializeCompact(i), IncidentJson.Settings)!;
         DeployIncidents.Annotate(o, i, beats);
+        if (o["responses"] is JArray rs)
+        {
+            var names = IncidentLogic.ResponseNames(i);
+            for (var k = 0; k < rs.Count && k < names.Count; k++) if (rs[k] is JObject r) r["display"] = names[k];
+        }
         return TypedReply.Parse<IncidentView>(o);
     }
 
@@ -180,14 +199,18 @@ public static class IncidentTools
         var lines = new List<string>();
         foreach (var i in list)
         {
-            var orphan = i.Kind == "deploy" && i.IsOpen && DeployIncidents.Judge(i, beats.TryGetValue(i.Id, out var b) ? b : null, DeployIncidents.PidAlive, now) is { Orphaned: true } j
+            var orphan = i.Kind == "deploy" && i.IsOpen && DeployIncidents.Judge(i, beats.TryGetValue(i.Id, out var b) ? b : null, DeployIncidents.PidAlive, now, DeployIncidents.SameLabelServer) is { Orphaned: true } j
                 ? $" ORPHANED: {j.Why}." : "";
             lines.Add(i.IsOpen
                 ? $"- OPEN {IncidentLogic.OneLine(i, now)}{orphan}"
                 : $"- resolved {IncidentLogic.Ago(i.ResolvedAt, now)} by {i.ResolvedBy}: [{i.Kind}] {i.Title}" + (i.Get("resolution") is { } n ? $" ({n})" : ""));
             if (i.IsOpen && !string.IsNullOrWhiteSpace(i.Detail)) lines.Add($"    {i.Detail}");
-            foreach (var r in i.Responses.Where(_ => i.IsOpen))
-                lines.Add($"    {r.Who}: {r.Status}{(r.Until is { } u ? $" until {u:HH:mm}Z" : "")}{(r.Note != null ? $" - {r.Note}" : "")}");
+            var names = IncidentLogic.ResponseNames(i);   // "Label (2)" when two sessions share a label
+            foreach (var (r, k) in i.Responses.Select((r, k) => (r, k)).Where(_ => i.IsOpen))
+                lines.Add($"    {names[k]}: {r.Status}{(r.Until is { } u ? $" until {u:HH:mm}Z" : "")}{(r.Note != null ? $" - {r.Note}" : "")}");
+            if (i.IsOpen && i.Kind == "outage" && OutageLogic.Info(i) is { } o)
+                lines.Add($"    outage phase {o.Phase}" + (o.Answer != null ? $", card answer {o.Answer}" : "") +
+                          (o.Participants.Count > 0 ? ": " + string.Join(", ", o.Participants.Values.Select(p => $"{p.Display ?? p.Label} {p.State}{(p.Doing != null ? $" ({p.Doing})" : "")}")) : ""));
         }
         return lines.Count == 0 ? "(nothing)" : string.Join("\n", lines);
     }

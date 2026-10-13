@@ -218,6 +218,7 @@ public static class ExperimentTools
             int transients = 0;
             var askUser = true;           // false once the bridge turns out to have no guide.user (older bridge: no Done button)
             bool userDone = false, cancelled = false;
+            var pause = new HudPause();
             while (true)
             {
                 var elapsed = sw.ElapsedMilliseconds;
@@ -227,10 +228,26 @@ public static class ExperimentTools
                 await Task.Delay(120, ct);
                 // A HUD that restarted and came back would hand us values from a new process: a "change" that isn't the user's.
                 if (HudRestartState.Since(bridges, game, t0) is { } cut) throw new HudRestartedException(cut, $"The guided step '{label}' of {experiment}");
-                current = await CaptureAll(specs, bridges, game, ct);
+                bool supported; string? mark = null;
+                try
+                {
+                    current = await CaptureAll(specs, bridges, game, ct);
+                    (supported, mark) = askUser ? await UserMarkAsync(bridges, game, stepId, ct) : (false, null);
+                }
+                catch (HudUnavailableException notNow) when (pause.Holds(notNow))
+                {
+                    // A load screen (the user may be walking through the very door we watch), the HUD starting or the user's
+                    // planned restart: pause the step and move its deadline by the pause, instead of failing it.
+                    var paused = Stopwatch.StartNew();
+                    await onStatus("paused");
+                    if (!await HudAvailabilityProbe.WaitReadyAsync(bridge, TimeSpan.FromSeconds(30), ct)) await Task.Delay(2000, ct);
+                    timeoutMs += (int)paused.ElapsedMilliseconds;
+                    pause.Extend(DateTime.UtcNow, paused.Elapsed);
+                    await onStatus(changedAt < 0 ? "waiting" : "detected");
+                    continue;
+                }
                 if (askUser)
                 {
-                    var (supported, mark) = await UserMarkAsync(bridges, game, stepId, ct);
                     askUser = supported;
                     if (mark == "cancelled") { cancelled = true; break; }
                     if (mark == "done" && doneAt < 0) { doneAt = sw.ElapsedMilliseconds; userDone = true; await onStatus("checking"); }
@@ -366,7 +383,7 @@ public static class ExperimentTools
             if (o["current"]?.Value<bool>() != true) return (true, "replaced");
             return (true, o["mark"]?.Type == JTokenType.String ? o["mark"]!.ToString() : null);
         }
-        catch (McpException) { return (false, null); }
+        catch (McpException ex) when (ex is not HudUnavailableException { NotNow: true }) { return (false, null); }   // "not now": the step pauses
     }
 
     /// <summary>
@@ -642,11 +659,12 @@ public static class ExperimentTools
         CancellationToken ct = default)
     {
         var until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSec, 5, 3600));
+        var pause = new HudPause();   // a "not now" (load screen, restart) pauses the wait instead of failing it
         while (true)
         {
             JToken list;
             try { (_, list) = await bridges.CallAsync(game, "experiment.queued", new JObject(), ct); }
-            catch (McpException) when (DateTime.UtcNow < until) { await Task.Delay(5000, ct); continue; }   // HUD restarting
+            catch (McpException ex) when (pause.Holds(ex) || DateTime.UtcNow < until) { if (pause.Holds(ex)) until = pause.Extend(until, TimeSpan.FromMilliseconds(5000)); await Task.Delay(5000, ct); continue; }   // HUD restarting; a "not now" (load screen, restart) pauses the wait
             NeedQueue(list);
             var open = (list["steps"] as JArray ?? []).OfType<JObject>().Count(s =>
                 s["status"]?.ToString() is "queued" or "running" && (experiment == null || s["experiment"]?.ToString() == experiment));
