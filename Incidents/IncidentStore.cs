@@ -377,7 +377,7 @@ public static class IncidentStore
     }
 
     /// <summary>This server beats (and beats older than an hour go), under the board's mutex. Best effort.</summary>
-    public static void BeatServer(int pid, string label, string kind)
+    public static void BeatServer(int pid, string label, string kind, string? session = null)
     {
         Directory.CreateDirectory(Dir);
         using var mutex = new Mutex(false, MutexName);
@@ -389,7 +389,7 @@ public static class IncidentStore
             var now = DateTime.UtcNow;
             var beats = ReadServerBeats().Where(kv => kv.Value.At is { } at && now - at < TimeSpan.FromHours(1))
                 .ToDictionary(kv => kv.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), kv => kv.Value);
-            beats[pid.ToString(System.Globalization.CultureInfo.InvariantCulture)] = new ServerBeat { Label = label, Kind = kind, At = now };
+            beats[pid.ToString(System.Globalization.CultureInfo.InvariantCulture)] = new ServerBeat { Label = label, Kind = kind, Session = session, At = now };
             WriteAtomic(ServerBeatsPath, JsonConvert.SerializeObject(beats, IncidentJson.Settings));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }

@@ -79,6 +79,9 @@ public sealed class ServerBeat
     public string Label { get; set; } = "";
     /// <summary>mcp | mcp-http.</summary>
     public string? Kind { get; set; }
+    /// <summary>The client session the server works for (SessionIdentity.ResponseId), for the deploy same-session rule.
+    /// Absent from older servers' beats.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)] public string? Session { get; set; }
     public DateTime? At { get; set; }
     [JsonExtensionData] public IDictionary<string, JToken>? Extra { get; set; }
 }
