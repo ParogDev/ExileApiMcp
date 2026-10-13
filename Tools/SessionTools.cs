@@ -236,7 +236,7 @@ public static class SessionTools
         {
             0 => stopOnly ? "stopped" : "restarted",
             2 => "cancelled", 3 => "error", 4 => "error",
-            5 => "denied", 6 => "blocked", 7 => "merged", 8 => "held_by_outage",
+            5 => "denied", 6 => "blocked", 7 => "merged", 8 => "held_by_outage", 9 => "bridge_not_back",
             _ => "error",
         };
         var result = new RestartResult { Game = g, Mode = "agent", Status = status, Ok = code == 0, ExitCode = code, Who = SessionIdentity.Label, Reason = reason, Output = output };
@@ -269,6 +269,7 @@ public static class SessionTools
         {
             "denied" => "The user pressed Not now on the in-game card. Say what you need the restart for in chat, or retry later.",
             "blocked" => "Still blocked when the wait ran out (see output for whose work). Retry later with a longer waitSec, or ask the user.",
+            "bridge_not_back" => "The HUD process restarted but its new bridge didn't answer its hello within 150 s of the HUD start: bridge-down or ports-reserved is on the incident board (see output). Check hud_log and bridge_status.",
             "cancelled" => "The UAC prompt was declined (no prompt-free task installed: tools\\install-hud-restart-tasks.ps1).",
             _ => "See output; <HUD>\\restart-hud.log has the elevated half's lines.",
         };
@@ -451,12 +452,14 @@ public static class SessionTools
         var stdout = proc.StandardOutput.ReadToEndAsync(ct);
         var stderr = proc.StandardError.ReadToEndAsync(ct);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(waitSec + 180));   // the restart itself: grace 15 s, start, 8 s alive check, focus
+        // The restart itself after the coordination: stop (grace 15 s + kill 5 s), the task or UAC prompt, then the bridge
+        // wait, 150 s from the new HUD process's start (exit 9 when it runs out), with slack for the UAC prompt.
+        timeout.CancelAfter(TimeSpan.FromSeconds(waitSec + 240));
         try { await proc.WaitForExitAsync(timeout.Token); }
         catch (OperationCanceledException)
         {
             try { proc.Kill(entireProcessTree: true); } catch { }
-            throw new McpException($"restart-hud.ps1 gave no result within {waitSec + 180} s.");
+            throw new McpException($"restart-hud.ps1 gave no result within {waitSec + 240} s.");
         }
         var output = (await stdout).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r')).ToList();
         var err = await stderr;

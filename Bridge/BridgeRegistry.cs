@@ -282,7 +282,7 @@ public sealed class BridgeRegistry : IDisposable
 
     /// <summary>
     /// Until when a call should wait for the HUD to come back: a restart that is stopping or relaunching it (phase stopping,
-    /// written in the last 3 minutes) gets 150 s from its start; one that just finished (phase done) gets 45 s for the bridge
+    /// written in the last 3 minutes) gets 150 s from the new HUD's start (bridgeWaitFrom; until then the restart's start); one that just finished (phase done) gets 45 s for the bridge
     /// to come up. Null when no restart is under way (a HUD that is simply not running fails at once, as before).
     /// </summary>
     private static DateTime? RestartComesBackBy(BridgeClient bridge)
@@ -296,9 +296,11 @@ public sealed class BridgeRegistry : IDisposable
             var phase = o["phase"]?.ToString();
             if (o["stopOnly"]?.Value<bool>() == true) return null;   // stopped on purpose: it isn't coming back
             var started = o["startedAt"]?.Value<DateTime>().ToUniversalTime() ?? written;
+            // restart-hud.ps1 counts its 150 s bridge wait from the new HUD process's start (bridgeWaitFrom, once it started).
+            var waitFrom = o["bridgeWaitFrom"]?.Value<DateTime>().ToUniversalTime() ?? started;
             DateTime? until = phase switch
             {
-                "stopping" when DateTime.UtcNow - written < TimeSpan.FromMinutes(3) => started.AddSeconds(150),
+                "stopping" when DateTime.UtcNow - written < TimeSpan.FromMinutes(3) => waitFrom.AddSeconds(150),
                 "done" when DateTime.UtcNow - written < TimeSpan.FromSeconds(45) => written.AddSeconds(45),
                 _ => null,
             };
