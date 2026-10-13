@@ -1169,6 +1169,9 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     var f = ExileApiMcp.Tools.HealthReportTools.ReflectionFindings(bad);
     Check("reflection: a finding per broken / blocked link", f.Count == 4 && f[0].StartsWith("bridge reflection link runtime.pool_buckets BROKEN"), string.Join(" | ", f));
     Check("reflection: line names the build change", ExileApiMcp.Tools.HealthReportTools.ReflectionLine(bad).Contains("1 broken, 3 blocked of 24") && ExileApiMcp.Tools.HealthReportTools.ReflectionLine(bad).Contains("was ExileCore2 1.0 (aa)"));
+    var crashed = JObject.Parse("""{"targets":0,"ok":0,"broken":0,"notNow":0,"blocked":0,"problems":["preflight failed: NullReferenceException: x"]}""");
+    Check("reflection: a failed preflight is a finding, never ok", ExileApiMcp.Tools.HealthReportTools.ReflectionFindings(crashed).Count == 1
+        && ExileApiMcp.Tools.HealthReportTools.ReflectionLine(crashed).StartsWith("Reflection preflight: did not run (preflight failed"), ExileApiMcp.Tools.HealthReportTools.ReflectionLine(crashed));
     var typed = ExileApiMcp.Tools.Dto.From<ExileApiMcp.Tools.HealthReport>(new JObject { ["reflection"] = bad, ["findings"] = new JArray(f) });
     Check("reflection: HealthReport.Reflection is the same object the findings came from", typed.Reflection?.Broken == 1 && typed.Reflection.Blocked == 3 && typed.Findings?.Count == 4);
 }

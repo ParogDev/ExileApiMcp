@@ -221,16 +221,30 @@ public static class HealthReportTools
         var broken = r["broken"]?.Value<int?>() ?? 0;
         var blocked = r["blocked"]?.Value<int?>() ?? 0;
         var changed = r["changedFrom"]?.Value<string>() is { } from ? $" (HUD build changed since the last check, was {from})" : "";
+        // No targets checked: the bridge's preflight itself failed (its problems say why), never "ok".
+        if ((r["targets"]?.Value<int?>() ?? 0) == 0)
+            return $"Reflection preflight: did not run ({string.Join("; ", (r["problems"] as JArray ?? []).Select(x => x.ToString()).DefaultIfEmpty("no targets and no reason given"))}).";
         return broken + blocked == 0
             ? $"Reflection preflight: {r["ok"]}/{r["targets"]} HUD internals ok{changed}."
             : $"Reflection preflight: {broken} broken, {blocked} blocked of {r["targets"]} HUD internals{changed}.";
     }
 
-    /// <summary>One finding per broken or blocked link of hello.reflection (not_now rows are not findings).</summary>
-    public static List<string> ReflectionFindings(JObject r) =>
-        (r["problems"] as JArray ?? []).Select(x => x.ToString()).Where(x => x.Contains(" BROKEN: ") || x.Contains(" blocked: "))
-            .Select(p => $"bridge reflection link {p}: fix the link in the bridge's Shared/HudLinks.cs (rows: bridge method reflection.preflight)")
-            .ToList();
+    /// <summary>One finding per broken or blocked link of hello.reflection, and one for any other problem (the preflight
+    /// itself failing); only not_now rows are not findings.</summary>
+    public static List<string> ReflectionFindings(JObject r)
+    {
+        var findings = new List<string>();
+        foreach (var p in (r["problems"] as JArray ?? []).Select(x => x.ToString()))
+        {
+            if (p.Contains(" BROKEN: ") || p.Contains(" blocked: "))
+                findings.Add($"bridge reflection link {p}: fix the link in the bridge's Shared/HudLinks.cs (rows: bridge method reflection.preflight)");
+            else if (!p.Contains(" not now: "))
+                findings.Add($"bridge reflection preflight: {p} (bridge method reflection.preflight refresh=true re-runs it; the bridge's Shared/Preflight.cs)");
+        }
+        if (findings.Count == 0 && (r["targets"]?.Value<int?>() ?? 0) == 0)
+            findings.Add("bridge reflection preflight checked no targets and gave no reason: run bridge method reflection.preflight refresh=true");
+        return findings;
+    }
 
     private static JObject Action(string label, string tool, JObject args) => new() { ["label"] = label, ["tool"] = tool, ["args"] = args };
 
