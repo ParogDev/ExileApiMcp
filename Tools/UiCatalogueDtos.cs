@@ -57,7 +57,7 @@ public sealed class UiCatalogueOption
     /// <summary>Child indexes from the panel to the element.</summary>
     public int[] Child { get; set; } = [];
     public float[]? Rect { get; set; }
-    /// <summary>The element or a parent within two levels reacts to hover: likely clickable.</summary>
+    /// <summary>A hint, PoE2 only (always false on PoE1): the element or its direct parent reacts to hover. False does not mean unclickable.</summary>
     public bool Clickable { get; set; }
     /// <summary>The text is unique in its view, so the text target hits only this element.</summary>
     public bool Unique { get; set; }

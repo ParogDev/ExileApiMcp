@@ -68,7 +68,7 @@ public static partial class ObserveTools
     [Description("The interfaces the user has opened while observing (NPC dialogues and their options, travel menus, choice and " +
                  "reward panels...), one entry per distinct interface keyed by a stable fingerprint ('NpcDialog|The Hooded One', " +
                  "'<mapped property or panel>|<title>'), each with how to recognise it, the areas it was seen in, and every visible " +
-                 "text as an option with child path, rect, clickable guess and a ready-to-use `highlight` target (text + within, or " +
+                 "text as an option with child path, rect, clickable hint (PoE2 only) and a ready-to-use `highlight` target (text + within, or " +
                  "panel + child). To point at an option: open nothing yourself; when the interface is open, pass the option's " +
                  "highlight object as a target to `highlight` (add label, a short durationSec). Filled by the bridge on its own while " +
                  "`observe` is on; read-only.")]
