@@ -61,18 +61,23 @@ public sealed class BridgeSchema
 /// type on purpose (the rest passes through [JsonExtensionData] Extra): bridge fields it lacks aren't drift; the reason
 /// says why. <paramref name="McpOnly"/> = fields the MCP adds itself (never on the bridge's wire). <paramref name="BridgeOnly"/>
 /// = bridge fields the mirror leaves out on purpose (handled before the mirror reads the reply, or never on the wire).
+/// <paramref name="McpWrites"/> = the other direction: the MCP writes this JSON and the bridge reads it (e.g. incidents.json).
+/// A bridge field the MCP lacks is then drift the same way, an MCP field the bridge ignores is not, and nullability is
+/// judged from the writer's side (the MCP may write null where the bridge declares a non-null field).
 /// </summary>
-public sealed record ContractMirror(Type Mcp, string Bridge, string? Narrow = null, string[]? McpOnly = null, string[]? BridgeOnly = null);
+public sealed record ContractMirror(Type Mcp, string Bridge, string? Narrow = null, string[]? McpOnly = null, string[]? BridgeOnly = null, bool McpWrites = false);
 
 /// <summary>A difference between an MCP mirror and the bridge DTO it reads, named at the field.</summary>
 public sealed record ContractDrift(string McpType, string BridgeType, string Field, string Kind, string? BridgeShape, string? McpShape)
 {
     /// <summary>missing_in_bridge (the MCP reads a field the bridge never writes) | missing_in_mcp (the bridge writes a field
-    /// the mirror lacks and the mirror isn't declared narrow) | type_mismatch | bridge_type_gone (the declared bridge type
-    /// isn't in the contract).</summary>
+    /// the mirror lacks and the mirror isn't declared narrow) | type_mismatch | nullability_mismatch (the writer may send null
+    /// where the reader declares the field non-null: a value type fails to deserialize, a reference type breaks the
+    /// reader's non-null assumption) | bridge_type_gone (the declared bridge type isn't in the contract).</summary>
     public string Text => Kind switch
     {
         "bridge_type_gone" => $"{McpType}: bridge type {BridgeType} is gone from the contract",
+        "nullability_mismatch" => $"{McpType}.{Field}{Of}: nullability mismatch (bridge {BridgeShape}, MCP {McpShape})",
         "missing_in_bridge" => $"{McpType}.{Field}{Of}: missing in the bridge (MCP {McpShape}; the bridge never writes it)",
         "missing_in_mcp" => $"{McpType}.{Field}{Of}: extra on the bridge (bridge {BridgeShape}; not in the MCP mirror, which isn't declared narrow)",
         _ => $"{McpType}.{Field}{Of}: type mismatch (bridge {BridgeShape}, MCP {McpShape})",
@@ -136,6 +141,19 @@ public static class BridgeContract
         new(typeof(Tools.ObjectPathError), "ObjectPathErrorDto"),
         // script.run / script.result (run_csharp)
         new(typeof(Tools.ScriptResult), "ScriptResultDto"),
+        // hud.reload_plugin / hud.reload_status (reload_plugin, Tools/ReloadDtos.cs)
+        new(typeof(Tools.ReloadQueuedReply), "ReloadQueuedResponse"),
+        new(typeof(Tools.ReloadStatusReply), "ReloadStatusResponse"),
+        // outage.state (Incidents/Outage.cs readiness for hud_restart mode=user): the card's own fields aren't read
+        new(typeof(Incidents.OutageStateReply), "OutageStateDto", Narrow: "readiness: busy / ready lists and the card's answer only"),
+        new(typeof(Incidents.OutageParty), "OutageParty", Narrow: "readiness: who and what they are doing; since / until (the card's timer) not read"),
+        // incidents.json the other way round: the MCP writes it (Incidents/IncidentStore.cs), the bridge's in-game incident
+        // card reads it. The incident's "outage" field is written through Extra (OutageLogic.SetInfo), so it pairs as its own root.
+        new(typeof(Incidents.IncidentFile), "IncidentBoardDto", McpWrites: true),
+        new(typeof(Incidents.Incident), "IncidentDto", BridgeOnly: ["outage"], McpWrites: true),
+        new(typeof(Incidents.OutageInfo), "IncidentOutageDto", McpWrites: true),
+        // Not mirrored: HudPluginsResponse (hud.plugins): the MCP never calls it; hud_plugins reads the HUD folders on disk
+        // and instrument.state.
     ];
 
     /// <summary>Compare every mirror (and the types its fields reach) with a bridge schema.</summary>
@@ -146,6 +164,7 @@ public static class BridgeContract
         var narrow = declared.Where(m => m.Narrow != null).Select(m => (m.Mcp, m.Bridge)).ToHashSet();
         var mcpOnly = declared.Where(m => m.McpOnly != null).ToDictionary(m => (m.Mcp, m.Bridge), m => m.McpOnly!.ToHashSet(StringComparer.OrdinalIgnoreCase));
         var bridgeOnly = declared.Where(m => m.BridgeOnly != null).ToDictionary(m => (m.Mcp, m.Bridge), m => m.BridgeOnly!.ToHashSet(StringComparer.OrdinalIgnoreCase));
+        var writes = declared.Where(m => m.McpWrites).Select(m => (m.Mcp, m.Bridge)).ToHashSet();
         var queue = new Queue<(Type Mcp, string Bridge)>(declared.Select(m => (m.Mcp, m.Bridge)));
         var seen = new HashSet<(Type, string)>();
         while (queue.Count > 0)
@@ -157,6 +176,8 @@ public static class BridgeContract
             if (bt.Kind == "enum") continue;
             var mFields = McpFields(mt);
             var only = mcpOnly.GetValueOrDefault((mt, bn));
+            var mcpWrites = writes.Contains((mt, bn));
+            var nested = new Queue<(Type, string)>();
             foreach (var bf in bt.Fields)
             {
                 // The MCP reads case-insensitively (Dto.Options), so a casing difference is not drift.
@@ -166,15 +187,25 @@ public static class BridgeContract
                         drift.Add(new(mt.Name, bn, bf.Json, "missing_in_mcp", bf.Type, null));
                     continue;
                 }
-                var why = Compare(bf.Type, mf.Shape, mf.Type, schema, queue);
-                if (why != null) drift.Add(new(mt.Name, bn, bf.Json, "type_mismatch", bf.Type, why));
+                var why = Compare(bf.Type, mf.Shape, mf.Type, schema, nested);
+                if (why != null) { drift.Add(new(mt.Name, bn, bf.Json, "type_mismatch", bf.Type, why)); continue; }
+                // Nullability, from the reader's side: the writer may send null (the bridge writes nulls unless omitNull)
+                // where the reader declares the field non-null.
+                if (mcpWrites ? mf.Nullable && !bf.Nullable : bf.Nullable && !bf.OmitNull && !mf.Nullable)
+                    drift.Add(new(mt.Name, bn, bf.Json, "nullability_mismatch", NullText(bf.Type, bf.Nullable), NullText(mf.Shape, mf.Nullable)));
             }
-            foreach (var (json, mf) in mFields)
-                if (!bt.Fields.Any(f => string.Equals(f.Json, json, StringComparison.OrdinalIgnoreCase)) && only?.Contains(json) != true && !bt.Open)
-                    drift.Add(new(mt.Name, bn, json, "missing_in_bridge", null, mf.Shape));
+            // Types reached through this pair's fields inherit its direction.
+            foreach (var n in nested) { queue.Enqueue(n); if (mcpWrites) writes.Add(n); }
+            // A reader that ignores a field the MCP writes is fine; a field the MCP reads that the bridge never writes is not.
+            if (!mcpWrites)
+                foreach (var (json, mf) in mFields)
+                    if (!bt.Fields.Any(f => string.Equals(f.Json, json, StringComparison.OrdinalIgnoreCase)) && only?.Contains(json) != true && !bt.Open)
+                        drift.Add(new(mt.Name, bn, json, "missing_in_bridge", null, mf.Shape));
         }
         return drift;
     }
+
+    private static string NullText(string shape, bool nullable) => nullable ? $"{shape} nullable" : $"{shape} non-null";
 
     /// <summary>Null when the MCP shape reads what the bridge writes; else the MCP shape as reported. Pairs nested types.</summary>
     private static string? Compare(string b, string m, Type? mType, BridgeSchema schema, Queue<(Type, string)> queue)
@@ -204,12 +235,15 @@ public static class BridgeContract
 
     // ── MCP shapes (System.Text.Json, Dto.Options) ──────────────────────────────────────────────────────────────────
 
-    public sealed record McpField(string Shape, Type Type);
+    /// <param name="Nullable">The property may hold null: Nullable&lt;T&gt;, a T? reference, or a reference whose nullability
+    /// isn't annotated (unknown counts as nullable, never as drift).</param>
+    public sealed record McpField(string Shape, Type Type, bool Nullable = true);
 
     /// <summary>The JSON fields of an MCP DTO, keyed case-insensitively (Dto.Options reads that way).</summary>
     public static Dictionary<string, McpField> McpFields(Type t)
     {
         var d = new Dictionary<string, McpField>(StringComparer.OrdinalIgnoreCase);
+        var nullability = new NullabilityInfoContext();
         foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             if (p.GetIndexParameters().Length > 0 || p.GetMethod == null || !p.CanWrite && !IsCollection(p.PropertyType)) continue;
@@ -221,7 +255,7 @@ public static class BridgeContract
             var name = p.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name
                        ?? p.GetCustomAttribute<Newtonsoft.Json.JsonPropertyAttribute>()?.PropertyName
                        ?? JsonNamingPolicy.CamelCase.ConvertName(p.Name);
-            d[name] = new McpField(Shape(p.PropertyType), p.PropertyType);
+            d[name] = new McpField(Shape(p.PropertyType), p.PropertyType, nullability.Create(p).ReadState != NullabilityState.NotNull);
         }
         return d;
     }

@@ -25,7 +25,9 @@ internal static class ContractChecks
           { "name": "RootDto", "kind": "object", "fields": [
             { "json": "count", "type": "integer" }, { "json": "ratio", "type": "number" }, { "json": "name", "type": "string" },
             { "json": "child", "type": "object:ChildDto" }, { "json": "items", "type": "list<object:ChildDto>" },
-            { "json": "extra", "type": "string" }, { "json": "kind", "type": "enum:KindEnum" } ] },
+            { "json": "extra", "type": "string" }, { "json": "kind", "type": "enum:KindEnum" },
+            { "json": "maybe", "type": "integer", "nullable": true }, { "json": "omitted", "type": "integer", "nullable": true, "omitNull": true } ] },
+          { "name": "BoardDto", "kind": "object", "open": true, "fields": [ { "json": "must", "type": "string", "nullable": false }, { "json": "fine", "type": "string", "nullable": true } ] },
           { "name": "ChildDto", "kind": "object", "fields": [ { "json": "id", "type": "string" } ] },
           { "name": "KindEnum", "kind": "enum", "values": ["A", "B"] } ] }
         """));
@@ -44,6 +46,24 @@ internal static class ContractChecks
         C("contract rule: a narrow mirror and its MCP-only fields aren't drift", !narrow.Any(x => x.Field is "extra" or "ghost"));
         C("contract rule: a gone bridge type is named",
             BridgeContract.Check(schema, [new ContractMirror(typeof(FixtureChild), "GoneDto")]).Single().Kind == "bridge_type_gone");
+        C("contract rule: a nullable bridge field read into a non-null MCP field is a nullability drift, named apart from type drift",
+            d.SingleOrDefault(x => x.Field == "maybe") is { Kind: "nullability_mismatch" } m
+            && m.Text == "FixtureRoot.maybe (bridge RootDto): nullability mismatch (bridge integer nullable, MCP integer non-null)",
+            string.Join("; ", d.Where(x => x.Field == "maybe").Select(x => x.Text)));
+        C("contract rule: an omitNull bridge field never sends null, so a non-null MCP field is fine", !d.Any(x => x.Field == "omitted"));
+        var w = BridgeContract.Check(schema, [new ContractMirror(typeof(FixtureBoard), "BoardDto", McpWrites: true)]);
+        C("contract rule: a written mirror: MCP may write null where the bridge reads non-null; extra MCP fields aren't drift",
+            w.Count == 1 && w[0] is { Field: "must", Kind: "nullability_mismatch" }, string.Join("; ", w.Select(x => x.Text)));
+        // reload_plugin reads hud.reload_status through its mirror: a finished result, unknown fields kept.
+        var rs = JObject.Parse("""
+        { "last": { "plugin": "Whats A Mirage", "queuedAt": "2026-10-13T20:00:00Z", "startedAt": "2026-10-13T20:00:01Z",
+          "finishedAt": "2026-10-13T20:00:04Z", "durationMs": 3012, "ok": true, "initialized": true, "instances": 1,
+          "warnings": [], "staleBridgeMethods": ["Mirage.Get"], "newField": 1 }, "pending": [] }
+        """).ToObject<ExileApiMcp.Tools.ReloadStatusReply>();
+        C("contract: hud.reload_status reads into its mirror",
+            rs?.Last is { Plugin: "Whats A Mirage", Ok: true, DurationMs: 3012, Initialized: true, FinishedAt: not null } l
+            && l.StartedAt.ToUniversalTime() == new DateTime(2026, 10, 13, 20, 0, 1, DateTimeKind.Utc)
+            && l.StaleBridgeMethods?.Single() == "Mirage.Get" && l.Extra?.ContainsKey("newField") == true && rs.Pending?.Count == 0);
         var emitted = BridgeContract.EmitMirror(schema, "RootDto", "Fx");
         C("contract: mirror generator emits the type and what it reaches",
             emitted.Contains("public sealed class FxRoot") && emitted.Contains("public FxChild? Child") && emitted.Contains("List<FxChild>? Items") && emitted.Contains("[JsonExtensionData]"), emitted);
@@ -108,10 +128,20 @@ internal sealed class FixtureRoot
     public List<FixtureChild>? Items { get; set; }
     public int? Kind { get; set; }
     public string? Ghost { get; set; }
+    public int Maybe { get; set; }
+    public int Omitted { get; set; }
     [System.Text.Json.Serialization.JsonExtensionData] public Dictionary<string, System.Text.Json.JsonElement>? Extra { get; set; }
 }
 
 internal sealed class FixtureChild
 {
     public int? Id { get; set; }
+}
+
+/// <summary>A file the MCP writes and the bridge reads (McpWrites).</summary>
+internal sealed class FixtureBoard
+{
+    public string? Must { get; set; }
+    public string Fine { get; set; } = "";
+    public string? OursOnly { get; set; }
 }

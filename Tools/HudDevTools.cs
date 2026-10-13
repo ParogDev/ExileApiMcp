@@ -216,20 +216,24 @@ public static partial class HudDevTools
         var before = perf ? await PluginCost(bridges, game, plugin, ct) : null;
         var started = DateTime.UtcNow;
         var (bridge, queued) = await bridges.CallAsync(game, "hud.reload_plugin", new JObject { ["name"] = plugin, ["force"] = force }, ct);
-        if (queued["queued"]?.Value<bool>() != true || !wait) return queued as JObject ?? new JObject { ["result"] = queued };
-        var folder = queued["plugin"]?.Value<string>() ?? plugin;
+        if (queued is not JObject queuedObj || queuedObj.ToObject<ReloadQueuedReply>() is not { Queued: true } q || !wait)
+            return queued as JObject ?? new JObject { ["result"] = queued };
+        var folder = q.Plugin ?? plugin;
 
-        JToken? last = null;
+        ReloadResultReply? last = null;
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(120);
         while (DateTime.UtcNow < deadline)
         {
             await Task.Delay(400, ct);
-            JToken status;
-            try { (_, status) = await bridges.CallAsync(bridge.Game == "auto" ? game : bridge.Game, "hud.reload_status", null, ct); }
+            ReloadResultReply? l;
+            try
+            {
+                var (_, status) = await bridges.CallAsync(bridge.Game == "auto" ? game : bridge.Game, "hud.reload_status", null, ct);
+                l = (status as JObject)?.ToObject<ReloadStatusReply>()?.Last;
+            }
             catch (McpException) { continue; } // the bridge can be briefly unreachable while the HUD compiles
-            var l = status["last"];
-            if (l?["plugin"]?.Value<string>() == folder && l["finishedAt"] != null
-                && l["startedAt"]?.Value<DateTime>().ToUniversalTime() >= started.AddSeconds(-2))
+            catch (Newtonsoft.Json.JsonException) { continue; }   // a reply not shaped like ReloadStatusResponse: not our result
+            if (l != null && l.Plugin == folder && l.FinishedAt != null && l.StartedAt.ToUniversalTime() >= started.AddSeconds(-2))
             {
                 last = l;
                 break;
@@ -238,16 +242,18 @@ public static partial class HudDevTools
         if (last == null)
             return new JObject { ["plugin"] = folder, ["error"] = "timeout", ["message"] = "No result after 120 s; check hud_log and hud.reload_status." };
 
-        var result = new JObject { ["plugin"] = folder, ["ok"] = last["ok"], ["durationMs"] = last["durationMs"] };
+        var result = new JObject { ["plugin"] = folder, ["ok"] = last.Ok, ["durationMs"] = last.DurationMs };
         var hud = Installs(bridges, bridge.Game == "auto" ? game : bridge.Game).FirstOrDefault();
-        if (last["error"] is { } err && hud != null) result["error"] = Clip(hud.ForAgent(err.ToString()));
-        else if (last["error"] != null) result["error"] = last["error"];
+        if (last.Error is { } err) result["error"] = hud != null ? Clip(hud.ForAgent(err)) : err;
         // Newer bridges check after a good compile that the new instance loaded and initialised (error not_loaded /
         // not_initialised / init_failed, with message), and name PluginBridge methods still answering from the old one.
-        foreach (var key in new[] { "message", "via", "instances", "initialized", "staleBridgeMethods" })
-            if (last[key] is { Type: not JTokenType.Null } v) result[key] = v;
-        if (last["warnings"] is JArray { Count: > 0 } warnings) result["warnings"] = warnings;
-        else if (last["initialized"] == null && result["ok"]?.Value<bool>() == true)
+        if (last.Message != null) result["message"] = last.Message;
+        if (last.Via != null) result["via"] = last.Via;
+        if (last.Instances != null) result["instances"] = last.Instances;
+        if (last.Initialized != null) result["initialized"] = last.Initialized;
+        if (last.StaleBridgeMethods != null) result["staleBridgeMethods"] = new JArray(last.StaleBridgeMethods);
+        if (last.Warnings is { Count: > 0 } warnings) result["warnings"] = new JArray(warnings);
+        else if (last.Initialized == null && last.Ok == true)
             result["warnings"] = new JArray("This bridge build doesn't confirm the plugin initialised after the reload: if it doesn't seem to Tick, check loggedSinceReload for its Initialise line, and update Whats An AI Bridge.");
 
         // Give the plugin a moment to initialise, then report what it logged since the reload started.
@@ -256,7 +262,7 @@ public static partial class HudDevTools
             await Task.Delay(750, ct);
             var src = hud.SourcePlugins().FirstOrDefault(p => string.Equals(p.Folder, folder, StringComparison.OrdinalIgnoreCase));
             var names = src != null ? Names(src).ToList() : [folder];
-            var since = new DateTimeOffset(last["startedAt"]!.Value<DateTime>().ToUniversalTime());
+            var since = new DateTimeOffset(last.StartedAt.ToUniversalTime());
             var logged = (hud.LatestRun()?.Entries ?? [])
                 .Where(e => e.Time >= since && HudInstall.LevelRank(e.Level) >= 3 && IsFrom(e.Message, names))
                 .Select(e => new JObject { ["level"] = e.Level, ["message"] = Clip(hud.ForAgent(e.Message)) })
