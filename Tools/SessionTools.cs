@@ -182,9 +182,10 @@ public static class SessionTools
                  "(run it through tools\\mcp-call.ps1 in the background for long waits). force=true skips the coordination: " +
                  "only when the user asked for that. While the user's planned restart (an outage incident) is open, an agent " +
                  "restart is refused with held_by_outage. mode=user announces the user's own restart of game + HUD (a patch, " +
-                 "a crash): it raises the outage incident, shows the in-game card, stops the HUD once nobody is busy (or on " +
-                 "Restart now) and returns at once with {outageId, phase, busy, ready}; the incident resolves (back) when the " +
-                 "game is in again, or on Not now (cancelled).")]
+                 "a crash): it raises the outage incident, shows the in-game card (who is busy, who is ready) and returns at " +
+                 "once with {outageId, phase, busy, ready}. The HUD stops only on the user's Restart now (an 8 s countdown " +
+                 "with Cancel first); the incident resolves (back) when the game is in again, or on Not now / Cancel (cancelled). " +
+                 "Agent mode reports hudAliveSec / bridgeAfterSec / inGameAfterSec, seconds after the new HUD process started.")]
     public static async Task<CallToolResult> HudRestart(BridgeRegistry bridges,
         [Description("Why, in a few words (shown on the card and in the guide log), e.g. 'bridge change: sessions'")] string reason,
         [Description("poe1 | poe2 (optional when only one HUD is configured as running)")] string? game = null,
@@ -209,6 +210,8 @@ public static class SessionTools
         // Once the script has the go and starts stopping the HUD (restart-state.json phase "stopping"), put the restart on the
         // incident board with an ETA, so every session hears of it at once (Incidents/IncidentAuto.cs).
         var callStart = DateTime.UtcNow;
+        // The HUD process before the restart: the new one is a process started after it (WaitBackAsync times from its start).
+        var hudAtCall = Incidents.BridgeDiagnosis.FindHud(HudDirOf(bridge)).StartedAt;
         Incidents.Incident? incident = null;
         using var watchStop = new CancellationTokenSource();
         var watch = Task.Run(async () =>
@@ -241,19 +244,20 @@ public static class SessionTools
         {
             // The new HUD writes a new token; our client reconnects (and re-identifies) on the next call. Back = the bridge
             // answers AND hud-state.json says the game is in (no file: an older bridge, back on the answer).
-            await WaitBackAsync(bridges, bridge, g, result, TimeSpan.Zero, TimeSpan.FromSeconds(60), ct);
-            result.Note = result.BackAfterSec != null
-                ? "The HUD is back, the bridge answers and the game is in. Plugins compiled at startup: check hud_plugins for the one you changed."
+            await WaitBackAsync(bridges, bridge, g, result, hudAtCall, ownScript: true, ct);
+            result.Note = result.InGameAfterSec != null
+                ? $"The HUD is back: process alive {Secs(result.HudAliveSec)}, bridge listener answered {Secs(result.BridgeAfterSec)}, game in {Secs(result.InGameAfterSec)} after the HUD started. " +
+                  "Plugins compiled at startup: check hud_plugins for the one you changed."
                 : result.BridgeAfterSec != null
-                    ? $"The HUD restarted and its bridge answers ({result.BridgeAfterSec} s), but the game isn't in yet (phase {result.Phase ?? "?"}): calls answer 'not now' until it is."
-                    : "The HUD restarted but its bridge hasn't answered within 60 s: check hud_log and bridge_status.";
+                    ? $"The HUD restarted and its bridge listener answers ({Secs(result.BridgeAfterSec)} after the HUD started), but the game isn't in yet (phase {result.Phase ?? "?"}): calls answer 'not now' until it is."
+                    : $"The HUD process is alive but its bridge listener hasn't answered within {HudAvailabilityLogic.StartupStuckSec:0} s of the start (usually ~{HudAvailabilityLogic.StartupUsualSec:0} s, up to ~{HudAvailabilityLogic.StartupMaxSec:0} s): check hud_log and bridge_status.";
         }
         else if (code == 7)
         {
-            await WaitBackAsync(bridges, bridge, g, result, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(90), ct);
-            result.Note = result.BackAfterSec != null ? "Another agent restarted the HUD; it is back and the game is in."
-                : result.BridgeAfterSec != null ? $"Another agent restarted the HUD; the bridge answers but the game isn't in yet (phase {result.Phase ?? "?"})."
-                : "Another agent was restarting the HUD; it isn't back yet (bridge_status).";
+            await WaitBackAsync(bridges, bridge, g, result, hudAtCall, ownScript: false, ct);
+            result.Note = result.InGameAfterSec != null ? $"Another agent restarted the HUD; it is back (bridge {Secs(result.BridgeAfterSec)}, game in {Secs(result.InGameAfterSec)} after the HUD started)."
+                : result.BridgeAfterSec != null ? $"Another agent restarted the HUD; the bridge listener answers but the game isn't in yet (phase {result.Phase ?? "?"})."
+                : "Another agent was restarting the HUD; its bridge listener isn't answering yet (bridge_status).";
         }
         else if (code == 8)
         {
@@ -272,8 +276,8 @@ public static class SessionTools
         // the incident monitor re-diagnoses it (HUD not running, bridge not listening...) or resolves it once the game is in.
         try
         {
-            if (code == 0 && !stopOnly && result.BackAfterSec != null)
-                Incidents.IncidentStore.ResolveKeys(Incidents.IncidentAuto.BridgeKeys(g), $"the {g} HUD is back and the game is in, {result.BackAfterSec} s after the restart");
+            if (code == 0 && !stopOnly && result.InGameAfterSec != null)
+                Incidents.IncidentStore.ResolveKeys(Incidents.IncidentAuto.BridgeKeys(g), $"the {g} HUD is back and the game is in, {result.InGameAfterSec} s after the HUD started");
             // Not restarted at all (Loader.exe missing, UAC declined, Not now, still blocked, held): the HUD was never stopped.
             // A restart that failed after stopping (3, 4) leaves the HUD possibly down: its incident stays open.
             else if (code is 1 or 2 or 5 or 6 or 8 && incident != null)
@@ -283,37 +287,81 @@ public static class SessionTools
                 result.Incident = IncidentTools.View(inc, Incidents.IncidentStore.ReadHeartbeats());
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { output.Add($"incident board not updated: {ex.Message}"); }
-        var text = $"{g}: {status} (exit {code}, {sw.Elapsed.TotalSeconds:0} s)" + (result.BackAfterSec != null ? $", back after {result.BackAfterSec} s" : "") +
+        var text = $"{g}: {status} (exit {code}, {sw.Elapsed.TotalSeconds:0} s)" + ((result.HudAliveSec ?? result.BridgeAfterSec ?? result.InGameAfterSec) is not null
+                       ? $", HUD alive {Secs(result.HudAliveSec)} / bridge {Secs(result.BridgeAfterSec)} / in game {Secs(result.InGameAfterSec)} after it started" : "") +
                    (result.Note != null && code is 0 or 7 or 8 ? "\n" + result.Note : "") + "\n" + string.Join("\n", output);
         var call = Dto.Result(result, text);
         if (code != 0) call.IsError = true;
         return call;
     }
 
+    private static string HudDirOf(BridgeClient bridge) =>
+        Path.GetDirectoryName(Path.GetFullPath(bridge.BridgeDir).TrimEnd('\\', '/')) ?? bridge.BridgeDir;
+
+    private static string Secs(double? s) => s is { } x ? $"{x:0.#} s" : "?";
+
+    /// <summary>A file the new bridge hasn't written yet answers for this long after its listener is up before we take the
+    /// listener alone as back (a bridge that writes no hud-state.json).</summary>
+    private static readonly TimeSpan NewFileGrace = TimeSpan.FromSeconds(10);
+
     /// <summary>
-    /// Waits until the bridge answers (BridgeAfterSec) and hud-state.json says the game is in (BackAfterSec; no file or a
-    /// stale one: back on the answer, as with older bridges). A bridge that answers from the menu gets up to 60 s more.
+    /// Waits until the new HUD is back: its bridge LISTENER answers (ping, answered on the listener thread: BridgeAfterSec)
+    /// AND hud-state.json says the game is in (InGameAfterSec; no file, or no file newer than the process after
+    /// <see cref="NewFileGrace"/>: the listener suffices, as with older bridges). "The process is alive" (HudAliveSec: the
+    /// script's alive check, or our first sight of the process for a merged restart) is not back: the listener comes
+    /// ~15-100 s after the start, after ExileCore2's preload and the plugin compile. All three are seconds after the new
+    /// HUD process started (its StartTime; the script's end when unknown). The listener gets up to
+    /// <see cref="HudAvailabilityLogic.StartupStuckSec"/> after the start, then the game 60 s more from its answer.
     /// </summary>
-    private static async Task WaitBackAsync(BridgeRegistry bridges, BridgeClient bridge, string g, RestartResult result, TimeSpan first, TimeSpan budget, CancellationToken ct)
+    private static async Task WaitBackAsync(BridgeRegistry bridges, BridgeClient bridge, string g, RestartResult result, DateTime? previousStart, bool ownScript, CancellationToken ct)
     {
-        var back = Stopwatch.StartNew();
-        var extended = false;
-        if (first > TimeSpan.Zero) await Task.Delay(first, ct);
-        while (back.Elapsed < budget)
+        var hudDir = HudDirOf(bridge);
+        var scriptEnd = DateTime.UtcNow;
+        // Our own script exits 0 only after its alive check: the process is alive at its end.
+        DateTime? hudStart = null, aliveAt = ownScript ? scriptEnd : null, bridgeAt = null, inGameAt = null;
+        var looked = false;
+        var deadline = scriptEnd + TimeSpan.FromSeconds(HudAvailabilityLogic.StartupStuckSec);
+        if (!ownScript) await Task.Delay(TimeSpan.FromSeconds(3), ct);   // a merged restart: let the old HUD go first
+        while (DateTime.UtcNow < deadline)
         {
-            try
+            if (hudStart == null && (!looked || aliveAt == null))
             {
-                await bridges.QueryAsync(g, "hello", ct);
-                result.BridgeAfterSec ??= Math.Round(back.Elapsed.TotalSeconds, 1);
-                var s = HudStateReader.Read(bridge.BridgeDir);
-                result.Phase = s?.Phase;
-                if (Incidents.IncidentAuto.BackVerdict(s, g, DateTime.UtcNow).Resolve) { result.BackAfterSec = Math.Round(back.Elapsed.TotalSeconds, 1); return; }
-                // The bridge answers from the menu or a load: give the game 60 s more from now, once.
-                if (!extended) { budget = TimeSpan.FromSeconds(Math.Max(budget.TotalSeconds, back.Elapsed.TotalSeconds + 60)); extended = true; }
+                looked = true;
+                // running null: the process list can't say (access); take it as alive and let the listener decide.
+                var (running, _, started) = Incidents.BridgeDiagnosis.FindHud(hudDir);
+                if (running != false && (previousStart == null || started == null || started > previousStart.Value.AddSeconds(1)))
+                {
+                    hudStart = started;
+                    aliveAt ??= DateTime.UtcNow;
+                    if (started is { } st) deadline = st + TimeSpan.FromSeconds(HudAvailabilityLogic.StartupStuckSec);
+                }
             }
-            catch (McpException) { }
+            if (aliveAt != null)
+            {
+                try
+                {
+                    await bridges.CallAsync(g, "ping", new JObject(), ct);
+                    bridgeAt ??= DateTime.UtcNow;
+                    var s = HudStateReader.Read(bridge.BridgeDir);
+                    result.Phase = s?.Phase;
+                    // The previous HUD's file (last heartbeat before this process started): the new bridge hasn't written yet.
+                    var oldFile = s != null && hudStart != null && (s.Heartbeat is not { } hb || hb < hudStart.Value);
+                    var back = oldFile ? DateTime.UtcNow - bridgeAt.Value > NewFileGrace : Incidents.IncidentAuto.BackVerdict(s, g, DateTime.UtcNow).Resolve;
+                    if (back) { inGameAt = DateTime.UtcNow; break; }
+                    // The listener answers from the menu or a load: give the game 60 s more from now.
+                    if (deadline < DateTime.UtcNow + TimeSpan.FromSeconds(60)) deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+                }
+                catch (McpException) { }
+            }
             await Task.Delay(1000, ct);
         }
+        var origin = hudStart ?? scriptEnd;
+        static double? Since(DateTime? at, DateTime origin) => at is { } t ? Math.Round(Math.Max(0, (t - origin).TotalSeconds), 1) : null;
+        result.HudStartedAt = hudStart;
+        result.HudAliveSec = Since(aliveAt, origin);
+        result.BridgeAfterSec = Since(bridgeAt, origin);
+        result.InGameAfterSec = Since(inGameAt, origin);
+        result.BackAfterSec = result.InGameAfterSec;
     }
 
     /// <summary>The open outage of this game that holds agent restarts, as the typed refusal; null when none.</summary>
@@ -363,9 +411,11 @@ public static class SessionTools
             Game = g, Mode = "user", Status = created ? "announced" : "already_announced", Ok = true, ExitCode = 0, Who = SessionIdentity.Label, Reason = info.Reason ?? reason,
             OutageId = inc.Id, Phase = info.Phase, Busy = busy.Select(View).ToList(), Ready = ready.Select(View).ToList(),
             Note = (created ? $"Outage {inc.Id} announced: the in-game card tells the user. " : $"The user's restart {inc.Id} was already announced (phase {info.Phase}). ") +
-                   (busy.Count > 0 ? $"Busy: {string.Join(", ", busy.Select(b => b.Label + (b.Doing != null ? $" ({b.Doing})" : "")))}; the HUD stops when they finish or the user presses Restart now. "
-                                   : "Nobody is busy: the HUD stops within seconds. ") +
-                   "The user then restarts game + HUD by hand; the incident resolves (back) once the game is in, or cancelled on Not now. " +
+                   (busy.Count > 0 ? $"Busy: {string.Join(", ", busy.Select(b => b.Label + (b.Doing != null ? $" ({b.Doing})" : "")))} (the card shows them to the user). "
+                                   : "Nobody is busy (the card says so). ") +
+                   $"The HUD stops only when the user presses Restart now on the card: then a {Incidents.OutageLogic.StopCountdown.TotalSeconds:0} s countdown with Cancel, " +
+                   "then the stop; the user restarts game + HUD by hand and the incident resolves (back) once the game is in, or cancelled on Not now / Cancel. " +
+                   "The bridge posts every outage toast itself: don't guide.log or toast the stop, the load or the menu. " +
                    "Wait with incident_wait." + (notes.Count > 0 ? " (" + string.Join("; ", notes) + ")" : ""),
         };
         result.Output = notes;

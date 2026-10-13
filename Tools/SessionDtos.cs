@@ -165,11 +165,18 @@ public sealed class RestartResult
     public string? Reason { get; set; }
     /// <summary>What tools\restart-hud.ps1 printed (coordination, stop, start, focus).</summary>
     public List<string> Output { get; set; } = [];
-    /// <summary>Seconds until the new HUD was back: its bridge answers and hud-state.json says the game is in (no file:
-    /// the answer alone). Null: not back within the wait.</summary>
-    public double? BackAfterSec { get; set; }
-    /// <summary>Seconds until the new HUD's bridge answered at all (it may still be at the menu or loading: see phase).</summary>
+    /// <summary>When the new HUD process started (Loader.exe StartTime, UTC): the origin of the three *Sec times below
+    /// (null: unknown, then they count from the restart script's end).</summary>
+    public DateTime? HudStartedAt { get; set; }
+    /// <summary>Seconds after the start until the HUD process was confirmed alive (restart-hud.ps1's alive check, ~8 s). Alive is NOT back.</summary>
+    public double? HudAliveSec { get; set; }
+    /// <summary>Seconds after the start until the new bridge's listener answered (ping); usually ~35 s, up to ~100 s. Null: not within the wait.</summary>
     public double? BridgeAfterSec { get; set; }
+    /// <summary>Seconds after the start until back: the listener answers AND hud-state.json says the game is in (no file
+    /// from the new bridge: the listener alone). Null: not back within the wait.</summary>
+    public double? InGameAfterSec { get; set; }
+    /// <summary>Same as <see cref="InGameAfterSec"/> (kept for older readers).</summary>
+    public double? BackAfterSec { get; set; }
     /// <summary>hud-state.json's phase when last read; mode=user: the outage's phase (announced | holding | down | waitingGame | back | cancelled).</summary>
     public string? Phase { get; set; }
     public string? Note { get; set; }

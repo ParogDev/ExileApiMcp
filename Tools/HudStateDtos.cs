@@ -12,7 +12,7 @@ public sealed class HudAvailability
 {
     /// <summary>notNow (normal, comes back by itself) | broken (needs someone).</summary>
     public string State { get; set; } = "notNow";
-    /// <summary>loading | starting | restarting | user-restart | menu | stuckLoading | gameGone | hudGone | frozen.</summary>
+    /// <summary>loading | starting | restarting | user-restart | menu | stuckLoading | stuckStarting | gameGone | hudGone | frozen.</summary>
     public string Reason { get; set; } = "";
     /// <summary>The bridge's phase from hud-state.json (starting | menu | loading | ready | restarting | user-restart | closed).</summary>
     public string? Phase { get; set; }
@@ -29,6 +29,8 @@ public sealed class HudAvailability
     /// <summary>user-restart: the outage incident on the board.</summary>
     public string? OutageId { get; set; }
     public string? Game { get; set; }
+    /// <summary>For the agent: who tells the user (the bridge posts outage and long-load toasts itself; loading / starting / menu need no toast).</summary>
+    public string? Note { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 
     [JsonIgnore] public bool NotNow => State == "notNow";

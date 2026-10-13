@@ -868,9 +868,25 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check("availability: HUD closed for the user's restart is not now user-restart", L(fu) is { State: "notNow", Reason: "user-restart" });
     var fs = F(S("closed", 600), "unavailable"); fs.HudStartedAt = now.AddSeconds(-12); fs.State!.Heartbeat = now.AddSeconds(-90);
     var a2 = L(fs);
-    Check("availability: a HUD process newer than the heartbeat is starting (plugins compiling), typical 40 s, 12 s in",
-        a2 is { State: "notNow", Reason: "starting" } && a2.Detail.Contains("plugins compiling") && a2.ExpectedBackSec == 28 && a2.SinceSec == 12, a2?.Detail);
-    Check("availability: phase starting is not now starting", L(F(S("starting", 5), "unavailable")) is { State: "notNow", Reason: "starting" });
+    Check("availability: a HUD process newer than the heartbeat is starting, usually ~40 s (typical), 12 s in, never 'plugins compiling'",
+        a2 is { State: "notNow", Reason: "starting" } && a2.Detail.Contains("usually ~40 s, up to ~100 s") && !a2.Detail.Contains("compiling")
+        && a2.ExpectedBackSec == 28 && a2.SinceSec == 12, a2?.Detail);
+    Check("availability: phase starting is not now starting (a bridge reload in an old HUD counts in the phase)",
+        L(F(S("starting", 5), "unavailable")) is { State: "notNow", Reason: "starting", SinceSec: 5 }, L(F(S("starting", 5), "unavailable"))?.Detail);
+    var fn = F(null, "unavailable"); fn.HudStartedAt = now.AddSeconds(-20);
+    var a3 = L(fn);
+    Check("availability: no file (older bridge), HUD process 20 s old, listener down = starting, usually ~35 s, back in ~15 s",
+        a3 is { State: "notNow", Reason: "starting", ExpectedBackSec: 15, SinceSec: 20 } && a3.Detail.Contains("usually ~35 s, up to ~100 s"), a3?.Detail);
+    fn.HudStartedAt = now.AddSeconds(-120);
+    Check("availability: 120 s into a start is still not now (up to ~100 s, stuck only after 150 s)", L(fn) is { State: "notNow", Reason: "starting", ExpectedBackSec: 1 });
+    fn.HudStartedAt = now.AddSeconds(-160);
+    Check("availability: 160 s with no listener and no file is broken stuckStarting", L(fn) is { State: "broken", Reason: "stuckStarting" } st && st.WaitWith!.Contains("hud_log"), L(fn)?.Detail);
+    var fsk = F(S("closed", 600), "unavailable"); fsk.HudStartedAt = now.AddSeconds(-160); fsk.State!.Heartbeat = now.AddSeconds(-300);
+    Check("availability: 160 s with only the previous HUD's file is broken stuckStarting", L(fsk) is { State: "broken", Reason: "stuckStarting" });
+    var fl = F(null, "hud_timeout"); fl.HudStartedAt = now.AddSeconds(-20);
+    Check("availability: no file and the listener answered (timeout) stays today's error", L(fl) == null);
+    Check("availability: not-now results tell agents not to toast", a1!.Note!.Contains("Don't guide.log") && a3!.Note!.Contains("starting")
+        && ExileApiMcp.Bridge.HudAvailabilityLogic.Text(a3).Contains("Don't guide.log"));
     Check("availability: menu is not now, back when the user enters a character", L(F(S("menu", 30))) is { State: "notNow", Reason: "menu" } m && m.Detail.Contains("character"));
     var ft = F(S("ready", 30, true), "hud_timeout"); ft.TickAgeMs = 8000;
     Check("availability: ready but the main thread silent 8 s is broken frozen", L(ft) is { State: "broken", Reason: "frozen" });
@@ -949,10 +965,31 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check("outage: busy agents hold an announced outage", OutageLogic.Decide(info, null, 1, null, null, now) == OutageStep.Hold);
     info.Phase = "holding";
     Check("outage: holding with busy agents waits", OutageLogic.Decide(info, null, 2, null, null, now) == OutageStep.None);
-    Check("outage: nobody busy stops the HUD", OutageLogic.Decide(info, null, 0, null, null, now) == OutageStep.Stop);
-    Check("outage: Restart now stops it over busy agents", OutageLogic.Decide(info, "now", 3, null, null, now) == OutageStep.Stop);
+    Check("outage: nobody busy alone never stops the HUD", OutageLogic.Decide(info, null, 0, null, null, now) == OutageStep.None);
+    Check("outage: Restart now starts the countdown over busy agents", OutageLogic.Decide(info, "now", 3, null, null, now) == OutageStep.Countdown);
     Check("outage: Not now cancels", OutageLogic.Decide(info, "notNow", 0, null, null, now) == OutageStep.Cancel);
-    info.Phase = "down"; info.PhaseAt = now.AddMinutes(-2);
+    var cd = new OutageInfo { Game = "poe2", Phase = "down", PhaseAt = now, StopAt = now.AddSeconds(8), Answer = "now" };
+    Check("outage: counting down to stopAt waits", OutageLogic.Decide(cd, null, 0, null, null, now.AddSeconds(3)) == OutageStep.None);
+    Check("outage: Cancel during the countdown cancels (outage.answer notNow)", OutageLogic.Decide(cd, "notNow", 0, null, null, now.AddSeconds(8)) == OutageStep.Cancel);
+    Check("outage: at stopAt with no Cancel the HUD stops", OutageLogic.Decide(cd, "now", 0, null, null, now.AddSeconds(8)) == OutageStep.Stop
+                                                          && OutageLogic.Decide(cd, null, 0, null, null, now.AddSeconds(9)) == OutageStep.Stop);
+    Check("outage: the countdown ignores a fresh in-game file (the HUD still runs)",
+        OutageLogic.Decide(cd, null, 0, new HudStateFile { Phase = "ready", InGame = true, Heartbeat = now.AddSeconds(2) }, true, now.AddSeconds(3)) == OutageStep.None);
+    cd.StoppedAt = now.AddSeconds(9);
+    Check("outage: after the stop, a heartbeat from before the stop is the old HUD",
+        OutageLogic.Decide(cd, null, 0, new HudStateFile { Phase = "ready", InGame = true, Heartbeat = now.AddSeconds(5) }, true, now.AddSeconds(14)) == OutageStep.None
+        && OutageLogic.Decide(cd, null, 0, new HudStateFile { Phase = "ready", InGame = true, Heartbeat = now.AddSeconds(60) }, true, now.AddSeconds(61)) == OutageStep.Back);
+    {
+        var fc = new IncidentFile { Rev = 1 };
+        var (oc, _) = OutageLogic.Raise(fc, "poe1", "patch", "s#1", "S", 9, now);
+        Check("outage: BeginCountdown -> phase down, stopAt, answer now, detail names the countdown",
+            OutageLogic.BeginCountdown(oc, "t", now, now.AddSeconds(8)) && OutageLogic.Info(oc) is { Phase: "down", StoppedAt: null, Answer: "now" } ic
+            && ic.StopAt == now.AddSeconds(8) && oc.Detail.Contains("Cancel") && oc.IsOpen, oc.Detail);
+        Check("outage: MarkStopped records the stop", OutageLogic.MarkStopped(oc, now.AddSeconds(9)) && OutageLogic.Info(oc)!.StoppedAt == now.AddSeconds(9)
+            && oc.Detail.Contains("restart-hud.ps1 -StopOnly"));
+        Check("outage: stopAt round-trips in the incident JSON", IncidentJson.Serialize(fc).Contains("\"stopAt\""));
+    }
+    info.Phase = "down"; info.PhaseAt = now.AddMinutes(-2);   // no stopAt: an older runner's down (already stopped)
     var oldFile = new HudStateFile { Phase = "user-restart", Heartbeat = now.AddMinutes(-3) };
     var menuFile = new HudStateFile { Phase = "menu", Heartbeat = now.AddSeconds(-1), Since = now.AddSeconds(-20) };
     var readyFile = new HudStateFile { Phase = "ready", InGame = true, Heartbeat = now.AddSeconds(-1) };

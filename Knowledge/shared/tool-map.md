@@ -9,7 +9,7 @@ This server has ~90 tools. Start from the question; cheapest and most direct fir
 | Did plugins compile, what did they log? | `hud_plugins`, `hud_log` (offline) |
 | The HUD is slow, laggy or not drawing | `hud_health_report` |
 | A call failed with `hud_not_now`: is that normal? | Yes: a load screen, the HUD starting or restarting, the user's planned restart, the game at the menu. Read `availability.waitWith` and wait with it (`pubsub_wait kinds=area.ready` / `hud.phase`, `incident_wait`); don't debug or restart. `hud_broken` names the broken link (`stuckLoading`, `gameGone`, `hudGone`, `frozen`) |
-| The user wants to restart the game / HUD themselves (patch, crash) | `hud_restart mode=user`: announces it (outage incident + in-game card), stops the HUD once nobody is busy, resolves when the game is back in; returns at once. Agent restarts meanwhile get `held_by_outage` |
+| The user wants to restart the game / HUD themselves (patch, crash) | `hud_restart mode=user`: announces it (outage incident + in-game card), stops the HUD only on the user's Restart now (8 s countdown with Cancel), resolves when the game is back in; returns at once. Agent restarts meanwhile get `held_by_outage` |
 | What is broken for every session right now, and who is waiting on it | `incidents`, `incident_wait since=<rev>`, `incident_respond` |
 
 ## Game state now

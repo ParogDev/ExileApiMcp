@@ -29,6 +29,11 @@ public sealed class OutageInfo
     public bool StopOnly { get; set; } = true;
     /// <summary>The in-game card's answer: null | now | notNow.</summary>
     public string? Answer { get; set; }
+    /// <summary>Phase down: when the HUD stops (Restart now + <see cref="OutageLogic.StopCountdown"/>); the card counts down to
+    /// it and its Cancel (outage.answer notNow) still cancels. Null outside the countdown.</summary>
+    public DateTime? StopAt { get; set; }
+    /// <summary>Phase down: when restart-hud.ps1 -StopOnly stopped the HUD (null while counting down to <see cref="StopAt"/>).</summary>
+    public DateTime? StoppedAt { get; set; }
     public Dictionary<string, OutageParticipant> Participants { get; set; } = [];
     public DateTime? ClosedAt { get; set; }
     [JsonExtensionData] public IDictionary<string, JToken>? Extra { get; set; }
@@ -50,12 +55,14 @@ public sealed class OutageParticipant
 public sealed record OutageSession(string Session, string Label, string? Doing, string? Lease);
 
 /// <summary>What the runner should do next (pure decision).</summary>
-public enum OutageStep { None, Hold, Stop, Cancel, WaitingGame, Back }
+public enum OutageStep { None, Hold, Countdown, Stop, Cancel, WaitingGame, Back }
 
 /// <summary>The pure half: reading and writing the field, the phase machine and readiness. Unit-tested.</summary>
 public static class OutageLogic
 {
     public static readonly string[] HoldingPhases = ["announced", "holding", "down", "waitingGame"];
+    /// <summary>Restart now -> phase down with stopAt = now + this; the card counts down with Cancel, then the HUD stops.</summary>
+    public static readonly TimeSpan StopCountdown = TimeSpan.FromSeconds(8);
     private static readonly JsonSerializer Json = JsonSerializer.Create(IncidentJson.Settings);
 
     public static string Key(string game) => $"outage:{game}";
@@ -98,8 +105,9 @@ public static class OutageLogic
 
     public static string Detail(OutageInfo o) => o.Phase switch
     {
-        "announced" => $"Announced by {o.RequestedByLabel}: the in-game card asks the user; waiting for busy agents or Restart now.",
-        "holding" => $"Holding for busy agents ({string.Join(", ", o.Participants.Values.Where(p => p.State == "busy").Select(p => p.Display ?? p.Label).DefaultIfEmpty("none"))}) or the user's Restart now.",
+        "announced" => $"Announced by {o.RequestedByLabel}: the in-game card asks the user; the HUD stops only on the user's Restart now.",
+        "holding" => $"Waiting for the user's Restart now on the in-game card (busy agents: {string.Join(", ", o.Participants.Values.Where(p => p.State == "busy").Select(p => p.Display ?? p.Label).DefaultIfEmpty("none"))}).",
+        "down" when o.StoppedAt == null && o.StopAt != null =>$"The user pressed Restart now: the HUD stops at {o.StopAt:HH:mm:ss}Z ({StopCountdown.TotalSeconds:0} s countdown on the card, Cancel still cancels).",
         "down" => "HUD stopped (restart-hud.ps1 -StopOnly): the user restarts the game and the HUD by hand.",
         "waitingGame" => "A new HUD is up, the game isn't in yet (login / character select / load).",
         "back" => "The HUD is back and the game is in.",
@@ -117,6 +125,28 @@ public static class OutageLogic
         SetInfo(i, o);
         i.Detail = Detail(o) + (note != null ? " " + note : "");
         if (phase is "back" or "cancelled") IncidentLogic.Resolve(i, who, phase == "back" ? "back" : note ?? "cancelled", now);
+        return true;
+    }
+
+    /// <summary>Restart now: phase down with stopAt (the card's countdown; Cancel still cancels until then). False when not open.</summary>
+    public static bool BeginCountdown(Incident i, string who, DateTime now, DateTime stopAt)
+    {
+        if (!i.IsOpen) return false;
+        var o = Info(i) ?? new OutageInfo { Game = i.Scope };
+        o.Phase = "down"; o.PhaseAt = now; o.StopAt = stopAt; o.StoppedAt = null; o.Answer = "now";
+        SetInfo(i, o);
+        i.Detail = Detail(o);
+        return true;
+    }
+
+    /// <summary>restart-hud.ps1 -StopOnly stopped the HUD: from here the monitor waits for a newer bridge.</summary>
+    public static bool MarkStopped(Incident i, DateTime now)
+    {
+        if (!i.IsOpen) return false;
+        var o = Info(i) ?? new OutageInfo { Game = i.Scope, Phase = "down" };
+        o.StoppedAt = now;
+        SetInfo(i, o);
+        i.Detail = Detail(o);
         return true;
     }
 
@@ -144,8 +174,10 @@ public static class OutageLogic
     }
 
     /// <summary>
-    /// The next step. announced/holding: Not now cancels; Restart now or nobody busy stops the HUD; busy agents hold.
-    /// down: a newer bridge (heartbeat after the stop) at menu/loading/starting is waitingGame, in game is back.
+    /// The next step. announced/holding: Not now cancels; only the user's Restart now starts the stop (Countdown: phase down
+    /// with stopAt), never "nobody busy" alone (busyCount only informs the card); otherwise hold.
+    /// down before the stop: Cancel on the card (notNow) cancels; at stopAt the HUD stops (Stop).
+    /// down after the stop: a newer bridge (heartbeat after the stop) at menu/loading/starting is waitingGame, in game is back.
     /// waitingGame: in game (fresh heartbeat, HUD alive) is back.
     /// </summary>
     public static OutageStep Decide(OutageInfo o, string? answer, int busyCount, HudStateFile? state, bool? hudAlive, DateTime now)
@@ -155,12 +187,16 @@ public static class OutageLogic
             case "announced":
             case "holding":
                 if ((answer ?? o.Answer) == "notNow") return OutageStep.Cancel;
-                if ((answer ?? o.Answer) == "now" || busyCount == 0) return OutageStep.Stop;
+                if ((answer ?? o.Answer) == "now") return OutageStep.Countdown;
                 return o.Phase == "announced" ? OutageStep.Hold : OutageStep.None;
+            case "down" when o.StoppedAt == null && o.StopAt != null:   // no stopAt: an older runner's down, already stopped
+                if ((answer ?? o.Answer) == "notNow") return OutageStep.Cancel;
+                return now < o.StopAt.Value ? OutageStep.None : OutageStep.Stop;
             case "down":
             case "waitingGame":
                 if (state == null || hudAlive == false) return OutageStep.None;
-                var fresh = state.Heartbeat is { } hb && now - hb < HudAvailabilityLogic.HeartbeatStale && (o.PhaseAt == null || hb > o.PhaseAt.Value);
+                var stopped = o.StoppedAt ?? o.PhaseAt;
+                var fresh = state.Heartbeat is { } hb && now - hb < HudAvailabilityLogic.HeartbeatStale && (stopped == null || hb > stopped.Value);
                 if (!fresh) return OutageStep.None;
                 if (state.IsInGame && state.Phase is "ready" or null) return OutageStep.Back;
                 if (o.Phase == "down" && state.Phase is "menu" or "loading" or "starting" or "ready") return OutageStep.WaitingGame;
@@ -208,13 +244,16 @@ public static class OutageLogic
 /// <summary>
 /// Drives an outage in this server (hud_restart mode=user starts it; any server's IncidentMonitor adopts an outage whose
 /// owner process died). Every 2 s: announced/holding reads the card's answer and who is busy (bridge outage.state, pub/sub
-/// outage.answer, session.list as the fallback) and stops the HUD (restart-hud.ps1 -StopOnly -Outage id -Kind user) on Restart
-/// now or when nobody is busy, cancels on Not now; down/waitingGame watch hud-state.json until the game is back in.
+/// outage.answer, session.list as the fallback; busy / ready only inform the card) and cancels on Not now. Only the user's
+/// Restart now starts the stop: phase down with stopAt = now + 8 s (outage.set {phase: down, stopAt}: the card counts down
+/// with Cancel), then at stopAt a last check for outage.answer notNow (cancelled), else restart-hud.ps1 -StopOnly -Kind user
+/// -Outage id. After the stop, down/waitingGame watch hud-state.json until the game is back in. The bridge posts every outage
+/// toast itself; the runner posts none.
 /// </summary>
 public static class OutageRunner
 {
     private static readonly ConcurrentDictionary<string, Task> Running = new();
-    /// <summary>An outage nobody answers and busy agents never leave goes after this (cancelled, "expired").</summary>
+    /// <summary>An outage the user never answers goes after this (cancelled, "expired").</summary>
     public static readonly TimeSpan HoldMax = TimeSpan.FromHours(2);
     public const string AnswerKind = "outage.answer";
 
@@ -274,11 +313,13 @@ public static class OutageRunner
     }
 
     /// <summary>Shows / updates the card (outage.set); clear removes it. Best effort: an older bridge has no card.</summary>
-    public static async Task<string?> SetCardAsync(BridgeRegistry bridges, string game, string id, string phase, string? reason, string? by, bool clear, CancellationToken ct)
+    public static async Task<string?> SetCardAsync(BridgeRegistry bridges, string game, string id, string phase, string? reason, string? by, bool clear, CancellationToken ct,
+        DateTime? stopAt = null)
     {
         try
         {
             var p = new JObject { ["id"] = id, ["game"] = game, ["phase"] = phase, ["reason"] = reason, ["by"] = by, ["stopOnly"] = true };
+            if (stopAt is { } at) p["stopAt"] = at.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture);
             if (clear) p["clear"] = true;
             var (_, r) = await bridges.CallAsync(game, "outage.set", p, ct);
             return r["error"] != null ? $"outage.set refused: {r["error"]} {r["message"]}" : null;
@@ -302,7 +343,7 @@ public static class OutageRunner
             if (inc == null || !inc.IsOpen || info == null)
             {
                 // Resolved by someone else (incident_resolve: the requester cancelled): take the card down if it may still show.
-                if (info?.Phase is "announced" or "holding" or "cancelled") await SetCardAsync(bridges, game, id, "cancelled", info.Reason, info.RequestedByLabel, true, ct);
+                if (info?.Phase is "announced" or "holding" or "cancelled" || info is { Phase: "down", StoppedAt: null }) await SetCardAsync(bridges, game, id, "cancelled", info.Reason, info.RequestedByLabel, true, ct);
                 return;
             }
             if (inc.OwnerPid is { } owner && owner != SessionIdentity.Pid && DeployIncidents.PidAlive(owner, null) != false) return;   // another server drives it
@@ -324,7 +365,7 @@ public static class OutageRunner
                     answer ??= stateAnswer;
                     IncidentStore.Update(f => IncidentLogic.Find(f, id) is { IsOpen: true } i && OutageLogic.SetParticipants(i, answer, busy, ready, DateTime.UtcNow));
                     var step = OutageLogic.Decide(info, answer, busy.Count, null, null, now);
-                    if (step == OutageStep.None && now - started > HoldMax) step = OutageStep.Cancel;
+                    if (step == OutageStep.None && now - (info.AnnouncedAt ?? started) > HoldMax) step = OutageStep.Cancel;
                     switch (step)
                     {
                         case OutageStep.Hold:
@@ -333,32 +374,64 @@ public static class OutageRunner
                             break;
                         case OutageStep.Cancel:
                         {
-                            var why = (answer ?? info.Answer) == "notNow" ? "cancelled: the user pressed Not now" : $"cancelled: expired after {HoldMax.TotalHours:0} h without Restart now while agents stayed busy";
+                            var why = (answer ?? info.Answer) == "notNow" ? "cancelled: the user pressed Not now" : $"cancelled: expired after {HoldMax.TotalHours:0} h without the user's Restart now";
                             IncidentStore.Update(f => IncidentLogic.Find(f, id) is { IsOpen: true } i && OutageLogic.SetPhase(i, "cancelled", SessionIdentity.Label, DateTime.UtcNow, why));
                             await SetCardAsync(bridges, game, id, "cancelled", info.Reason, info.RequestedByLabel, true, ct);
                             Console.Error.WriteLine($"[Outage] {id}: {why}");
                             return;
                         }
-                        case OutageStep.Stop:
+                        case OutageStep.Countdown:
                         {
-                            var force = (answer ?? info.Answer) == "now" && busy.Count > 0;
-                            var (code, output) = await Tools.SessionTools.RunRestartScriptAsync(game, info.RequestedByLabel ?? SessionIdentity.Label, info.Reason ?? "user restart",
-                                60, stopOnly: true, force: force, kind: "user", outageId: id, ct);
-                            if (code == 0)
-                            {
-                                IncidentStore.Update(f => IncidentLogic.Find(f, id) is { IsOpen: true } i && OutageLogic.SetPhase(i, "down", SessionIdentity.Label, DateTime.UtcNow));
-                                Console.Error.WriteLine($"[Outage] {id}: HUD stopped, waiting for the user to restart game + HUD");
-                            }
-                            else
-                            {
-                                var why = $"cancelled: restart-hud.ps1 -StopOnly failed (exit {code}): {string.Join(" | ", output.TakeLast(3))}";
-                                IncidentStore.Update(f => IncidentLogic.Find(f, id) is { IsOpen: true } i && OutageLogic.SetPhase(i, "cancelled", SessionIdentity.Label, DateTime.UtcNow, why));
-                                await SetCardAsync(bridges, game, id, "cancelled", info.Reason, info.RequestedByLabel, true, ct);
-                                Console.Error.WriteLine($"[Outage] {id}: {why}");
-                                return;
-                            }
+                            // The user's Restart now: phase down with stopAt; the card counts down with Cancel (outage.answer notNow).
+                            var stopAt = DateTime.UtcNow + OutageLogic.StopCountdown;
+                            IncidentStore.Update(f => IncidentLogic.Find(f, id) is { IsOpen: true } i && OutageLogic.BeginCountdown(i, SessionIdentity.Label, DateTime.UtcNow, stopAt));
+                            await SetCardAsync(bridges, game, id, "down", info.Reason, info.RequestedByLabel, false, ct, stopAt);
+                            Console.Error.WriteLine($"[Outage] {id}: Restart now: the HUD stops at {stopAt:HH:mm:ss}Z unless Cancel");
                             break;
                         }
+                    }
+                    break;
+                }
+                case "down" when info.StoppedAt == null && info.StopAt != null:
+                {
+                    // Counting down to stopAt: Cancel on the card (outage.answer notNow) still cancels, re-checked at stopAt itself.
+                    if (info.StopAt.Value > now)
+                    {
+                        try { await Task.Delay(info.StopAt.Value - now + TimeSpan.FromMilliseconds(100), ct); } catch (OperationCanceledException) { return; }
+                        now = DateTime.UtcNow;
+                    }
+                    if (since == long.MaxValue) since = 0;
+                    var (answer, next) = await AnswerAsync(bridges, game, id, since, ct);
+                    since = next;
+                    if (answer == null)
+                    {
+                        var (_, _, stateAnswer, _) = await ReadinessAsync(bridges, game, id, info.RequestedBy, ct);
+                        if (stateAnswer == "notNow") answer = stateAnswer;
+                    }
+                    var step = OutageLogic.Decide(info, answer, 0, null, null, now);
+                    if (step == OutageStep.Cancel)
+                    {
+                        const string why = "cancelled: the user pressed Cancel during the stop countdown";
+                        IncidentStore.Update(f => IncidentLogic.Find(f, id) is { IsOpen: true } i && OutageLogic.SetPhase(i, "cancelled", SessionIdentity.Label, DateTime.UtcNow, why));
+                        await SetCardAsync(bridges, game, id, "cancelled", info.Reason, info.RequestedByLabel, true, ct);
+                        Console.Error.WriteLine($"[Outage] {id}: {why}");
+                        return;
+                    }
+                    if (step != OutageStep.Stop) break;
+                    var (code, output) = await Tools.SessionTools.RunRestartScriptAsync(game, info.RequestedByLabel ?? SessionIdentity.Label, info.Reason ?? "user restart",
+                        60, stopOnly: true, force: false, kind: "user", outageId: id, ct);   // -Outage skips the coordination by itself
+                    if (code == 0)
+                    {
+                        IncidentStore.Update(f => IncidentLogic.Find(f, id) is { IsOpen: true } i && OutageLogic.MarkStopped(i, DateTime.UtcNow));
+                        Console.Error.WriteLine($"[Outage] {id}: HUD stopped, waiting for the user to restart game + HUD");
+                    }
+                    else
+                    {
+                        var why = $"cancelled: restart-hud.ps1 -StopOnly failed (exit {code}): {string.Join(" | ", output.TakeLast(3))}";
+                        IncidentStore.Update(f => IncidentLogic.Find(f, id) is { IsOpen: true } i && OutageLogic.SetPhase(i, "cancelled", SessionIdentity.Label, DateTime.UtcNow, why));
+                        await SetCardAsync(bridges, game, id, "cancelled", info.Reason, info.RequestedByLabel, true, ct);
+                        Console.Error.WriteLine($"[Outage] {id}: {why}");
+                        return;
                     }
                     break;
                 }

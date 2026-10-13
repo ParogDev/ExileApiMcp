@@ -103,6 +103,8 @@ public static class HudAvailabilityLogic
     public static readonly TimeSpan StuckLoading = TimeSpan.FromSeconds(60);
     public static readonly TimeSpan HeartbeatStale = TimeSpan.FromSeconds(15);
     public static readonly TimeSpan MainThreadFrozen = TimeSpan.FromSeconds(5);
+    /// <summary>A HUD start, measured on PoE2 (research/hud-startup-timing.md): usually ~35 s, up to ~100 s; stuck after 150 s with no listener.</summary>
+    public const double StartupUsualSec = 35, StartupMaxSec = 100, StartupStuckSec = 150;
     public static readonly string[] OutageHoldingPhases = ["announced", "holding", "down", "waitingGame"];
 
     public static HudAvailability? Diagnose(HudAvailabilityFacts f)
@@ -114,6 +116,13 @@ public static class HudAvailabilityLogic
             return NotNow(f, "user-restart", s,
                 $"the user is restarting {G} (game and HUD) by hand: outage {f.OutageId} is at phase {f.OutagePhase ?? "?"}; it resolves by itself once the game is back in",
                 $"incident_wait (outage {f.OutageId} resolves when the game is back)", outageId: f.OutageId);
+        // A HUD process whose bridge hasn't written hud-state.json since it started (no file, or the last heartbeat is older
+        // than the process): the HUD is starting. ExileCore2 stalls in "Preload stats and mods" BEFORE plugins compile, so
+        // nothing of ours can say so yet; older bridges (no file at all) count too when the listener doesn't answer.
+        if (f.HudAlive == true && f.HudStartedAt is { } hs && (s?.Heartbeat is not { } lastBeat || hs > lastBeat)
+            && (s != null || f.ErrorReason is null or "unavailable"))
+            return Starting(f, s, G, Math.Max(0, (f.Now - hs).TotalSeconds),
+                s == null ? "no hud-state.json yet, listener not answering" : "process newer than the bridge's last heartbeat");
         if (s == null) return null;   // an older bridge: no file, keep today's behaviour
 
         var since = s.Since is { } t ? Math.Max(0, (f.Now - t).TotalSeconds) : (double?)null;
@@ -135,22 +144,17 @@ public static class HudAvailabilityLogic
                 $"the user starts the {G} HUD, or hud_restart game={f.Game} (it launches a HUD that isn't running)");
         }
 
-        // A HUD process newer than the file's last heartbeat: plugins are compiling, the bridge hasn't initialised yet.
-        if (f.HudStartedAt is { } hs && (s.Heartbeat == null || hs > s.Heartbeat.Value))
-        {
-            var inSec = Math.Max(0, (f.Now - hs).TotalSeconds);
-            return NotNow(f, "starting", s,
-                $"the {G} HUD is starting, plugins compiling{(typical != null ? $", typically {typical:0} s" : "")}, {inSec:0} s in (process newer than the bridge's last heartbeat)",
-                "pubsub_wait kinds=hud.phase, or retry when it is up", sinceOverride: inSec, expected: typical is { } ty ? Math.Max(1, ty - inSec) : null);
-        }
-
         switch (s.Phase)
         {
             case "starting":
             case "closed" when f.HudAlive == true:
-                return NotNow(f, "starting", s,
-                    $"the {G} HUD is starting{(typical != null ? $", typically {typical:0} s" : "")}, {Sec(since)} in (hud-state.json phase {s.Phase})",
-                    "pubsub_wait kinds=hud.phase, or retry when it is up", expected: typical is { } ty2 && since is { } sn ? Math.Max(1, ty2 - sn) : null);
+            {
+                // Seconds since the HUD process started when this phase belongs to that start (the bridge writes "starting" late
+                // in a start); a process much older than the phase is a bridge reload: seconds in the phase.
+                var inSec = f.HudStartedAt is { } st && (s.Since is not { } ps || ps - st < TimeSpan.FromSeconds(2 * StartupStuckSec))
+                    ? Math.Max(0, (f.Now - st).TotalSeconds) : since ?? 0;
+                return Starting(f, s, G, inSec, $"hud-state.json phase {s.Phase}");
+            }
             case "restarting":
                 return NotNow(f, "restarting", s, $"the {G} HUD is closing for a restart (hud-state.json phase restarting, {Sec(since)} ago)",
                     "incident_wait (the hud-restart incident resolves when it is back)", expected: typical);
@@ -192,22 +196,46 @@ public static class HudAvailabilityLogic
         return null;
     }
 
+    /// <summary>
+    /// The HUD is starting: "usually ~35 s, up to ~100 s" (measured, research/hud-startup-timing.md; the bridge's own
+    /// typicalStartupSec when it has one). Broken stuckStarting only after <see cref="StartupStuckSec"/> with the listener
+    /// still not answering. Never "plugins compiling": most of a start is ExileCore2's preload, before any plugin compiles.
+    /// </summary>
+    private static HudAvailability Starting(HudAvailabilityFacts f, HudStateFile? s, string G, double inSec, string evidence)
+    {
+        var listenerDown = f.ErrorReason is null or "unavailable" && s?.ListenerUp != true;
+        if (inSec > StartupStuckSec && listenerDown)
+            return Broken(f, "stuckStarting", s,
+                $"the {G} HUD process started {inSec:0} s ago and its bridge listener still doesn't answer ({evidence}): a start takes up to ~{StartupMaxSec:0} s, this one is stuck",
+                $"hud_log game={f.Game} (its last lines say where the start stopped); if it stays, hud_restart game={f.Game}", sinceOverride: inSec);
+        var usual = s?.TypicalStartupSec ?? StartupUsualSec;
+        var expected = inSec < usual ? usual - inSec : StartupMaxSec - inSec;
+        return NotNow(f, "starting", s,
+            $"the {G} HUD is starting, usually ~{usual:0} s, up to ~{StartupMaxSec:0} s; {inSec:0} s in ({evidence})",
+            "pubsub_wait kinds=hud.phase, or retry when it is up", sinceOverride: inSec, expected: Math.Max(1, expected));
+    }
+
     /// <summary>One line for tool text: "Not now (normal): ... Wait with ..." or "BROKEN: ... Fix: ...".</summary>
     public static string Text(HudAvailability a) =>
         (a.NotNow ? "Not now (normal): " : "BROKEN: ") + a.Detail + "." +
         (a.ExpectedBackSec is { } e && a.NotNow ? $" Expected back in ~{Math.Ceiling(e):0} s." : "") +
-        (a.WaitWith != null ? (a.NotNow ? $" Wait with {a.WaitWith}." : $" Fix: {a.WaitWith}.") : "");
+        (a.WaitWith != null ? (a.NotNow ? $" Wait with {a.WaitWith}." : $" Fix: {a.WaitWith}.") : "") +
+        (a.Note != null ? " " + a.Note : "");
 
     private static HudAvailability NotNow(HudAvailabilityFacts f, string reason, HudStateFile? s, string detail, string waitWith,
         string? from = null, double? expected = null, string? outageId = null, double? sinceOverride = null) => new()
     {
         State = "notNow", Reason = reason, Phase = s?.Phase, SinceSec = Round(sinceOverride ?? SinceOf(f, s)), From = from,
         ExpectedBackSec = Round(expected), WaitWith = waitWith, Detail = detail, OutageId = outageId, Game = f.Game,
+        Note = reason == "user-restart"
+            ? "The bridge posts the outage toasts itself (stopping, your turn, HUD is up, back): don't guide.log or toast this."
+            : "Normal: the user sees the game's own screen. Don't guide.log or toast loading / starting / menu / restarting.",
     };
 
-    private static HudAvailability Broken(HudAvailabilityFacts f, string reason, HudStateFile s, string detail, string fix) => new()
+    private static HudAvailability Broken(HudAvailabilityFacts f, string reason, HudStateFile? s, string detail, string fix, double? sinceOverride = null) => new()
     {
-        State = "broken", Reason = reason, Phase = s.Phase, SinceSec = Round(SinceOf(f, s)), From = s.LastArea, WaitWith = fix, Detail = detail, Game = f.Game,
+        State = "broken", Reason = reason, Phase = s?.Phase, SinceSec = Round(sinceOverride ?? SinceOf(f, s)), From = s?.LastArea, WaitWith = fix, Detail = detail, Game = f.Game,
+        Note = reason == "stuckLoading" ? "The bridge shows the user a LONG LOAD toast itself: don't guide.log or toast it." : null,
     };
 
     private static double? SinceOf(HudAvailabilityFacts f, HudStateFile? s) => s?.Since is { } t ? Math.Max(0, (f.Now - t).TotalSeconds) : null;
@@ -239,7 +267,9 @@ public static class HudAvailabilityProbe
                 f.OutageId = o.Id;
                 f.OutagePhase = Incidents.OutageLogic.Info(o)?.Phase;
             }
-            if (f.State == null && f.OutageId == null) return null;   // older bridge, nothing announced: today's error stands
+            // Older bridge, nothing announced and the listener answered (a real error): today's error stands. With the listener
+            // down, a HUD process that just started is "starting" even without a file.
+            if (f.State == null && f.OutageId == null && f.ErrorReason != "unavailable") return null;
             var hudDir = Path.GetDirectoryName(Path.GetFullPath(bridge.BridgeDir).TrimEnd('\\', '/')) ?? bridge.BridgeDir;
             var (running, _, started) = Incidents.BridgeDiagnosis.FindHud(hudDir);
             f.HudAlive = running ?? (f.State?.HudPid is { } hp ? PidAlive(hp) : null);
