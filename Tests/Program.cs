@@ -686,6 +686,55 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check("lint reflection: an async lambda's body is on the path", refl.Any(f => f.Call == "Type.GetMethods" && f.Chain?.StartsWith("LintFixturePlugin.Render > ", StringComparison.Ordinal) == true), Dump());
     Check("lint reflection: an uncalled async overload is not linked to the called one", !refl.Any(f => f.Call == "Type.GetConstructor"), Dump());
     Check("lint reflection: Type.GetProperty in Initialise (not per frame) is not reported", !refl.Any(f => f.Method == "LintFixturePlugin.Initialise"), Dump());
+    Check("lint once-only: HudLog's Bind (behind `if (_info == null) Bind()`) is a once-only fill", refl.Any(f => f.Method == "LintFixtureHudLog.Bind" && f.Call == "Type.GetMethod" && f.OnceOnly), Dump());
+    Check("lint once-only: HudLog's per-line Invoke stays per-frame", invoke is { OnceOnly: false }, Dump());
+}
+
+// ── hud_plugin_lint: once-only cache fills vs per-frame reflection (LintFixtureOnce) ──
+{
+    var all = ExileApiMcp.Hud.PluginLint.Lint(typeof(LintFixtureOnce).Assembly.Location);
+    var refl = all.Where(f => f.Kind == "reflection" && f.Method.StartsWith("LintFixtureOnce.", StringComparison.Ordinal)
+        || f.Kind == "reflection" && f.Chain?.StartsWith("LintFixtureOnce.Render", StringComparison.Ordinal) == true).ToList();
+    string Dump() => string.Join(" | ", refl.Select(f => $"{f.Method}:{f.Call}{(f.OnceOnly ? " ONCE" : "")}"));
+    bool Once(string method, string call) => refl.Any(f => f.Method == "LintFixtureOnce." + method && f.Call == call && f.OnceOnly)
+        && !refl.Any(f => f.Method == "LintFixtureOnce." + method && f.Call == call && !f.OnceOnly);
+    bool Hot(string methodPrefix, string call) => refl.Any(f => f.Method.Contains(methodPrefix, StringComparison.Ordinal) && f.Call == call && !f.OnceOnly);
+    Check("lint once-only: x ??= GetProperty", Once("CoalesceAssign", "Type.GetProperty"), Dump());
+    Check("lint once-only: if (_x == null) _x = GetField", Once("NullCheckAssign", "Type.GetField"), Dump());
+    Check("lint once-only: if (_bound) return; ...; _bound = true", Once("FlagGuard", "Type.GetFields"), Dump());
+    Check("lint once-only: if (TryGetValue) return; ...; d[k] = ...", Once("TryGetEarlyReturn", "Type.GetMethod"), Dump());
+    Check("lint once-only: if (!TryGetValue) { ...; d.Add }", Once("TryGetThenAdd", "Type.GetMember"), Dump());
+    Check("lint once-only: GetOrAdd factory lambda", refl.Any(f => f.Method.Contains("GetOrAddFactory") && f.Call == "Type.GetMembers" && f.OnceOnly)
+        && !refl.Any(f => f.Method.Contains("GetOrAddFactory") && f.Call == "Type.GetMembers" && !f.OnceOnly), Dump());
+    Check("lint once-only: key memo (if (t == _last) return; _last = t; Activator...)", Once("KeyMemo", "Activator.CreateInstance"), Dump());
+    Check("lint once-only: x ??= Expression.Compile()", Once("CompileCached", "Expression.Compile"), Dump());
+    Check("lint once-only: Task.Run lambda behind ??= (Prepare)", Once("Prepare", "Type.GetMembers"), Dump());
+    Check("lint once-only: new Lazy<T>(factory) lambda", refl.Any(f => f.Method.Contains("LazyFactory") && f.Call == "Type.GetFields" && f.OnceOnly)
+        && !refl.Any(f => f.Method.Contains("LazyFactory") && f.Call == "Type.GetFields" && !f.OnceOnly), Dump());
+    Check("lint once-only: a method reached only through a guarded call (BindEvent)", Once("BindEvent", "MethodBase.Invoke"), Dump());
+    Check("lint once-only: chain of a once-only finding still runs from Render",
+        refl.FirstOrDefault(f => f.Method == "LintFixtureOnce.BindEvent")?.Chain == "LintFixtureOnce.Render > LintFixtureOnce.BindEvent", Dump());
+    Check("lint per-frame: a stored delegate's body (_get ??= o => ...GetValue) stays per-frame", Hot("StoredDelegate", "PropertyInfo.GetValue"), Dump());
+    var compile = refl.FirstOrDefault(f => f.Method == "LintFixtureOnce.CompileEveryFrame");
+    Check("lint per-frame: Expression.Compile every frame, with its own advice", compile is { Call: "Expression.Compile", OnceOnly: false } && compile.Advice == ExileApiMcp.Hud.PluginLint.CompileAdvice, Dump());
+    var attr = refl.FirstOrDefault(f => f.Method == "LintFixtureOnce.AttributeEveryFrame");
+    Check("lint per-frame: GetCustomAttribute every frame, with its own advice", attr is { Call: "CustomAttributeExtensions.GetCustomAttribute", OnceOnly: false } && attr.Advice == ExileApiMcp.Hud.PluginLint.AttributeAdvice, Dump());
+    Check("lint: once-only findings sort after per-frame ones", all.SkipWhile(f => !f.OnceOnly).All(f => f.OnceOnly));
+
+    // The tool's kind filter and once-only switch (Tools/PluginLintTools.cs).
+    var kinds = ExileApiMcp.Tools.PluginLintTools.ParseKinds("reflection, api");
+    Check("lint kind: parses a comma-separated list", kinds != null && kinds.SetEquals(["reflection", "api"]));
+    Check("lint kind: omitted = every kind", ExileApiMcp.Tools.PluginLintTools.ParseKinds(null) == null && ExileApiMcp.Tools.PluginLintTools.ParseKinds(" ") == null);
+    var badKind = "";
+    try { ExileApiMcp.Tools.PluginLintTools.ParseKinds("reflektion"); } catch (ModelContextProtocol.McpException ex) { badKind = ex.Message; }
+    Check("lint kind: an unknown kind names the valid ones", badKind.Contains("reflektion") && badKind.Contains("reflection") && badKind.Contains("alloc"), badKind);
+    var (onlyRefl, onceCount) = ExileApiMcp.Tools.PluginLintTools.Filter(all, ExileApiMcp.Tools.PluginLintTools.ParseKinds("reflection"), includeOnceOnly: false);
+    Check("lint kind: reflection only, once-only hidden", onlyRefl.Count > 0 && onlyRefl.All(f => f.Kind == "reflection" && !f.OnceOnly), string.Join(",", onlyRefl.Select(f => f.Kind)));
+    Check("lint kind: hidden once-only sites are counted", onceCount == all.Count(f => f.Kind == "reflection" && f.OnceOnly) && onceCount >= 11, onceCount.ToString());
+    var (withOnce, _) = ExileApiMcp.Tools.PluginLintTools.Filter(all, ExileApiMcp.Tools.PluginLintTools.ParseKinds("reflection"), includeOnceOnly: true);
+    Check("lint kind: includeOnceOnly lists them", withOnce.Count == onlyRefl.Count + onceCount);
+    var (apiOnly, apiOnce) = ExileApiMcp.Tools.PluginLintTools.Filter(all, ExileApiMcp.Tools.PluginLintTools.ParseKinds("alloc"), includeOnceOnly: false);
+    Check("lint kind: alloc only drops reflection (and its once-only count)", apiOnly.All(f => f.Kind == "alloc") && apiOnce == 0);
 }
 
 // ── HUD source: which tree a junction points into, and the lock that serializes changes to it (Hud/HudSource.cs) ──
@@ -1305,6 +1354,76 @@ internal sealed class LintFixturePlugin
         await Task.Yield();
         _ = typeof(LintFixturePlugin).GetConstructor(Type.EmptyTypes);
     }
+}
+
+// Once-only cache fills (hud_plugin_lint onceOnly) next to the per-frame shapes they must not hide. Each pattern has its
+// own method so the test can name it.
+internal sealed class LintFixtureOnce
+{
+    private static System.Reflection.PropertyInfo? _prop;
+    private System.Reflection.FieldInfo? _field;
+    private bool _bound;
+    private readonly Dictionary<string, System.Reflection.MethodInfo?> _methods = new();
+    private readonly Dictionary<string, System.Reflection.MemberInfo[]> _ctors = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Type, System.Reflection.MemberInfo[]> _members = new();
+    private Type? _lastType;
+    private object? _lastValue;
+    private static Func<object, object?>? _getter;
+    private Func<int>? _compiled;
+    private Task? _loading;
+    private Lazy<System.Reflection.FieldInfo[]>? _lazy;
+    private System.Reflection.EventInfo? _evt;
+
+    public void Render()
+    {
+        CoalesceAssign(); NullCheckAssign(); FlagGuard(); TryGetEarlyReturn("x"); TryGetThenAdd("y"); GetOrAddFactory();
+        KeyMemo(typeof(int)); StoredDelegate(); CompileCached(); CompileEveryFrame(); AttributeEveryFrame(); TaskRunOnce(); LazyFactory();
+        if (_evt == null) BindEvent();
+    }
+    private static void CoalesceAssign() => _prop ??= typeof(LintFixtureOnce).GetProperty("P");
+    private void NullCheckAssign() { if (_field == null) _field = typeof(LintFixtureOnce).GetField("_bound"); }
+    private void FlagGuard()
+    {
+        if (_bound) return;
+        _ = typeof(LintFixtureOnce).GetFields();
+        _bound = true;
+    }
+    private System.Reflection.MethodInfo? TryGetEarlyReturn(string name)
+    {
+        if (_methods.TryGetValue(name, out var m)) return m;
+        m = typeof(LintFixtureOnce).GetMethod(name);
+        _methods[name] = m;
+        return m;
+    }
+    private void TryGetThenAdd(string name)
+    {
+        if (!_ctors.TryGetValue(name, out var c))
+        {
+            c = typeof(LintFixtureOnce).GetMember(name);
+            _ctors.Add(name, c);
+        }
+    }
+    private void GetOrAddFactory() => _ = _members.GetOrAdd(typeof(int), t => t.GetMembers());
+    private object? KeyMemo(Type t)
+    {
+        if (t == _lastType) return _lastValue;
+        _lastType = t;
+        _lastValue = Activator.CreateInstance(t);
+        return _lastValue;
+    }
+    // The delegate is made once, but its body (PropertyInfo.GetValue) runs on every call: per frame.
+    private void StoredDelegate()
+    {
+        _getter ??= o => o.GetType().GetProperty("P")!.GetValue(o);
+        _ = _getter(this);
+    }
+    private void CompileCached() => _compiled ??= System.Linq.Expressions.Expression.Lambda<Func<int>>(System.Linq.Expressions.Expression.Constant(1)).Compile();
+    private void CompileEveryFrame() => _ = System.Linq.Expressions.Expression.Lambda<Func<int>>(System.Linq.Expressions.Expression.Constant(2)).Compile();
+    private void AttributeEveryFrame() => _ = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<ObsoleteAttribute>(typeof(LintFixtureOnce));
+    private void TaskRunOnce() => _loading ??= Task.Run(() => Prepare());
+    private void Prepare() => _ = typeof(LintFixtureOnce).GetNestedTypes().Length + typeof(LintFixtureOnce).GetMembers().Length;
+    private void LazyFactory() { _lazy ??= new Lazy<System.Reflection.FieldInfo[]>(() => typeof(LintFixtureOnce).GetFields()); _ = _lazy.Value; }
+    private void BindEvent() => _evt = typeof(LintFixtureOnce).GetEvent("E") is { } e ? e : (System.Reflection.EventInfo?)typeof(LintFixtureOnce).GetMethod("Bind")?.Invoke(null, null);
 }
 
 internal static class LintFixtureHudLog
