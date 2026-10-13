@@ -668,6 +668,23 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check($"lint: JitOptimized({asm.GetName().Name}) == {expected} ({flags})", ExileApiMcp.Hud.PluginLint.JitOptimized(asm.Location) == expected);
 }
 
+// ── hud_plugin_lint: reflection reachable from Tick/Render (the LintFixture* types below, linted in this test DLL) ──
+{
+    var refl = ExileApiMcp.Hud.PluginLint.Lint(typeof(LintFixturePlugin).Assembly.Location).Where(f => f.Kind == "reflection").ToList();
+    string Dump() => string.Join(" | ", refl.Select(f => $"{f.Call} via {f.Chain}"));
+    var invoke = refl.FirstOrDefault(f => f.Call == "MethodBase.Invoke" && f.Method == "LintFixtureHudLog.Write");
+    Check("lint reflection: HudLog's per-line MethodInfo.Invoke from Tick", invoke != null, Dump());
+    Check("lint reflection: its chain runs Tick > Quiet > Write", invoke?.Chain == "LintFixturePlugin.Tick > LintFixtureHudLog.Quiet > LintFixtureHudLog.Write", invoke?.Chain);
+    Check("lint reflection: the fix hint names CreateDelegate", invoke?.Advice.Contains("CreateDelegate") == true);
+    Check("lint reflection: PropertyInfo.GetValue in a Render loop", refl.Any(f => f.Call == "PropertyInfo.GetValue" && f.InLoop && f.Chain == "LintFixturePlugin.Render"), Dump());
+    Check("lint reflection: Activator.CreateInstance and DynamicInvoke from Render", refl.Any(f => f.Call == "Activator.CreateInstance") && refl.Any(f => f.Call == "Delegate.DynamicInvoke"), Dump());
+    Check("lint reflection: a dynamic call site", refl.Any(f => f.Call.StartsWith("dynamic (Binder.", StringComparison.Ordinal) && f.Method == "LintFixturePlugin.Render"), Dump());
+    Check("lint reflection: an async method's body (state machine MoveNext) is on the path", refl.Any(f => f.Call == "Type.GetField" && f.Chain?.StartsWith("LintFixturePlugin.Tick > LintFixturePlugin.TickAsync > <TickAsync>d__", StringComparison.Ordinal) == true && f.Chain.EndsWith(".MoveNext", StringComparison.Ordinal)), Dump());
+    Check("lint reflection: an async lambda's body is on the path", refl.Any(f => f.Call == "Type.GetMethods" && f.Chain?.StartsWith("LintFixturePlugin.Render > ", StringComparison.Ordinal) == true), Dump());
+    Check("lint reflection: an uncalled async overload is not linked to the called one", !refl.Any(f => f.Call == "Type.GetConstructor"), Dump());
+    Check("lint reflection: Type.GetProperty in Initialise (not per frame) is not reported", !refl.Any(f => f.Method == "LintFixturePlugin.Initialise"), Dump());
+}
+
 // ── HUD source: which tree a junction points into, and the lock that serializes changes to it (Hud/HudSource.cs) ──
 {
     var tmp = Path.Combine(Path.GetTempPath(), "hexile-hudsource-test-" + Guid.NewGuid().ToString("N")[..8]);
@@ -1145,3 +1162,58 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
 
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures;
+
+// Lint fixtures: never run, only their IL is read. Shaped like a plugin and the plugins' HudLog.cs copies (Bind resolves
+// Core.Logger once, Write calls MethodInfo.Invoke per log line).
+internal sealed class LintFixturePlugin
+{
+    public int Value { get; set; }
+    public void Initialise() => _ = typeof(LintFixturePlugin).GetProperty("Value");
+    public void Tick()
+    {
+        LintFixtureHudLog.Quiet("tick");
+        _ = TickAsync();
+    }
+    private async Task TickAsync()
+    {
+        await Task.Yield();
+        _ = typeof(LintFixturePlugin).GetField("_async");
+    }
+    public void Render()
+    {
+        var p = typeof(LintFixturePlugin).GetProperty("Value")!;
+        for (var i = 0; i < 3; i++) _ = p.GetValue(this);
+        _ = Activator.CreateInstance(typeof(LintFixturePlugin));
+        Func<int> f = () => 1;
+        _ = f.DynamicInvoke();
+        dynamic d = this;
+        _ = d.Value;
+        Func<Task> later = async () => { await Task.Yield(); _ = typeof(LintFixturePlugin).GetMethods(); };
+        _ = later();
+        Load(1);
+    }
+    private void Load(int _) { }
+    // Never called: its state machine must not be linked to the Load(int) overload Render calls.
+    private async Task Load()
+    {
+        await Task.Yield();
+        _ = typeof(LintFixturePlugin).GetConstructor(Type.EmptyTypes);
+    }
+}
+
+internal static class LintFixtureHudLog
+{
+    private static object? _logger;
+    private static System.Reflection.MethodInfo? _info;
+    public static void Quiet(string msg) => Write(msg);
+    private static void Write(string text)
+    {
+        if (_info == null) Bind();
+        _info?.Invoke(_logger, new object[] { "{M:l}", new object[] { text } });
+    }
+    private static void Bind()
+    {
+        _logger = Console.Out;
+        _info = typeof(TextWriter).GetMethod("WriteLine", [typeof(string)]);
+    }
+}

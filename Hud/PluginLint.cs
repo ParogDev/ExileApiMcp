@@ -10,11 +10,32 @@ namespace ExileApiMcp.Hud;
 /// DLL's IL with System.Reflection.Metadata (nothing is loaded or run), builds the call graph inside the plugin
 /// (direct calls plus delegates via ldftn, so lambdas count), takes everything reachable from Tick/Render, and reports
 /// each call to a known-expensive member with its measured cost (knowledge pack shared/api-costs) and whether it sits
-/// inside a loop (between a backward branch's target and the branch: per-entity cost).
+/// inside a loop (between a backward branch's target and the branch: per-entity cost). Reflection on those paths
+/// (Type.GetProperty, PropertyInfo.GetValue, MethodInfo.Invoke, Activator.CreateInstance, dynamic call sites...) is
+/// reported too, with the call chain from Tick/Render that reaches it.
 /// </summary>
 public static class PluginLint
 {
-    public sealed record Finding(string Method, string Call, int Count, bool InLoop, int CostNs, string Advice);
+    /// <summary>One call site group. Kind: "api" (a measured HUD member), "alloc" (allocating BCL call in per-item code)
+    /// or "reflection". Chain: the methods from Tick/Render down to <see cref="Method"/>, joined with " > ".</summary>
+    public sealed record Finding(string Method, string Call, int Count, bool InLoop, int CostNs, string Advice, string Kind = "api", string? Chain = null);
+
+    /// <summary>Fix hint for every reflection finding.</summary>
+    public const string ReflectionAdvice = "reflection on a per-frame path: resolve the member once and cache a delegate via CreateDelegate / compiled getter (Expression.Lambda(...).Compile())";
+
+    /// <summary>Reflection members flagged on Tick/Render paths: (namespace, type simple name) -> member names.</summary>
+    private static readonly Dictionary<(string ns, string type), HashSet<string>> ReflectionCalls = new()
+    {
+        [("System", "Type")] = ["GetProperty", "GetProperties", "GetField", "GetFields", "GetMethod", "GetMethods", "GetMember", "GetMembers", "GetConstructor", "InvokeMember"],
+        [("System.Reflection", "TypeInfo")] = ["GetProperty", "GetProperties", "GetField", "GetFields", "GetMethod", "GetMethods", "GetMember", "GetMembers", "GetDeclaredProperty", "GetDeclaredField", "GetDeclaredMethod"],
+        [("System.Reflection", "PropertyInfo")] = ["GetValue", "SetValue"],
+        [("System.Reflection", "FieldInfo")] = ["GetValue", "SetValue"],
+        [("System.Reflection", "MethodBase")] = ["Invoke"],
+        [("System.Reflection", "MethodInfo")] = ["Invoke", "MakeGenericMethod"],
+        [("System.Reflection", "ConstructorInfo")] = ["Invoke"],
+        [("System", "Delegate")] = ["DynamicInvoke"],
+        [("System", "Activator")] = ["CreateInstance"],
+    };
 
     // Measured on PoE2, first call per entity per frame (shared/api-costs). Type simple name + member name, both games.
     private static readonly Dictionary<(string type, string member), (int ns, string advice)> Costs = new()
@@ -96,26 +117,82 @@ public static class PluginLint
                 if (mdef.RelativeVirtualAddress == 0) continue;
                 calls[mh] = Scan(pe.GetMethodBody(mdef.RelativeVirtualAddress).GetILBytes());
             }
+        // Async methods, async lambdas/local functions and iterators (coroutines): the body is MoveNext of a compiler-made
+        // state machine type that the stub never calls directly. The stub names it in its [AsyncStateMachine] /
+        // [IteratorStateMachine] / [AsyncIteratorStateMachine] attribute; add that edge (as a non-call, like ldftn) so the
+        // bodies are on the path too. Matched per stub, so overloads don't cross-link.
+        var typesByName = md.TypeDefinitions.GroupBy(FullName, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        foreach (var mh in calls.Keys)
+            foreach (var ah in md.GetMethodDefinition(mh).GetCustomAttributes())
+            {
+                var attr = md.GetCustomAttribute(ah);
+                if (AttributeTypeName(md, attr.Constructor) is not ("AsyncStateMachineAttribute" or "IteratorStateMachineAttribute" or "AsyncIteratorStateMachineAttribute")) continue;
+                var blob = md.GetBlobReader(attr.Value);
+                if (blob.ReadUInt16() != 1 || blob.ReadSerializedString() is not { } smName) continue;
+                // A serialized type name may carry ", Assembly..." after the type; nested types are joined with '+'.
+                var comma = smName.IndexOf(", ", StringComparison.Ordinal);
+                if (comma > 0) smName = smName[..comma];
+                if (!typesByName.TryGetValue(smName, out var sm)) continue;
+                var moveNext = md.GetTypeDefinition(sm).GetMethods().FirstOrDefault(m => md.GetString(md.GetMethodDefinition(m).Name) == "MoveNext");
+                if (!moveNext.IsNil) calls[mh].Add((MetadataTokens.GetToken(moveNext), 0, false, true));
+            }
+        string FullName(TypeDefinitionHandle th)
+        {
+            var t = md.GetTypeDefinition(th);
+            var outer = t.GetDeclaringType();
+            if (!outer.IsNil) return FullName(outer) + "+" + md.GetString(t.Name);
+            var ns = md.GetString(t.Namespace);
+            return ns.Length == 0 ? md.GetString(t.Name) : ns + "." + md.GetString(t.Name);
+        }
 
         // Reachable from Tick/Render through the plugin's own methods (MethodDef targets, incl. ldftn for lambdas).
         var roots = calls.Keys.Where(h => md.GetString(md.GetMethodDefinition(h).Name) is "Tick" or "Render").ToList();
+        // BFS keeps the first (shortest) caller of each method, so a finding can name its chain from Tick/Render.
         var reach = new HashSet<MethodDefinitionHandle>(roots);
+        var caller = new Dictionary<MethodDefinitionHandle, MethodDefinitionHandle>();
         var queue = new Queue<MethodDefinitionHandle>(roots);
         while (queue.Count > 0)
-            foreach (var c in calls.GetValueOrDefault(queue.Dequeue()) ?? [])
+        {
+            var from = queue.Dequeue();
+            foreach (var c in calls.GetValueOrDefault(from) ?? [])
             {
                 var h = MetadataTokens.EntityHandle(c.token);
-                if (h.Kind == HandleKind.MethodDefinition && reach.Add((MethodDefinitionHandle)h)) queue.Enqueue((MethodDefinitionHandle)h);
+                if (h.Kind == HandleKind.MethodDefinition && reach.Add((MethodDefinitionHandle)h))
+                {
+                    caller[(MethodDefinitionHandle)h] = from;
+                    queue.Enqueue((MethodDefinitionHandle)h);
+                }
             }
+        }
+        string Name(MethodDefinitionHandle h)
+        {
+            var d = md.GetMethodDefinition(h);
+            return $"{md.GetString(md.GetTypeDefinition(d.GetDeclaringType()).Name)}.{md.GetString(d.Name)}";
+        }
+        string Chain(MethodDefinitionHandle h)
+        {
+            var path = new List<string> { Name(h) };
+            while (caller.TryGetValue(h, out var up) && path.Count < 32) { path.Add(Name(up)); h = up; }
+            path.Reverse();
+            return string.Join(" > ", path);
+        }
 
         var findings = new List<Finding>();
         foreach (var mh in reach)
         {
             var isLambda0 = md.GetString(md.GetMethodDefinition(mh).Name).StartsWith("<", StringComparison.Ordinal);
             var groups = new Dictionary<(string call, bool loop), (int n, int ns, string advice)>();
+            var reflection = new Dictionary<(string call, bool loop), int>();
             foreach (var c in calls.GetValueOrDefault(mh) ?? [])
             {
-                if (c.ldftn || Target(md, c.token) is not { } t) continue;
+                if (c.ldftn) continue;
+                if (Reflection(md, c.token) is { } r)
+                {
+                    var rk = (r, c.inLoop || isLambda0);
+                    reflection[rk] = reflection.GetValueOrDefault(rk) + 1;
+                    continue;
+                }
+                if (Target(md, c.token) is not { } t) continue;
                 if (!Costs.TryGetValue(t, out var cost))
                 {
                     // Allocations in per-item code: garbage every frame, GC pauses at high fps (frame-time spikes).
@@ -131,11 +208,32 @@ public static class PluginLint
             if (isLambda)
                 groups = groups.GroupBy(kv => (kv.Key.call, loop: true))
                     .ToDictionary(g => g.Key, g => (g.Sum(x => x.Value.n), g.First().Value.ns, g.First().Value.advice));
-            var mdef = md.GetMethodDefinition(mh);
-            var name = $"{md.GetString(md.GetTypeDefinition(mdef.GetDeclaringType()).Name)}.{md.GetString(mdef.Name)}";
-            findings.AddRange(groups.Select(g => new Finding(name, g.Key.call, g.Value.n, g.Key.loop, g.Value.ns, g.Value.advice)));
+            var name = Name(mh);
+            findings.AddRange(groups.Select(g => new Finding(name, g.Key.call, g.Value.n, g.Key.loop, g.Value.ns, g.Value.advice, g.Value.ns > 0 ? "api" : "alloc")));
+            if (reflection.Count > 0)
+            {
+                var chain = Chain(mh);
+                findings.AddRange(reflection.Select(r => new Finding(name, r.Key.call, r.Value, r.Key.loop, 0, ReflectionAdvice, "reflection", chain)));
+            }
         }
-        return findings.OrderByDescending(f => f.InLoop).ThenByDescending(f => f.CostNs * f.Count).ToList();
+        return findings.OrderByDescending(f => f.InLoop).ThenByDescending(f => f.Kind == "reflection").ThenByDescending(f => f.CostNs * f.Count).ToList();
+    }
+
+    /// <summary>
+    /// The reflection call a token names ("MethodBase.Invoke", "dynamic (Binder.InvokeMember)"), or null. Matched by
+    /// namespace too: Microsoft.CSharp.RuntimeBinder.Binder is a dynamic call site, System.Reflection.Binder is not.
+    /// </summary>
+    private static string? Reflection(MetadataReader md, int token)
+    {
+        var h = MetadataTokens.EntityHandle(token);
+        if (h.Kind == HandleKind.MethodSpecification) h = md.GetMethodSpecification((MethodSpecificationHandle)h).Method;
+        if (h.Kind != HandleKind.MemberReference) return null;
+        var mr = md.GetMemberReference((MemberReferenceHandle)h);
+        if (mr.Parent.Kind != HandleKind.TypeReference) return null;
+        var tr = md.GetTypeReference((TypeReferenceHandle)mr.Parent);
+        var (ns, type, member) = (md.GetString(tr.Namespace), md.GetString(tr.Name), md.GetString(mr.Name));
+        if (ns == "Microsoft.CSharp.RuntimeBinder" && type == "Binder") return $"dynamic (Binder.{member})";
+        return ReflectionCalls.TryGetValue((ns, type), out var members) && members.Contains(member) ? $"{type}.{member}" : null;
     }
 
     /// <summary>Allocating BCL calls worth flagging in per-item code, with the fix.</summary>
