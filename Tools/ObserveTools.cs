@@ -63,6 +63,38 @@ public static partial class ObserveTools
         return Typed(result, Summary(result));
     }
 
+    [McpServerTool(Name = "ui_catalogue", Title = "Game interfaces seen, with highlight targets", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(UiCatalogueResult), IconSource = IconSet.TimelineLight)]
+    [Description("The interfaces the user has opened while observing (NPC dialogues and their options, travel menus, choice and " +
+                 "reward panels...), one entry per distinct interface keyed by a stable fingerprint ('NpcDialog|The Hooded One', " +
+                 "'<mapped property or panel>|<title>'), each with how to recognise it, the areas it was seen in, and every visible " +
+                 "text as an option with child path, rect, clickable guess and a ready-to-use `highlight` target (text + within, or " +
+                 "panel + child). To point at an option: open nothing yourself; when the interface is open, pass the option's " +
+                 "highlight object as a target to `highlight` (add label, a short durationSec). Filled by the bridge on its own while " +
+                 "`observe` is on; read-only.")]
+    public static async Task<CallToolResult> UiCatalogue(BridgeRegistry bridges,
+        [Description("Only interfaces whose key, title, NPC, area or an option's text contains this (case-insensitive)")] string? query = null,
+        [Description("Exactly this interface key")] string? key = null,
+        [Description("Include the option lists (default true; false = a short list with optionCount)")] bool options = true,
+        [Description(BridgeRegistry.GameParamDescription)] string? game = null,
+        CancellationToken ct = default)
+    {
+        var p = new JObject { ["options"] = options };
+        if (!string.IsNullOrEmpty(query)) p["query"] = query;
+        if (!string.IsNullOrEmpty(key)) p["key"] = key;
+        var (_, r) = await bridges.CallAsync(game, "observe.ui_catalogue", p, ct);
+        if (r["error"]?.ToString() == "unknown_method" || (r["ok"] == null && r["error"] == null))
+            throw new McpException("This HUD's bridge has no UI catalogue yet (observe.ui_catalogue missing): update What's an AI Bridge and restart the HUD.");
+        var result = Dto.From<UiCatalogueResult>(r);
+        var sb = new StringBuilder();
+        sb.AppendLine($"{result.Entries.Count} of {result.Total} interface(s){(result.Observing ? "" : " - observe is OFF")}" +
+                      (result.Why != null ? $": {result.Why}" : ""));
+        foreach (var e in result.Entries.Take(40))
+            sb.AppendLine($"- {e.Key} ({e.Opened}x, {e.Views} view(s), {e.Options?.Count ?? e.OptionCount ?? 0} texts{(e.Areas.Count > 0 ? ", " + string.Join("/", e.Areas) : "")})");
+        if (result.LastError != null) sb.AppendLine($"last error: {result.LastError}");
+        return Typed(result, sb.ToString());
+    }
+
     [McpServerTool(Name = "observe_wait", Title = "Wake when something new happens in game", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ObserveEventsResult), IconSource = IconSet.TimelineLight)]
     [Description("Block until passive observation has noteworthy events after since, then return them. Noteworthy by default: a " +
