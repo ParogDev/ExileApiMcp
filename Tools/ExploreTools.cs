@@ -105,15 +105,19 @@ public static class ExploreTools
         UseStructuredContent = true, OutputSchemaType = typeof(FindInObjectResult))]
     [Description("Search the live object graph under a path for members whose name matches, or whose value contains, " +
                  "what you're looking for - e.g. where the 356 shown in game lives (value=356), or every '*Resist*' member " +
-                 "(name=resist). Breadth-first over explore_object results, skipping back-references and memory plumbing; " +
-                 "collections are read up to 200 items. Returns each match's path, C#, type and current value.")]
+                 "(name=resist). One breadth-first search inside the bridge (members, list items, dictionary entries, entity " +
+                 "components), skipping back-references, memory plumbing and objects already seen; collections are read up to " +
+                 "200 items. Returns each match's path, C#, type, current value and level, plus the budget spent (budget) and " +
+                 "where it stopped early (truncated). An object reachable two ways is listed once, under its first path.")]
     public static async Task<CallToolResult> FindInObject(BridgeRegistry bridges,
         [Description("Root path to search under (default GameController.Player)")] string path = "GameController.Player",
         [Description("Case-insensitive substring of member names to match")] string? name = null,
         // JsonElement: clients send 356 as a number as often as "356".
         [Description("Text or number the value must contain (numbers match whole: 356 won't match 3560)")] JsonElement? value = null,
-        [Description("Levels below the root to search (1-5, default 3)")] int depth = 3,
-        [Description("Maximum objects to open (10-300, default 120); each costs one bridge round trip")] int maxNodes = 120,
+        [Description("Levels below the root to search (1-8, default 4)")] int depth = 4,
+        [Description("Maximum objects to open (1-50000, default 5000)")] int maxNodes = 5000,
+        [Description("Time budget inside the HUD, ms (10-3000, default 200): the search runs on the HUD's main thread")] int timeMs = 200,
+        [Description("Stop after this many matches (1-500, default 100)")] int maxMatches = 100,
         [Description(BridgeRegistry.GameParamDescription)] string? game = null,
         CancellationToken ct = default)
     {
@@ -121,8 +125,69 @@ public static class ExploreTools
             ? (v.ValueKind == JsonValueKind.String ? v.GetString() : v.GetRawText()) : null;
         if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(text))
             throw new McpException("Pass name (a member name substring) and/or value (text the value contains).");
-        depth = Math.Clamp(depth, 1, 5);
-        maxNodes = Math.Clamp(maxNodes, 10, 300);
+        depth = Math.Clamp(depth, 1, 8);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var p = new JObject
+        {
+            ["path"] = path, ["depth"] = depth, ["maxNodes"] = Math.Clamp(maxNodes, 1, 50_000),
+            ["timeMs"] = Math.Clamp(timeMs, 10, 3000), ["maxMatches"] = Math.Clamp(maxMatches, 1, 500),
+        };
+        if (!string.IsNullOrWhiteSpace(name)) p["name"] = name;
+        if (!string.IsNullOrWhiteSpace(text)) p["value"] = text;
+        var (bridge, reply) = await bridges.CallAsync(game, "object.find", p, ct);
+        game = bridge.Game == "auto" ? game : bridge.Game;
+
+        if (IsUnknownMethodEcho(reply, "root"))
+        {
+            // An older bridge: walk with one object.explore round trip per object (depth 5 / 300 objects at most).
+            var fb = await FindViaExploreAsync(bridges, game, path, name, text, Math.Min(depth, 5), Math.Clamp(maxNodes, 10, 300), ct);
+            if (fb["error"] != null) return ToolResults.Json(fb);
+            fb["depth"] = Math.Min(depth, 5);
+            fb["via"] = "explore";
+            fb["fallback"] = "This HUD's bridge has no object.find (an older What's an AI Bridge): searched with one object.explore round trip per object, at most 300. Update the bridge for the one-request search.";
+            fb["elapsedMs"] = Math.Round(sw.Elapsed.TotalMilliseconds, 1);
+            if (game != null) fb["game"] = game;
+            return Dto.Result(TypedReply.Parse<FindInObjectResult>(fb), fb.ToString(Formatting.None));
+        }
+        if (reply["error"] != null) return ToolResults.Json(reply);   // resolve_failed: the message names the broken segment
+
+        var result = FindResultFromBridge(Dto.From<ObjectFindResponse>(reply), sw.Elapsed.TotalMilliseconds);
+        return Dto.Result(result, System.Text.Json.JsonSerializer.Serialize(result, Dto.Options));
+    }
+
+    /// <summary>
+    /// A bridge without a structured method treats it as an unknown query and echoes {game, query, timestamp}: neither the
+    /// reply's own key nor an error.
+    /// </summary>
+    public static bool IsUnknownMethodEcho(JToken reply, string ownKey) =>
+        reply is not JObject o || (o[ownKey] == null && o["error"] == null);
+
+    /// <summary>The bridge's object.find reply as find_in_object's contract (the fields the explore fallback also fills).</summary>
+    public static FindInObjectResult FindResultFromBridge(ObjectFindResponse r, double elapsedMs)
+    {
+        var result = new FindInObjectResult
+        {
+            Root = r.Root, Name = r.Name, Value = r.Value, Depth = r.Depth, ObjectsOpened = r.Budget.NodesOpened, Via = "bridge",
+            Budget = r.Budget, Truncated = r.Truncated, Errors = r.Errors, Aliases = r.Aliases, ElapsedMs = Math.Round(elapsedMs, 1),
+            Game = string.IsNullOrEmpty(r.Game) ? null : r.Game,
+            Matches = r.Matches.Select(m => new FindMatch
+            {
+                Path = m.Path, Csharp = m.Csharp, Type = m.Type, Value = m.Value, Kind = m.Kind, Level = m.Level, By = m.By,
+            }).ToList(),
+        };
+        if (r.Truncated is { } t)
+            result.Incomplete = $"Stopped early ({t.Reason}) at {t.At} with {t.Pending} objects left: {t.Hint}.";
+        if (result.Matches.Count == 0)
+            result.Note = "No match. Values are compared against one-line previews (strings, numbers, struct fields)"
+                          + (r.Budget.AtDepthLimit > 0 ? $"; {r.Budget.AtDepthLimit} objects sat at the depth limit (raise depth)" : "")
+                          + (r.Budget.ItemsSkipped > 0 ? $"; {r.Budget.ItemsSkipped} collection items past the first 200 were not read" : "") + ".";
+        return result;
+    }
+
+    /// <summary>The fallback for bridges without object.find: breadth-first over object.explore results, one round trip per object.</summary>
+    private static async Task<JObject> FindViaExploreAsync(BridgeRegistry bridges, string? game, string path, string? name, string? text,
+        int depth, int maxNodes, CancellationToken ct)
+    {
         var numeric = text != null && double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
         var valueRx = string.IsNullOrWhiteSpace(text) ? null
             : new System.Text.RegularExpressions.Regex(numeric ? $@"(?<![\d.]){System.Text.RegularExpressions.Regex.Escape(text)}(?![\d.])" : System.Text.RegularExpressions.Regex.Escape(text),
@@ -149,7 +214,7 @@ public static class ExploreTools
             opened++;
             if (node["error"] != null)
             {
-                if (opened == 1) return ToolResults.Json(node);
+                if (opened == 1) return node;
                 continue;
             }
             var kids = node["children"] as JArray ?? [];
@@ -184,7 +249,7 @@ public static class ExploreTools
         };
         if (queue.Count > 0) o["incomplete"] = $"Stopped after opening {opened} objects ({queue.Count} left): raise maxNodes, lower depth or search a narrower root.";
         if (matches.Count == 0) o["note"] = "No match. Values are compared against one-line previews (strings, numbers, struct fields).";
-        return Dto.Result(TypedReply.Parse<FindInObjectResult>(o), o.ToString(Formatting.None));
+        return o;
     }
 
     private static async Task<(BridgeClient bridge, JObject result)> ExploreAsync(BridgeRegistry bridges, string? game,

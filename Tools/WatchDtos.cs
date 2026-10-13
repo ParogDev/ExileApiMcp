@@ -34,5 +34,31 @@ public sealed class WatchObjectResult
     /// <summary>"N failed samples; last: ..." when some samples failed.</summary>
     public string? Errors { get; set; }
     public string? Note { get; set; }
+    /// <summary>Levels below the expression that were sampled.</summary>
+    public int? Depth { get; set; }
+    /// <summary>snapshot (bridge object.snapshot, any depth) | eval (fallback: eval:, 2 levels).</summary>
+    public string? Via { get; set; }
+    /// <summary>Set when the fallback ran: why.</summary>
+    public string? Fallback { get; set; }
+    /// <summary>The last sample's walk budget (snapshot only): nodes, members, what was skipped, ms per sample.</summary>
+    public ObjectWalkBudget? Budget { get; set; }
+    /// <summary>Samples cut short by a budget (their missing leaves are not counted as removed), and the last cut.</summary>
+    public int? TruncatedSamples { get; set; }
+    public ObjectWalkTruncation? LastTruncation { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>Bridge ObjectSnapshotResponse (object.snapshot): every leaf under a path, keyed by walker sub-path.</summary>
+public sealed class ObjectSnapshotResponse
+{
+    public string Path { get; set; } = "";
+    public string Type { get; set; } = "";
+    public int Depth { get; set; }
+    public Dictionary<string, string> Leaves { get; set; } = [];
+    public ObjectWalkBudget Budget { get; set; } = new();
+    public ObjectWalkTruncation? Truncated { get; set; }
+    public List<ObjectWalkError>? Errors { get; set; }
+    public List<ObjectWalkAlias>? Aliases { get; set; }
+    public string Game { get; set; } = "";
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
