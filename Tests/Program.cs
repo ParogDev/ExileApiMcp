@@ -1211,6 +1211,55 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check("reflection: typed failed / error parse", typedFailed.Failed == true && typedFailed.Error == "InvalidOperationException: boom");
 }
 
+// ── find_in_object / watch_object: the bridge's object.find / object.snapshot contracts ──
+{
+    var echo = JObject.Parse("""{"query":"object.find","timestamp":"2026-10-13T00:00:00Z","game":"poe2"}""");
+    Check("find: an older bridge's echo is detected", ExileApiMcp.Tools.ExploreTools.IsUnknownMethodEcho(echo, "root"));
+    Check("find: a bridge error is not an echo", !ExileApiMcp.Tools.ExploreTools.IsUnknownMethodEcho(JObject.Parse("""{"error":"resolve_failed","message":"No public property or field 'Playr' on type 'GameController'","path":"GameController.Playr"}"""), "root"));
+    Check("snapshot: a reply with leaves is not an echo", !ExileApiMcp.Tools.ExploreTools.IsUnknownMethodEcho(JObject.Parse("""{"path":"x","leaves":{}}"""), "leaves"));
+
+    var reply = JObject.Parse("""
+    { "root": "GameController.Player", "name": null, "value": "1084", "depth": 4,
+      "matches": [ { "path": "GameController.Player.GetComponent<Life>().Health.Current", "csharp": "GameController?.Player?.GetComponent<Life>()?.Health.Current",
+                     "type": "Int32", "kind": "number", "value": "1084", "level": 3, "by": "value", "future": 1 } ],
+      "budget": { "nodesOpened": 155, "membersRead": 3445, "maxNodes": 5000, "timeMs": 200, "elapsedMs": 6.1, "deepestLevel": 3, "cycles": 11,
+                  "plumbing": 111, "blocked": 0, "atDepthLimit": 182, "itemsSkipped": 5789, "getterErrors": 0 },
+      "truncated": { "reason": "time", "at": "GameController.Player.Buffs", "pending": 7, "hint": "raise timeMs" },
+      "errors": [ { "at": "GameController.Player.X", "message": "boom" } ], "game": "poe2",
+      "aliases": [ { "path": "GameController.Player.GetComponent<Stats>().StatDictionary", "sameAs": "GameController.Player.Stats" } ] }
+    """);
+    var typed = ExileApiMcp.Tools.Dto.From<ExileApiMcp.Tools.ObjectFindResponse>(reply);
+    var res = ExileApiMcp.Tools.ExploreTools.FindResultFromBridge(typed, 12.34);
+    Check("find: bridge reply maps to the tool contract", res.Via == "bridge" && res.ObjectsOpened == 155 && res.Depth == 4 && res.Game == "poe2"
+        && res.Matches.Single().Level == 3 && res.Matches[0].By == "value" && res.Matches[0].Csharp!.EndsWith("Health.Current") && res.ElapsedMs == 12.3);
+    Check("find: unknown match fields pass through", res.Matches[0].Extra == null && typed.Matches[0].Extra?.ContainsKey("future") == true);
+    Check("find: truncation becomes incomplete, naming where and why", res.Incomplete == "Stopped early (time) at GameController.Player.Buffs with 7 objects left: raise timeMs."
+        && res.Truncated?.Pending == 7 && res.Errors?.Single().Message == "boom" && res.Budget?.Cycles == 11
+        && res.Aliases?.Single().SameAs == "GameController.Player.Stats");
+    var none = ExileApiMcp.Tools.ExploreTools.FindResultFromBridge(ExileApiMcp.Tools.Dto.From<ExileApiMcp.Tools.ObjectFindResponse>(JObject.Parse(
+        """{"root":"r","depth":2,"matches":[],"budget":{"nodesOpened":1,"atDepthLimit":3,"itemsSkipped":0},"game":"poe1"}""")), 1);
+    Check("find: no match says the depth limit held objects back", none.Note!.Contains("3 objects sat at the depth limit") && none.Incomplete == null);
+    Throws<ModelContextProtocol.McpException>("find: a bridge error object is a tool error", () =>
+        ExileApiMcp.Tools.Dto.From<ExileApiMcp.Tools.ObjectFindResponse>(JObject.Parse("""{"error":"resolve_failed","message":"m","path":"p"}""")));
+
+    var snap = ExileApiMcp.Tools.Dto.From<ExileApiMcp.Tools.ObjectSnapshotResponse>(JObject.Parse(
+        """{"path":"GameController.Player.GetComponent<Life>()","type":"Life","depth":3,"leaves":{"CurHP":"1084","Health.Current":"1084"},"budget":{"nodesOpened":9},"game":"poe2"}"""));
+    Check("snapshot: typed parse", snap.Leaves["Health.Current"] == "1084" && snap.Budget.NodesOpened == 9 && snap.Truncated == null);
+
+    var d = new ExileApiMcp.Tools.WatchTools.WatchDiff();
+    d.Add(new() { ["CurHP"] = "100", ["Health.Current"] = "100", ["Buffs.Count"] = "1", ["Buffs[0].Name"] = "a" }, 0, false);
+    d.Add(new() { ["CurHP"] = "90", ["Health.Current"] = "90", ["Buffs.Count"] = "0" }, 250, false);                 // Buffs[0].Name removed
+    d.Add(new() { ["CurHP"] = "90" }, 500, true);                                                                     // truncated: nothing removed
+    d.Add(new() { ["CurHP"] = "80", ["Health.Current"] = "90", ["Buffs.Count"] = "0", ["Late"] = "x" }, 750, false); // after a cut: Late not "added"
+    var w = d.Result("e", "Life", 1000, 200);
+    var byPath = w.Changes.ToDictionary(c => c.Path);
+    Check("watch diff: deep leaves change", byPath["Health.Current"].Changes == 1 && byPath["Health.Current"].First == "100" && byPath["Health.Current"].Last == "90");
+    Check("watch diff: removed leaf is (absent)", byPath["Buffs[0].Name"].Last == "(absent)");
+    Check("watch diff: a truncated sample removes nothing and adds nothing", !byPath.ContainsKey("Late") && byPath["Health.Current"].Changes == 1
+        && byPath["CurHP"].Changes == 2 && byPath["CurHP"].First == "100" && byPath["CurHP"].Last == "80" && byPath["CurHP"].LastChangeAtMs == 750);
+    Check("watch diff: samples and counts", w.Samples == 4 && w.ChangedLeaves == 4 && w.Changes.Count == 4);
+}
+
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures;
 

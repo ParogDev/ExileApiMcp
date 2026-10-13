@@ -77,10 +77,119 @@ public sealed class FindInObjectResult
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Value { get; set; }
     public int ObjectsOpened { get; set; }
     public List<FindMatch> Matches { get; set; } = [];
-    /// <summary>Set when the search stopped early (maxNodes): how many objects were left.</summary>
+    /// <summary>Set when the search stopped early: why (nodes, time, matches) and how much was left.</summary>
     public string? Incomplete { get; set; }
     /// <summary>Set when nothing matched.</summary>
     public string? Note { get; set; }
+    /// <summary>Levels searched below the root.</summary>
+    public int? Depth { get; set; }
+    /// <summary>bridge (one object.find request) | explore (fallback: one object.explore round trip per object).</summary>
+    public string? Via { get; set; }
+    /// <summary>Set when the fallback ran: why (the bridge has no object.find).</summary>
+    public string? Fallback { get; set; }
+    /// <summary>Bridge search: what it read and skipped. Null on the fallback.</summary>
+    public ObjectWalkBudget? Budget { get; set; }
+    /// <summary>Bridge search: where and why it stopped early.</summary>
+    public ObjectWalkTruncation? Truncated { get; set; }
+    /// <summary>Bridge search: the first getters that threw.</summary>
+    public List<ObjectWalkError>? Errors { get; set; }
+    /// <summary>Bridge search: objects reached again by another path (not searched twice): a match under sameAs is also under path.</summary>
+    public List<ObjectWalkAlias>? Aliases { get; set; }
+    /// <summary>Wall time of the whole search as this server saw it, ms.</summary>
+    public double? ElapsedMs { get; set; }
+    /// <summary>Which game's HUD answered.</summary>
+    public string? Game { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+// ── Bridge wire contracts of object.find / object.snapshot (Whats An AI Bridge Shared/BridgeDtos.cs): keep in step ──
+
+/// <summary>Bridge ObjectWalkBudgetDto: what a graph walk read and skipped.</summary>
+public sealed class ObjectWalkBudget
+{
+    public int NodesOpened { get; set; }
+    public int MembersRead { get; set; }
+    public int MaxNodes { get; set; }
+    public int TimeMs { get; set; }
+    public double ElapsedMs { get; set; }
+    public int DeepestLevel { get; set; }
+    /// <summary>Not opened again: same reference, or same type at the same Address (the cycle guard).</summary>
+    public int Cycles { get; set; }
+    /// <summary>Memory plumbing and Owner back-references, not opened.</summary>
+    public int Plumbing { get; set; }
+    /// <summary>Members whose type is outside the walker's namespaces.</summary>
+    public int Blocked { get; set; }
+    public int AtDepthLimit { get; set; }
+    public int ItemsSkipped { get; set; }
+    public int GetterErrors { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>Bridge ObjectWalkTruncationDto: a walk that stopped before its queue was empty.</summary>
+public sealed class ObjectWalkTruncation
+{
+    /// <summary>nodes | time | matches | leaves.</summary>
+    public string Reason { get; set; } = "";
+    /// <summary>The first node not opened (walker path, else C#).</summary>
+    public string At { get; set; } = "";
+    public int Pending { get; set; }
+    public string Hint { get; set; } = "";
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>Bridge ObjectWalkErrorDto: a getter that threw.</summary>
+public sealed class ObjectWalkError
+{
+    public string At { get; set; } = "";
+    public string Message { get; set; } = "";
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>Bridge ObjectWalkAliasDto: an object reached again by another path, not opened twice.</summary>
+public sealed class ObjectWalkAlias
+{
+    public string Path { get; set; } = "";
+    /// <summary>Where it was opened first: matches inside it are listed under this path.</summary>
+    public string SameAs { get; set; } = "";
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>Bridge ObjectFindMatchDto.</summary>
+public sealed class ObjectFindMatch
+{
+    public string? Path { get; set; }
+    public string Csharp { get; set; } = "";
+    public string Type { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public string? Value { get; set; }
+    public int Level { get; set; }
+    /// <summary>name | value | name+value.</summary>
+    public string By { get; set; } = "";
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>Bridge ObjectFindResponse (object.find).</summary>
+public sealed class ObjectFindResponse
+{
+    public string Root { get; set; } = "";
+    public string? Name { get; set; }
+    public string? Value { get; set; }
+    public int Depth { get; set; }
+    public List<ObjectFindMatch> Matches { get; set; } = [];
+    public ObjectWalkBudget Budget { get; set; } = new();
+    public ObjectWalkTruncation? Truncated { get; set; }
+    public List<ObjectWalkError>? Errors { get; set; }
+    public List<ObjectWalkAlias>? Aliases { get; set; }
+    public string Game { get; set; } = "";
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>Bridge ObjectPathErrorDto: object.find / object.snapshot refused (resolve_failed names the broken segment; bad_request).</summary>
+public sealed class ObjectPathError
+{
+    public string Error { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string Path { get; set; } = "";
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
@@ -92,5 +201,11 @@ public sealed class FindMatch
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Type { get; set; }
     /// <summary>The one-line preview; null for components.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)] public string? Value { get; set; }
+    /// <summary>number | string | struct | component ... (bridge search only).</summary>
+    public string? Kind { get; set; }
+    /// <summary>Levels below the root (bridge search only).</summary>
+    public int? Level { get; set; }
+    /// <summary>name | value | name+value (bridge search only).</summary>
+    public string? By { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
