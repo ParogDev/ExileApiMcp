@@ -47,7 +47,7 @@ Method: prompt `probe_memory`, packs `shared/memory-mapping`, `poe2/offsets`.
 | What does action X change? | prompt `guided_experiment`: `await_change` (instruction shown in game), `experiment_*` |
 | The user may be away | `experiment_queue` (+ `experiment_queue_wait` in the background) |
 | Show where to click | `highlight`; multi-step tasks: `guide_flow`; plain messages: `guide`, `guide_state` |
-| Learn while they play | `observe`, `observe_wait`, `observe_events` |
+| Learn while they play | `observe`, `observe_wait`, `observe_events`; the interfaces they opened, with highlight targets: `ui_catalogue` |
 | Record and replay a session | `record_*`, `recording_*` |
 Pack `shared/working-with-users`. Never send input.
 

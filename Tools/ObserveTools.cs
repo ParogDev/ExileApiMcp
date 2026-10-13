@@ -83,8 +83,13 @@ public static partial class ObserveTools
         if (!string.IsNullOrEmpty(query)) p["query"] = query;
         if (!string.IsNullOrEmpty(key)) p["key"] = key;
         var (_, r) = await bridges.CallAsync(game, "observe.ui_catalogue", p, ct);
-        if (r["error"]?.ToString() == "unknown_method" || (r["ok"] == null && r["error"] == null))
+        if (r["error"]?.ToString() == "unknown_method")
             throw new McpException("This HUD's bridge has no UI catalogue yet (observe.ui_catalogue missing): update What's an AI Bridge and restart the HUD.");
+        if (r["ok"] == null && r["error"] == null)
+        {
+            var raw = r.ToString(Newtonsoft.Json.Formatting.None);
+            throw new McpException($"observe.ui_catalogue replied without ok or error (an older or broken bridge?): {(raw.Length > 400 ? raw[..400] + "..." : raw)}");
+        }
         var result = Dto.From<UiCatalogueResult>(r);
         var sb = new StringBuilder();
         sb.AppendLine($"{result.Entries.Count} of {result.Total} interface(s){(result.Observing ? "" : " - observe is OFF")}" +
