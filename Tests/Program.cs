@@ -1056,6 +1056,41 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     Check("same label: no such server -> orphaned as before", DeployIncidents.Judge(i, now, (_, _) => false, now, (_, _) => null).Orphaned);
     Check("same label: a live but silent owner stays orphaned (Adopt takes dead pids only)",
         DeployIncidents.Judge(i, now.AddMinutes(-11), (_, _) => true, now, (_, _) => 200).Orphaned);
+
+    // A deploy that records its client session follows the session, not the label (many sessions are labelled main).
+    var s = new Incident { Id = "i-s", Kind = "deploy", Key = "deploy:Y", RaisedBy = "main:aaaa1111", RaisedAt = now.AddHours(-1), State = "open" };
+    s.Set("ownerPid", 100); s.Set("owner", "main:aaaa1111"); s.Set("ownerSession", "aaaa1111-full");
+    var sbeats = new Dictionary<int, ServerBeat>
+    {
+        [500] = new() { Label = "main:aaaa1111", Kind = "mcp", At = now.AddSeconds(-20) },                            // same label, other session
+        [600] = new() { Label = "main:aaaa1111", Kind = "mcp", Session = "aaaa1111-full", At = now.AddSeconds(-20) },  // the session
+    };
+    Check("same session: matched by session, not label", DeployIncidents.SameLabelServer(sbeats, "main:aaaa1111", 100, (_, _) => true, now, "aaaa1111-full") == 600
+        && DeployIncidents.SameLabelServer(sbeats, "x", 100, (_, _) => true, now, "other-session") == null);
+    Check("same session: SameOwner by session, else (old deploys) by label",
+        DeployIncidents.SameOwner(s, "anything", "aaaa1111-full") && !DeployIncidents.SameOwner(s, "main:aaaa1111", "bbbb") && !DeployIncidents.SameOwner(s, "main:aaaa1111", null)
+        && DeployIncidents.SameOwner(i, "HUD-NOT-NOW", null));
+    var (sorph, swhy) = DeployIncidents.Judge(s, now, (_, _) => false, now, (_, _) => 600);
+    Check("same session: owner gone, its session's server beats -> adopts", !sorph && swhy.Contains("same session"), swhy);
+}
+
+// ── Per-conversation identity: distinct labels for sessions that would share one ──
+{
+    Check("distinct: main + session id -> main:<8>", SessionIdentity.Distinct("main", "bd3b164e-1243-4205") == "main:bd3b164e"
+        && SessionIdentity.Distinct("MASTER", "x-y_z") == "MASTER:xyz");
+    Check("distinct: a worktree branch or no id stays", SessionIdentity.Distinct("festive-lalande-40e6b9", "bd3b164e") == "festive-lalande-40e6b9"
+        && SessionIdentity.Distinct("main", null) == "main" && SessionIdentity.Distinct("main", "--") == "main");
+    Check("distinct: Claude Desktop with a conversation id", SessionIdentity.Distinct("Claude Desktop", "conv-1234abcd99") == "Claude Desktop:conv1234");
+    Check("distinct: an old mcp-call's bare main + X-Hexile-Session", CallerIdentity.FromHeaders("main", "main", @"C:\repo", "bd3b164e-1243")!.Label == "main:bd3b164e"
+        && CallerIdentity.FromHeaders("main:bd3b164e", "main", @"C:\repo", "bd3b164e-1243")!.Label == "main:bd3b164e");
+    Check("distinct: two main-checkout callers are two HUD sessions",
+        SessionIdentity.IdOf(CallerIdentity.FromHeaders("main", null, @"C:\repo", "aaaa1111")!) != SessionIdentity.IdOf(CallerIdentity.FromHeaders("main", null, @"C:\repo", "bbbb2222")!));
+    static KeyValuePair<string, string?> M(string k, string? v) => new(k, v);
+    Check("meta: a session / conversation id key is picked", SessionIdentity.PickMetaSession([M("progressToken", "7"), M("claudecode/sessionId", "abcd1234-5")]) is { Key: "claudecode/sessionId", Id: "abcd1234-5" }
+        && SessionIdentity.PickMetaSession([M("conversation_id", " c1234567x ")])?.Id == "c1234567x");
+    Check("meta: nothing else is (other keys, parentSessionId, short or empty values)", SessionIdentity.PickMetaSession([M("progressToken", "7"), M("sessionId", null), M("session", "abcdefgh12"),
+        M("parentSessionId", "abcdefgh12"), M("x.traceSessionId", "abcdefgh12"), M("conversationId", "a-b-c")]) == null);
+    Check("session-like: 8+ letters/digits", SessionIdentity.IsSessionLike("bd3b164e-1243") && !SessionIdentity.IsSessionLike("a") && !SessionIdentity.IsSessionLike("--------"));
 }
 
 // ── Outage drivers: one runner, and the stop re-checks the board ──

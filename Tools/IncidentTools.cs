@@ -88,13 +88,23 @@ public static class IncidentTools
         [Description(IdDesc)] string? id = null,
         [Description("Same as id, for clients that pass a key")] string? key = null,
         [Description("What you do meanwhile, or what you need, in a few words")] string? note = null,
-        [Description("How long this holds, minutes (sets until)")] double? minutes = null)
+        [Description("How long this holds, minutes (sets until)")] double? minutes = null,
+        [Description("Your conversation's id when this server can't tell conversations apart (mcp_status this.identity.clientSession " +
+                     "is null, e.g. the Claude desktop app's shared server): your Claude Code session id (CLAUDE_CODE_SESSION_ID in " +
+                     "your shell) if you have one, else any short id you keep for the whole conversation. Ignored when the server " +
+                     "knows your session.")] string? sessionTag = null)
     {
         var target = Target(id, key);
         try
         {
+            // Without a client session id, every conversation of a shared server answers as one: the tag keys this one.
+            var tag = SessionIdentity.ClientSession == null && !string.IsNullOrWhiteSpace(sessionTag) ? sessionTag.Trim() : null;
+            // Too short to tell sessions apart ("a" would merge with every other "a"): refused, not silently widened.
+            if (tag != null && !SessionIdentity.IsSessionLike(tag))
+                throw new McpException($"sessionTag '{tag}' is too short to name one conversation: give 8-100 chars with at least 8 letters or digits (your Claude Code session id, CLAUDE_CODE_SESSION_ID, is one)");
             var i = IncidentStore.Respond(target, status.Trim().ToLowerInvariant(), note,
-                minutes is { } m && m > 0 ? DateTime.UtcNow.AddMinutes(Math.Min(m, 7 * 24 * 60)) : null);
+                minutes is { } m && m > 0 ? DateTime.UtcNow.AddMinutes(Math.Min(m, 7 * 24 * 60)) : null,
+                who: tag != null ? SessionIdentity.Distinct(SessionIdentity.Label, tag) : null, sessionId: tag);
             return Action("responded", i, null);
         }
         catch (ArgumentException ex) { throw new McpException(ex.Message); }
@@ -199,7 +209,7 @@ public static class IncidentTools
         var lines = new List<string>();
         foreach (var i in list)
         {
-            var orphan = i.Kind == "deploy" && i.IsOpen && DeployIncidents.Judge(i, beats.TryGetValue(i.Id, out var b) ? b : null, DeployIncidents.PidAlive, now, DeployIncidents.SameLabelServer) is { Orphaned: true } j
+            var orphan = i.Kind == "deploy" && i.IsOpen && DeployIncidents.Judge(i, beats.TryGetValue(i.Id, out var b) ? b : null, DeployIncidents.PidAlive, now, DeployIncidents.SameOwnerServer) is { Orphaned: true } j
                 ? $" ORPHANED: {j.Why}." : "";
             lines.Add(i.IsOpen
                 ? $"- OPEN {IncidentLogic.OneLine(i, now)}{orphan}"

@@ -25,12 +25,13 @@ public static class DeployIncidents
 
     /// <summary>
     /// Is this deploy incident's owner gone? Pure given the facts (pid liveness is passed in for tests). A deploy whose owner
-    /// process died is not orphaned while another server with the owner's label beats (<paramref name="sameLabelServer"/>:
-    /// the label's live server pid other than the owner's, or null): that is the same agent after a session or server
-    /// restart, and its monitor adopts the deploy (<see cref="Adopt"/>).
+    /// process died is not orphaned while another server of the same owner beats (<paramref name="sameOwnerServer"/>: the
+    /// live server pid other than the owner's working for the deploy's client session, or for its label when the deploy
+    /// records no session; null if none): that is the same agent after a server restart or a resumed session, and its
+    /// monitor adopts the deploy (<see cref="Adopt"/>).
     /// </summary>
     public static (bool Orphaned, string Why) Judge(Incident i, DateTime? heartbeat, Func<int, DateTime?, bool?> pidAlive, DateTime now,
-        Func<string, int, int?>? sameLabelServer = null)
+        Func<Incident, int, int?>? sameOwnerServer = null)
     {
         var pid = i.OwnerPid;
         if (pid == null) return (true, "no owner process recorded (found by the scan, or deployed before the board existed)");
@@ -39,8 +40,8 @@ public static class DeployIncidents
         var beat = heartbeat ?? ParseIso(i.Get("heartbeatAt")) ?? i.RaisedAt;
         var stale = beat is { } b && now - b > HeartbeatStale;
         // Only a dead owner: Adopt takes dead pids only, so a live-but-silent owner stays orphaned by its stale heartbeat below.
-        if (alive == false && sameLabelServer?.Invoke(owner, pid.Value) is { } other)
-            return (false, $"owner process {pid} ({owner}) is gone, but a server with the same label (pid {other}) beats: it adopts the deploy");
+        if (alive == false && sameOwnerServer?.Invoke(i, pid.Value) is { } other)
+            return (false, $"owner process {pid} ({owner}) is gone, but a server of the same {(OwnerSession(i) != null ? "session" : "label")} (pid {other}) beats: it adopts the deploy");
         if (alive == false) return (true, $"owner process {pid} ({owner}) is gone");
         if (stale)
             return (true, $"no heartbeat from {owner} (pid {pid}) for {(int)(now - beat!.Value).TotalMinutes} min");
@@ -50,34 +51,47 @@ public static class DeployIncidents
     /// <summary>The deploy's owner label: its "owner" field, else who raised it.</summary>
     public static string OwnerLabel(Incident i) => i.Get("owner")?.ToString() is { Length: > 0 } o ? o : i.RaisedBy;
 
-    /// <summary>Servers that beat within this long count as alive for the same-label rule.</summary>
+    /// <summary>The client session that deployed (SessionIdentity.ServerSession at deploy time), or null (older deploys, or a
+    /// server that knew no client session id).</summary>
+    public static string? OwnerSession(Incident i) => i.Get("ownerSession")?.ToString() is { Length: > 0 } s ? s : null;
+
+    /// <summary>Is <paramref name="i"/> this server's to adopt: the same client session when the deploy records one, else
+    /// (older deploys) the same label.</summary>
+    public static bool SameOwner(Incident i, string label, string? session) =>
+        OwnerSession(i) is { } s ? string.Equals(s, session, StringComparison.Ordinal) : string.Equals(OwnerLabel(i), label, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Servers that beat within this long count as alive for the same-owner rule.</summary>
     public static readonly TimeSpan ServerBeatFresh = TimeSpan.FromMinutes(2);
 
-    /// <summary>The live server (fresh beat, process alive) with this label other than <paramref name="ownerPid"/>, from the per-pid sidecar.</summary>
-    public static int? SameLabelServer(string label, int ownerPid) =>
-        SameLabelServer(IncidentStore.ReadServerBeats(), label, ownerPid, PidAlive, DateTime.UtcNow);
+    /// <summary>The live server (fresh beat, process alive) of this deploy's owner other than <paramref name="ownerPid"/>, from the per-pid sidecar.</summary>
+    public static int? SameOwnerServer(Incident i, int ownerPid) =>
+        SameLabelServer(IncidentStore.ReadServerBeats(), OwnerLabel(i), ownerPid, PidAlive, DateTime.UtcNow, OwnerSession(i));
 
-    public static int? SameLabelServer(Dictionary<int, ServerBeat> beats, string label, int ownerPid, Func<int, DateTime?, bool?> pidAlive, DateTime now)
+    /// <summary>The live server with this label (or, when <paramref name="session"/> is given, working for that client
+    /// session: labels like main are shared by many sessions) other than <paramref name="ownerPid"/>.</summary>
+    public static int? SameLabelServer(Dictionary<int, ServerBeat> beats, string label, int ownerPid, Func<int, DateTime?, bool?> pidAlive, DateTime now,
+        string? session = null)
     {
         foreach (var (pid, b) in beats)
-            if (pid != ownerPid && string.Equals(b.Label, label, StringComparison.OrdinalIgnoreCase) && b.At is { } at && now - at < ServerBeatFresh
-                && b.Kind != "mcp-http" && pidAlive(pid, null) != false)
+            if (pid != ownerPid && (session != null ? string.Equals(b.Session, session, StringComparison.Ordinal) : string.Equals(b.Label, label, StringComparison.OrdinalIgnoreCase))
+                && b.At is { } at && now - at < ServerBeatFresh && b.Kind != "mcp-http" && pidAlive(pid, null) != false)
                 return pid;
         return null;
     }
 
     /// <summary>
-    /// This server adopts the open deploys raised under its label whose owner process is gone (a session or server restart on
-    /// the same checkout): ownerPid becomes this server's, so it beats for them (stdio servers only: a shared server's deploys
-    /// carry its callers' labels). Returns the adopted ids.
+    /// This server adopts the open deploys of its own client session (or, for deploys recording none, its label) whose owner
+    /// process is gone (a server restart, a resumed session): ownerPid becomes this server's, so it beats for them (stdio
+    /// servers only: a shared server's deploys carry its callers' identities). Returns the adopted ids.
     /// </summary>
     public static List<string> Adopt()
     {
         if (SessionIdentity.Kind == "mcp-http") return [];
         var me = SessionIdentity.Label;
+        var session = SessionIdentity.ServerSession;
         var board = IncidentStore.Read();
         var candidates = board.Incidents.Where(i => i.IsOpen && i.Kind == "deploy" && i.OwnerPid is { } p && p != SessionIdentity.Pid
-                                                    && string.Equals(OwnerLabel(i), me, StringComparison.OrdinalIgnoreCase)
+                                                    && SameOwner(i, me, session)
                                                     && PidAlive(p, i.RaisedAt) == false).ToList();
         if (candidates.Count == 0) return [];
         return IncidentStore.Update(f =>
@@ -90,7 +104,7 @@ public static class DeployIncidents
                 cur.Set("adoptedFrom", cur.OwnerPid);
                 cur.Set("ownerPid", SessionIdentity.Pid);
                 done.Add(cur.Id);
-                Console.Error.WriteLine($"[Incidents] adopted deploy {cur.Key} from dead pid {c.OwnerPid} (same label {me})");
+                Console.Error.WriteLine($"[Incidents] adopted deploy {cur.Key} from dead pid {c.OwnerPid} (same owner: {me}{(session != null ? " session " + session : "")})");
             }
             return done;
         });
@@ -119,7 +133,7 @@ public static class DeployIncidents
         var i = IncidentLogic.OpenByKey(f, Key(folder));
         if (i == null) return new OwnerState(null, true, "no deploy on the incident board");
         if (!IsFor(i, dir)) return new OwnerState(null, true, $"the deploy on the board is in another tree ({i.Get("mainPath")})");
-        var (orphaned, why) = Judge(i, beats.TryGetValue(i.Id, out var b) ? b : null, PidAlive, DateTime.UtcNow, SameLabelServer);
+        var (orphaned, why) = Judge(i, beats.TryGetValue(i.Id, out var b) ? b : null, PidAlive, DateTime.UtcNow, SameOwnerServer);
         return new OwnerState(i, orphaned, why);
     }
 
@@ -152,7 +166,7 @@ public static class DeployIncidents
                 Fix = $"{me} runs deploy_plugin plugin=\"{folder}\" action=restore when done. If {me}'s session is gone (orphaned), any session may restore it or deploy over it.",
                 Fields =
                 {
-                    ["owner"] = me, ["ownerPid"] = SessionIdentity.Pid, ["plugin"] = folder, ["commit"] = commit,
+                    ["owner"] = me, ["ownerPid"] = SessionIdentity.Pid, ["ownerSession"] = SessionIdentity.ServerSession, ["plugin"] = folder, ["commit"] = commit,
                     ["mainPath"] = mainPath, ["beforeBranch"] = beforeBranch, ["beforeCommit"] = beforeSha, ["heartbeatAt"] = IsoUtcConverter.Iso(now),
                 },
             }, me, now);
@@ -174,7 +188,7 @@ public static class DeployIncidents
     /// for as long as the server runs (once it stops after being idle, they are orphaned like any dead session's).</summary>
     public static List<string> Mine(IncidentFile f) =>
         f.Incidents.Where(i => i.IsOpen && i.Kind == "deploy" && i.OwnerPid == SessionIdentity.Pid
-                               && (SessionIdentity.Kind == "mcp-http" || i.RaisedBy == SessionIdentity.Label)).Select(i => i.Id).ToList();
+                               && (SessionIdentity.Kind == "mcp-http" || SameOwner(i, SessionIdentity.Label, SessionIdentity.ServerSession))).Select(i => i.Id).ToList();
 
     // ── The scan: HUD-source submodules detached off origin/main with no deploy on the board ──
 
@@ -317,7 +331,7 @@ public static class DeployIncidents
         if (i.Kind != "deploy" || !i.IsOpen) return;
         var beat = beats.TryGetValue(i.Id, out var b) ? b : (DateTime?)null;
         if (beat != null) view["heartbeatAt"] = IsoUtcConverter.Iso(beat.Value);
-        var (orphaned, why) = Judge(i, beat, PidAlive, DateTime.UtcNow, SameLabelServer);
+        var (orphaned, why) = Judge(i, beat, PidAlive, DateTime.UtcNow, SameOwnerServer);
         view["orphaned"] = orphaned;
         view["ownerState"] = why;
     }

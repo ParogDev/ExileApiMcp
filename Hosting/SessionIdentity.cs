@@ -24,6 +24,10 @@ public static class SessionIdentity
     public static string Cwd => CallerIdentity.Current is { } c ? c.Cwd ?? _cwd : _cwd;
     public static string? Branch => CallerIdentity.Current is { } c ? c.Branch : _branch;
     public static string Label => CallerIdentity.Current?.Label ?? _label;
+    /// <summary>The name an incident answer carries: <see cref="Label"/>, made distinct by a tool call's _meta conversation id
+    /// on a shared server ("Claude Desktop:&lt;8&gt;"). Only answers: deploys, leases and the bridge keep Label, which the
+    /// background monitor sees too.</summary>
+    public static string ResponseLabel => CallerIdentity.Current?.Label ?? (RequestSession.Value is { } m ? Distinct(_label, m.Id) : _label);
     /// <summary>The session's process: the supervisor (Supervisor/README.md) when there is one, so a swap to a newly deployed
     /// build stays the same session to the HUD; else this process.</summary>
     public static readonly int Pid = int.TryParse(Environment.GetEnvironmentVariable("HEXILE_SESSION_PID"), out var sp) && sp > 0 ? sp : Environment.ProcessId;
@@ -43,10 +47,88 @@ public static class SessionIdentity
     /// Code started it with (the id the incident hook uses). Else <see cref="Id"/>. Gap: Claude Desktop shares one stdio
     /// server among its conversations and sends no per-conversation id, so they answer as one session.
     /// </summary>
-    public static string ResponseId => CallerIdentity.Current is { } c ? c.ClientSessionId ?? IdOf(c) : (Kind == "mcp" ? ClientSessionEnv : null) ?? _id;
+    public static string ResponseId => ClientSession ?? (CallerIdentity.Current is { } c ? IdOf(c) : _id);
 
-    private static readonly string? ClientSessionEnv =
-        new[] { "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID" }.Select(Environment.GetEnvironmentVariable).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))?.Trim();
+    /// <summary>The client's own session id (the Claude Code session id the hooks see), or null when the client gives none:
+    /// a shared-server caller's X-Hexile-Session header, else the tool call's _meta conversation id, else a stdio server's
+    /// CLAUDE_CODE_SESSION_ID / CLAUDE_SESSION_ID. Incident answers and labels use it.</summary>
+    // The env id wins over _meta: a Claude Code stdio server's env id is the one its hooks use, so one session never
+    // answers under two ids.
+    public static string? ClientSession => CallerIdentity.Current is { } c ? c.ClientSessionId : (Kind == "mcp" ? EnvSession().Id : null) ?? RequestSession.Value?.Id;
+
+    /// <summary>The session id that is the same inside a tool call and in the background monitor: the HTTP caller's header,
+    /// else a stdio server's env id, never a per-request _meta id. Deploy leases record it (ownerSession) and server beats
+    /// carry it, so the monitor's Mine / Adopt see the same id a deploy was stamped with.</summary>
+    public static string? ServerSession => CallerIdentity.Current is { } c ? c.ClientSessionId : Kind == "mcp" ? EnvSession().Id : null;
+
+    /// <summary>Where a stdio server's client session id came from (env var name, or the request's _meta key), or null:
+    /// mcp_status shows it, so whether the client passes its session id is visible, not assumed.</summary>
+    public static string? ClientSessionSource => CallerIdentity.Current is { } c ? (c.ClientSessionId != null ? "header " + CallerIdentity.SessionHeader : null)
+        : (Kind == "mcp" ? EnvSession().Name : null) ?? (RequestSession.Value is { } m ? "_meta " + m.Key : null);
+
+    // A per-conversation id the client put in the tool call's _meta, for the request being handled (UseRequestMeta).
+    private static readonly AsyncLocal<(string Key, string Id)?> RequestSession = new();
+
+    /// <summary>The _meta keys the client sent on its first tool call (diagnostics in mcp_status: whether a shared server's
+    /// client, such as the Claude desktop app, names the conversation per request).</summary>
+    public static string[]? FirstMetaKeys { get; private set; }
+
+    /// <summary>
+    /// A shared stdio server (the Claude desktop app runs one for all its conversations, Code tab included) gets no
+    /// per-conversation id from MCP itself. When the client puts one in a tool call's _meta (any string value whose key names
+    /// a session or conversation id), the call runs as that session: incident answers carry it and the label becomes
+    /// "Claude Desktop:&lt;short id&gt;". Deploy leases don't (ServerSession: the monitor can't see a per-request id).
+    /// Without one, every conversation stays this server's one identity.
+    /// </summary>
+    public static void UseRequestMeta(IReadOnlyCollection<KeyValuePair<string, string?>>? meta)
+    {
+        if (CallerIdentity.Current != null) return;   // an HTTP caller names itself in headers
+        // The first call that carries _meta at all (a call without any says nothing about what the client can send).
+        if (FirstMetaKeys == null && meta is { Count: > 0 }) FirstMetaKeys = meta.Select(kv => kv.Key).ToArray();
+        RequestSession.Value = meta is { Count: > 0 } ? PickMetaSession(meta) : null;
+    }
+
+    /// <summary>The _meta entry naming the conversation (pure: tests call it): a key whose last segment (after '/' or '.')
+    /// is exactly sessionId / session_id / conversationId / conversation_id (any case; parentSessionId is not one), with a
+    /// value of 8-100 chars holding at least 8 letters or digits.</summary>
+    public static (string Key, string Id)? PickMetaSession(IEnumerable<KeyValuePair<string, string?>> meta)
+    {
+        foreach (var (k, v) in meta)
+        {
+            var last = k[(Math.Max(k.LastIndexOf('/'), k.LastIndexOf('.')) + 1)..].Replace("_", "").Replace("-", "");
+            if ((last.Equals("sessionid", StringComparison.OrdinalIgnoreCase) || last.Equals("conversationid", StringComparison.OrdinalIgnoreCase))
+                && IsSessionLike(v))
+                return (k, v!.Trim());
+        }
+        return null;
+    }
+
+    /// <summary>Long enough to tell sessions apart: 8-100 chars after trimming, at least 8 of them letters or digits.</summary>
+    public static bool IsSessionLike(string? v) => v?.Trim() is { Length: >= 8 and <= 100 } t && t.Count(char.IsAsciiLetterOrDigit) >= 8;
+
+    // A method, not a static field: MakeLabel needs it while the static fields above are still being initialized.
+    private static (string? Name, string? Id) EnvSession()
+    {
+        foreach (var n in new[] { "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID" })
+            if (Environment.GetEnvironmentVariable(n) is { } v && !string.IsNullOrWhiteSpace(v)) return (n, v.Trim());
+        return (null, null);
+    }
+
+    /// <summary>
+    /// The label rule for sessions that would otherwise share one (the same rule as tools\incident-lib.ps1
+    /// Get-HexileSessionLabel and tools\mcp-http-lib.ps1 Get-McpCaller): every session in the main checkout is on branch
+    /// main, so with a known client session id its label becomes main:&lt;first 8 chars of the id&gt;. Other labels (worktree
+    /// branches, HEXILE_AGENT) are kept: they already name one session.
+    /// </summary>
+    public static string Distinct(string label, string? sessionId)
+    {
+        // No static fields here: MakeLabel calls this while the statics are still being initialized.
+        if (sessionId is not { Length: > 0 } || !(label.Equals("main", StringComparison.OrdinalIgnoreCase) || label.Equals("master", StringComparison.OrdinalIgnoreCase)
+                                                  || label.Equals("Claude Desktop", StringComparison.Ordinal) || label.Equals("Claude", StringComparison.Ordinal)))
+            return label;
+        var shortId = new string(sessionId.Where(char.IsAsciiLetterOrDigit).Take(8).ToArray());
+        return shortId.Length == 0 ? label : $"{label}:{shortId}";
+    }
 
     private static string Hash8(string s)
     {
@@ -65,7 +147,7 @@ public static class SessionIdentity
     public static bool BeginRoots() => Interlocked.CompareExchange(ref _rootsState, 1, 0) == 0;
 
     private static string MakeLabel(string? branch, string cwd) => Clip(Environment.GetEnvironmentVariable("HEXILE_AGENT") is { Length: > 0 } env ? env
-        : branch is { Length: > 0 } b ? (b.StartsWith("claude/", StringComparison.Ordinal) ? b["claude/".Length..] : b)
+        : branch is { Length: > 0 } b ? Distinct(b.StartsWith("claude/", StringComparison.Ordinal) ? b["claude/".Length..] : b, EnvSession().Id)
         : FolderLabel(cwd), 40);
 
     /// <summary>How this server's label was decided, for hud_sessions (identity) and mcp_status (this.identity): source env |

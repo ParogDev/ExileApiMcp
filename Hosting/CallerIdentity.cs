@@ -70,7 +70,9 @@ public sealed record CallerIdentity(string Label, string? Branch, string? Cwd)
     {
         var label = Clean(agent, 40);
         if (label == null) return null;
-        return new CallerIdentity(label, Clean(branch, 200), Clean(cwd, 400)) { ClientSessionId = Clean(session, 100) };
+        var sid = Clean(session, 100);
+        // An older mcp-call sends the bare label main: the session id still tells main-checkout sessions apart.
+        return new CallerIdentity(SessionIdentity.Distinct(label, sid), Clean(branch, 200), Clean(cwd, 400)) { ClientSessionId = sid };
     }
 
     private static string? Clean(string? raw, int max)

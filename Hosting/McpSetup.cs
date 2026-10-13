@@ -11,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.81.0";
+    public const string Version = "3.82.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -234,6 +234,10 @@ internal static class McpSetup
                 // The client's roots, once: a stdio server started in the main checkout takes the one other checkout they clearly name
                 // as its label, before anything tells the HUD who we are (SessionIdentity.DecideRoots: never a guess).
                 if (SessionIdentity.NeedsRoots && SessionIdentity.BeginRoots()) await AdoptClientRootsAsync(request.Server);
+                // A shared server's client may name the conversation per call in _meta: the call then answers as that session.
+                if (CallerIdentity.Current == null)
+                    SessionIdentity.UseRequestMeta(request.Params?.Meta?.Select(kv => new KeyValuePair<string, string?>(kv.Key,
+                        kv.Value is System.Text.Json.Nodes.JsonValue jv && jv.TryGetValue<string>(out var sv) ? sv : null)).ToList());
                 // The in-game guide's log shows what the agent is doing (best effort, fire and forget).
                 // Polls and the experiment tools stay out of it: await_change writes its own lines, and the Memory View's
                 // experiment runner re-reads the record and presets while it follows along.

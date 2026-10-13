@@ -49,12 +49,23 @@ public sealed class SessionIdentityInfo
     public string Label { get; set; } = "";
     /// <summary>deploy_plugin's checkout when the roots named one (else it uses the checkout the server runs from).</summary>
     public string? SessionRoot { get; set; }
+    /// <summary>The client's own session id (the Claude Code session id), or null when the client gives none (Claude
+    /// Desktop's shared server): incident answers and deploy leases are keyed by it.</summary>
+    public string? ClientSession { get; set; }
+    /// <summary>Where ClientSession came from: the env var Claude Code started the server with, or the X-Hexile-Session header.</summary>
+    public string? ClientSessionSource { get; set; }
+    /// <summary>The id this session's incident answers carry (ClientSession, else the server's own session id).</summary>
+    public string ResponseId { get; set; } = "";
+    /// <summary>The _meta keys the client sent on its first tool call (does it name the conversation per request?).</summary>
+    public List<string>? MetaKeys { get; set; }
 
     public static SessionIdentityInfo? Current() => Hosting.CallerIdentity.Current != null ? null : new()
     {
         Source = Hosting.SessionIdentity.Identity.Source, Note = Hosting.SessionIdentity.Identity.Note,
         Roots = Hosting.SessionIdentity.Identity.Roots?.ToList(), Client = Hosting.SessionIdentity.Identity.Client,
         Label = Hosting.SessionIdentity.Label, SessionRoot = Hosting.SessionIdentity.SessionRoot,
+        ClientSession = Hosting.SessionIdentity.ClientSession, ClientSessionSource = Hosting.SessionIdentity.ClientSessionSource,
+        ResponseId = Hosting.SessionIdentity.ResponseId, MetaKeys = Hosting.SessionIdentity.FirstMetaKeys?.ToList(),
     };
 }
 

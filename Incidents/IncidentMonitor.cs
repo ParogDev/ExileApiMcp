@@ -199,9 +199,9 @@ public sealed class IncidentMonitor(BridgeRegistry bridges, IncidentWatcher watc
 
     private static void Beat()
     {
-        // Who runs under which label (per pid), then take over this label's deploys whose owner process died (a session or
-        // server restart on the same checkout): DeployIncidents.Judge doesn't call them orphaned while this server beats.
-        IncidentStore.BeatServer(Hosting.SessionIdentity.Pid, Hosting.SessionIdentity.Label, Hosting.SessionIdentity.Kind);
+        // Who runs under which label and client session (per pid), then take over this session's deploys whose owner process
+        // died (a server restart, a resumed session): DeployIncidents.Judge doesn't call them orphaned while this server beats.
+        IncidentStore.BeatServer(Hosting.SessionIdentity.Pid, Hosting.SessionIdentity.Label, Hosting.SessionIdentity.Kind, Hosting.SessionIdentity.ServerSession);
         DeployIncidents.Adopt();
         var board = IncidentStore.Read();
         var mine = DeployIncidents.Mine(board);
