@@ -185,7 +185,10 @@ public static class SessionTools
                  "a crash): it raises the outage incident, shows the in-game card (who is busy, who is ready) and returns at " +
                  "once with {outageId, phase, busy, ready}. The HUD stops only on the user's Restart now (an 8 s countdown " +
                  "with Cancel first); the incident resolves (back) when the game is in again, or on Not now / Cancel (cancelled). " +
-                 "Agent mode reports hudAliveSec / bridgeAfterSec / inGameAfterSec, seconds after the new HUD process started.")]
+                 "Agent mode reports hudAliveSec / bridgeAfterSec / inGameAfterSec, seconds after the new HUD process started. " +
+                 "Your own leases (hud_lease, also from before you entered another worktree) never block your own restart: they " +
+                 "are released for it (ownLeases) and taken again if the HUD isn't restarted. The restart doesn't depend on this " +
+                 "call: a caller that stops waiting (a client timeout) doesn't stop it, and a second call for the same game joins it.")]
     public static async Task<CallToolResult> HudRestart(BridgeRegistry bridges,
         [Description("Why, in a few words (shown on the card and in the guide log), e.g. 'bridge change: sessions'")] string reason,
         [Description("poe1 | poe2 (optional when only one HUD is configured as running)")] string? game = null,
@@ -206,7 +209,61 @@ public static class SessionTools
         // The user's planned restart holds every agent restart until the game is back (contract: held_by_outage).
         if (HeldBy(g) is { } held) return Held(g, reason, held);
 
+        // The restart runs detached from this request: a caller that stops waiting (mcp-call.ps1's client timeout, a
+        // cancelled tool call) no longer kills restart-hud.ps1 halfway through a restart, and a second call for the same
+        // game while one runs in this server joins it instead of starting another.
+        Task<AgentRestartOutcome> run;
+        bool joined;
+        lock (InFlightLock)
+        {
+            joined = InFlight.TryGetValue(g, out var cur) && !cur.IsCompleted;
+            run = joined ? cur! : Task.Run(() => AgentRestartAsync(bridges, bridge, g, reason, waitSec, stopOnly, force));
+            if (!joined) InFlight[g] = run;
+        }
+        var waitStart = DateTime.UtcNow;
+        try
+        {
+            var outcome = await run.WaitAsync(ct);
+            return outcome.ToCall(joined ? $"Joined the {g} restart already running in this server ({outcome.Result.Who}: {outcome.Result.Reason}). " : null);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            Console.Error.WriteLine($"[hud_restart] {g}: the caller stopped waiting after {(DateTime.UtcNow - waitStart).TotalSeconds:0} s (client timeout?): the restart carries on, its result is logged here");
+            if (!joined)
+                _ = run.ContinueWith(t => Console.Error.WriteLine(t.IsCompletedSuccessfully
+                    ? $"[hud_restart] {g}: {t.Result.Result.Status} (exit {t.Result.Result.ExitCode}) after its caller left"
+                    : $"[hud_restart] {g}: failed after its caller left: {t.Exception?.GetBaseException().Message}"), TaskScheduler.Default);
+            throw;
+        }
+    }
+
+    private static readonly object InFlightLock = new();
+    /// <summary>The agent restart running in this server per game (a finished task is replaced by the next call).</summary>
+    private static readonly Dictionary<string, Task<AgentRestartOutcome>> InFlight = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record AgentRestartOutcome(RestartResult Result, string Text)
+    {
+        public CallToolResult ToCall(string? prefix)
+        {
+            var call = Dto.Result(Result, (prefix ?? "") + Text);
+            if (Result.ExitCode != 0) call.IsError = true;
+            return call;
+        }
+    }
+
+    /// <summary>The longest an agent restart may take end to end: the script's own limit (waitSec + 240 s), the wait for the
+    /// HUD to come back (<see cref="HudAvailabilityLogic.StartupStuckSec"/> + 60 s for the game), and slack.</summary>
+    public static TimeSpan AgentRestartBudget(int waitSec) => TimeSpan.FromSeconds(waitSec + 240 + HudAvailabilityLogic.StartupStuckSec + 120);
+
+    /// <summary>One agent restart, start to back, independent of any caller's cancellation (bounded by <see cref="AgentRestartBudget"/>).</summary>
+    private static async Task<AgentRestartOutcome> AgentRestartAsync(BridgeRegistry bridges, BridgeClient bridge, string g, string reason, int waitSec, bool stopOnly, bool force)
+    {
+        using var budget = new CancellationTokenSource(AgentRestartBudget(waitSec));
+        var ct = budget.Token;
         var sw = Stopwatch.StartNew();
+        // This session's own leases would block its own restart (the script asks as its own bridge session, ps:<label>):
+        // release them first (a restart ends them anyway) and take them again if the HUD isn't restarted after all.
+        var own = force ? new OwnLeaseRelease([], []) : await ReleaseOwnLeasesAsync(bridges, g, ct);
         // Once the script has the go and starts stopping the HUD (restart-state.json phase "stopping"), put the restart on the
         // incident board with an ETA, so every session hears of it at once (Incidents/IncidentAuto.cs).
         var callStart = DateTime.UtcNow;
@@ -225,12 +282,22 @@ public static class SessionTools
         int code;
         List<string> output;
         try { (code, output) = await RunRestartScriptAsync(g, SessionIdentity.Label, reason, waitSec, stopOnly, force, "agent", null, ct); }
+        catch (McpException ex) when (own.Released.Count > 0)
+        {
+            // The script gave no result: whether the HUD restarted is unknown, so the leases aren't taken again; say so.
+            throw new McpException($"{ex.Message} This session's own lease(s) {string.Join(", ", own.Released.Select(l => l.Id))} were released for the restart and not taken again.");
+        }
         finally
         {
             watchStop.Cancel();
             await watch;
         }
         incident ??= Incidents.IncidentAuto.CheckRestartState(bridge, callStart);
+        // Not restarted (UAC declined, Not now, still blocked by others, held): the HUD still runs, so the leases this call
+        // released are taken again (new ids, the same kind, label and time left).
+        if (own.Released.Count > 0 && code is 1 or 2 or 5 or 6 or 8)
+            await ReacquireLeasesAsync(bridges, g, own, ct);
+        output.InsertRange(0, own.Lines());
 
         var status = code switch
         {
@@ -239,7 +306,8 @@ public static class SessionTools
             5 => "denied", 6 => "blocked", 7 => "merged", 8 => "held_by_outage", 9 => "bridge_not_back",
             _ => "error",
         };
-        var result = new RestartResult { Game = g, Mode = "agent", Status = status, Ok = code == 0, ExitCode = code, Who = SessionIdentity.Label, Reason = reason, Output = output };
+        var result = new RestartResult { Game = g, Mode = "agent", Status = status, Ok = code == 0, ExitCode = code, Who = SessionIdentity.Label, Reason = reason, Output = output,
+                                         OwnLeases = own.Released.Count > 0 ? own.Released : null };
         if (code == 0 && !stopOnly)
         {
             // The new HUD writes a new token; our client reconnects (and re-identifies) on the next call. Back = the bridge
@@ -291,9 +359,79 @@ public static class SessionTools
         var text = $"{g}: {status} (exit {code}, {sw.Elapsed.TotalSeconds:0} s)" + ((result.HudAliveSec ?? result.BridgeAfterSec ?? result.InGameAfterSec) is not null
                        ? $", HUD alive {Secs(result.HudAliveSec)} / bridge {Secs(result.BridgeAfterSec)} / in game {Secs(result.InGameAfterSec)} after it started" : "") +
                    (result.Note != null && code is 0 or 7 or 8 ? "\n" + result.Note : "") + "\n" + string.Join("\n", output);
-        var call = Dto.Result(result, text);
-        if (code != 0) call.IsError = true;
-        return call;
+        return new AgentRestartOutcome(result, text);
+    }
+
+    // ── Own leases (a session's lease never blocks its own restart) ──
+
+    /// <summary>The leases one call released for its restart, and what happened to them.</summary>
+    private sealed record OwnLeaseRelease(List<RestartLease> Released, List<string> Notes)
+    {
+        public IEnumerable<string> Lines() =>
+            Released.Select(l => $"own lease {l.Id} ({l.Kind}: {l.Label}) released for this restart" +
+                                 (l.ReacquiredAs != null ? $", taken again as {l.ReacquiredAs} (not restarted)" : l.ReacquireError != null ? $", NOT taken again: {l.ReacquireError}" : ""))
+                .Concat(Notes);
+    }
+
+    /// <summary>
+    /// The bridge session ids that are this caller (pure; tests call it): the id the bridge knows this connection by
+    /// (session.list "you"), this server's id for the caller, and on the shared HTTP server every caller with the same client
+    /// session id (the Claude Code session, X-Hexile-Session): a session that entered another worktree is another label and
+    /// cwd, so another bridge session, with its earlier leases still on the first one. Never matched by label alone.
+    /// </summary>
+    public static HashSet<string> OwnSessionIds(string? you, string? current, IEnumerable<string>? sameClient)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in new[] { you, current }.Concat(sameClient ?? []))
+            if (!string.IsNullOrWhiteSpace(id)) ids.Add(id);
+        return ids;
+    }
+
+    /// <summary>The leases (session.list leases[]) held by one of <paramref name="ownSessionIds"/> (pure; tests call it).</summary>
+    public static List<RestartLease> OwnLeases(JToken? leases, IReadOnlySet<string> ownSessionIds) =>
+        (leases as JArray ?? []).OfType<JObject>()
+            .Where(l => l["session"]?.ToString() is { Length: > 0 } s && ownSessionIds.Contains(s) && l["id"]?.ToString() is { Length: > 0 })
+            .Select(l => new RestartLease
+            {
+                Id = l["id"]!.ToString(), Kind = l["kind"]?.ToString() ?? "other", Label = l["label"]?.ToString() ?? "", Session = l["session"]!.ToString(),
+                SecondsLeft = l["secondsLeft"]?.Type == JTokenType.Integer ? l["secondsLeft"]!.Value<int>() : null,
+            }).ToList();
+
+    /// <summary>Releases this caller's own leases on <paramref name="g"/>'s HUD. Never throws: a problem is a note.</summary>
+    private static async Task<OwnLeaseRelease> ReleaseOwnLeasesAsync(BridgeRegistry bridges, string g, CancellationToken ct)
+    {
+        var r = new OwnLeaseRelease([], []);
+        try
+        {
+            var (_, list) = await bridges.CallAsync(g, "session.list", new JObject(), ct);
+            var ids = OwnSessionIds(list?["you"]?.ToString(), SessionIdentity.Id, bridges.SessionIdsOfClient(SessionIdentity.ServerSession));
+            foreach (var l in OwnLeases(list?["leases"], ids))
+            {
+                try
+                {
+                    await bridges.CallAsync(g, "lease.release", new JObject { ["id"] = l.Id }, ct);
+                    r.Released.Add(l);
+                }
+                catch (Exception ex) when (ex is McpException or BridgeException) { r.Notes.Add($"own lease {l.Id} could not be released ({ex.Message}): it may block this restart"); }
+            }
+        }
+        catch (Exception ex) when (ex is McpException or BridgeException) { r.Notes.Add($"own leases not checked (session.list: {ex.Message}): one of yours may block this restart"); }
+        return r;
+    }
+
+    /// <summary>Takes the released leases again (same kind, label and time left, at least 30 s). Never throws.</summary>
+    private static async Task ReacquireLeasesAsync(BridgeRegistry bridges, string g, OwnLeaseRelease own, CancellationToken ct)
+    {
+        foreach (var l in own.Released)
+        {
+            try
+            {
+                var (_, a) = await bridges.CallAsync(g, "lease.acquire", new JObject { ["kind"] = l.Kind, ["label"] = l.Label, ["ttlSec"] = Math.Clamp(l.SecondsLeft ?? 120, 30, 3600) }, ct);
+                l.ReacquiredAs = a?["id"]?.ToString();
+                if (l.ReacquiredAs == null) l.ReacquireError = a?["error"]?.ToString() ?? "no lease id in the reply";
+            }
+            catch (Exception ex) when (ex is McpException or BridgeException) { l.ReacquireError = ex.Message; }
+        }
     }
 
     private static string HudDirOf(BridgeClient bridge) =>
@@ -449,17 +587,20 @@ public static class SessionTools
 
         using var proc = Process.Start(psi) ?? throw new McpException("Could not start powershell.exe.");
         proc.StandardInput.Close();
-        var stdout = proc.StandardOutput.ReadToEndAsync(ct);
-        var stderr = proc.StandardError.ReadToEndAsync(ct);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // The pipes are read to the end whatever happens to the caller, so the script never blocks on a full pipe.
+        var stdout = proc.StandardOutput.ReadToEndAsync(CancellationToken.None);
+        var stderr = proc.StandardError.ReadToEndAsync(CancellationToken.None);
         // The restart itself after the coordination: stop (grace 15 s + kill 5 s), the task or UAC prompt, then the bridge
         // wait, 150 s from the new HUD process's start (exit 9 when it runs out), with slack for the UAC prompt.
-        timeout.CancelAfter(TimeSpan.FromSeconds(waitSec + 240));
-        try { await proc.WaitForExitAsync(timeout.Token); }
-        catch (OperationCanceledException)
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(waitSec + 240));
+        using var either = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+        try { await proc.WaitForExitAsync(either.Token); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            // Only our own limit kills the script. A cancelled caller leaves it running: killing it halfway through a restart
+            // (the 2026-10-13 timeouts: mcp-call's 30 s client timeout did exactly that) can leave the HUD stopped.
             try { proc.Kill(entireProcessTree: true); } catch { }
-            throw new McpException($"restart-hud.ps1 gave no result within {waitSec + 240} s.");
+            throw new McpException($"restart-hud.ps1 gave no result within {waitSec + 240} s (waitSec {waitSec} + 240 s for the restart itself): it was stopped.");
         }
         var output = (await stdout).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r')).ToList();
         var err = await stderr;

@@ -129,7 +129,9 @@ public static class DeployTools
         {
             // On the shared HTTP server every caller has its pid (Hosting/CallerIdentity.cs): there, a deploy another label
             // raised is not this caller's, pid or not. A stdio session is its pid (its label may change, AdoptRoots).
-            var mine = owner.Incident?.OwnerPid == SessionIdentity.Pid && (SessionIdentity.Kind != "mcp-http" || owner.Incident.RaisedBy == SessionIdentity.Label);
+            // A deploy that records its client session is this caller's when the session matches, whatever the label (a
+            // session that entered another worktree has a new label): DeployIncidents.IsOwnDeploy.
+            var mine = owner.Incident is { } own && DeployIncidents.IsOwnDeploy(own, SessionIdentity.Pid, SessionIdentity.Kind, SessionIdentity.Label, SessionIdentity.ServerSession);
             if (owner.Incident == null)
             {
                 if (!force)

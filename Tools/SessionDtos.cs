@@ -203,6 +203,25 @@ public sealed class RestartResult
     public List<RestartOutageSession>? Busy { get; set; }
     /// <summary>mode=user: every other connected session.</summary>
     public List<RestartOutageSession>? Ready { get; set; }
+    /// <summary>Agent mode: this session's own leases on that HUD, released so they don't block its own restart (a restart
+    /// ends them anyway); taken again (ReacquiredAs) when the HUD wasn't restarted after all.</summary>
+    public List<RestartLease>? OwnLeases { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>One of the caller's own leases that hud_restart released (and maybe took again).</summary>
+public sealed class RestartLease
+{
+    public string Id { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public string Label { get; set; } = "";
+    /// <summary>The bridge session that held it (the caller's, possibly from before it entered another worktree).</summary>
+    public string? Session { get; set; }
+    public int? SecondsLeft { get; set; }
+    /// <summary>The new lease id when it was taken again (the HUD was not restarted).</summary>
+    public string? ReacquiredAs { get; set; }
+    /// <summary>Why it couldn't be taken again.</summary>
+    public string? ReacquireError { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 

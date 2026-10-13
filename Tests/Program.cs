@@ -1212,6 +1212,45 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
     }
 }
 
+// ── hud_restart / deploy_plugin: one session is one owner (its own lease never blocks its own restart) ──
+{
+    var leases = JArray.Parse("""
+        [ { "id": "L1", "kind": "perf", "label": "mine now", "session": "wt-b#http-22222222", "who": "wt-b", "secondsLeft": 90 },
+          { "id": "L2", "kind": "pilot", "label": "mine, before I entered wt-b", "session": "wt-a#http-11111111", "who": "wt-a", "secondsLeft": 300 },
+          { "id": "L3", "kind": "perf", "label": "another session, same label as mine", "session": "wt-b#http-99999999", "who": "wt-b" },
+          { "id": "L4", "kind": "other", "label": "no session recorded", "who": "wt-b" } ]
+        """);
+    var ids = ExileApiMcp.Tools.SessionTools.OwnSessionIds("wt-b#http-22222222", "wt-b#http-22222222", ["wt-a#http-11111111", "wt-b#http-22222222"]);
+    var own = ExileApiMcp.Tools.SessionTools.OwnLeases(leases, ids);
+    Check("own leases: this bridge session's and the same client session's earlier one", own.Select(l => l.Id).SequenceEqual(["L1", "L2"]), string.Join(",", own.Select(l => l.Id)));
+    Check("own leases: never by label alone (another session labelled the same keeps blocking)", own.All(l => l.Id is not ("L3" or "L4")));
+    Check("own leases: kind, label and time left kept for taking them again", own[1] is { Kind: "pilot", SecondsLeft: 300, Session: "wt-a#http-11111111" } && own[0].Label == "mine now");
+    var stdio = ExileApiMcp.Tools.SessionTools.OwnSessionIds("main#19244", "main#19244", null);
+    Check("own leases: stdio (no client session) is its one bridge session", ExileApiMcp.Tools.SessionTools.OwnLeases(leases, stdio).Count == 0 && stdio.SetEquals(["main#19244"]));
+    Check("own leases: blank ids are no owner", ExileApiMcp.Tools.SessionTools.OwnSessionIds(null, "", ["", " "]).Count == 0);
+    Check("own leases: none on an old bridge's reply without leases", ExileApiMcp.Tools.SessionTools.OwnLeases(null, ids).Count == 0);
+    Check("restart budget: covers the script's limit and the wait for the HUD", ExileApiMcp.Tools.SessionTools.AgentRestartBudget(600) > TimeSpan.FromSeconds(600 + 240 + HudAvailabilityLogic.StartupStuckSec));
+
+    Incident Dep(int pid, string raisedBy, string? session)
+    {
+        var i = new Incident { Id = "i-own", Kind = "deploy", Key = "deploy:X", RaisedBy = raisedBy, RaisedAt = now, State = "open" };
+        i.Set("ownerPid", pid); i.Set("owner", raisedBy);
+        if (session != null) i.Set("ownerSession", session);
+        return i;
+    }
+    Check("own deploy: same client session after entering another worktree (new label) on the shared server",
+        DeployIncidents.IsOwnDeploy(Dep(500, "worktree-a", "sess-1"), 500, "mcp-http", "worktree-b", "sess-1"));
+    Check("own deploy: same client session, resumed with a new pid (stdio)", DeployIncidents.IsOwnDeploy(Dep(500, "worktree-a", "sess-1"), 600, "mcp", "worktree-b", "sess-1"));
+    Check("own deploy: another client session with the same label and pid is not mine", !DeployIncidents.IsOwnDeploy(Dep(500, "main:aaaa", "sess-1"), 500, "mcp-http", "main:aaaa", "sess-2"));
+    Check("own deploy: no session recorded -> pid (+ label on the shared server) as before",
+        DeployIncidents.IsOwnDeploy(Dep(500, "wt", null), 500, "mcp", "renamed", "sess-1")
+        && !DeployIncidents.IsOwnDeploy(Dep(500, "wt", null), 500, "mcp-http", "renamed", "sess-1")
+        && DeployIncidents.IsOwnDeploy(Dep(500, "wt", null), 500, "mcp-http", "wt", null)
+        && !DeployIncidents.IsOwnDeploy(Dep(500, "wt", null), 501, "mcp", "wt", null));
+    Check("own deploy: caller without a session id falls back to pid + label", DeployIncidents.IsOwnDeploy(Dep(500, "wt", "sess-1"), 500, "mcp-http", "wt", null)
+        && !DeployIncidents.IsOwnDeploy(Dep(500, "wt", "sess-1"), 500, "mcp-http", "other", null));
+}
+
 // ── hud_health_report: the bridge's reflection preflight (hello.reflection) ──
 {
     var ok = JObject.Parse("""{"targets":24,"ok":17,"broken":0,"notNow":7,"blocked":0,"problems":["harmony.detours not now: 0Harmony isn't loaded yet"]}""");
