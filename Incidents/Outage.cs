@@ -51,6 +51,31 @@ public sealed class OutageParticipant
     [JsonExtensionData] public IDictionary<string, JToken>? Extra { get; set; }
 }
 
+/// <summary>The bridge's outage.state reply (bridge OutageStateDto, Bridge/BridgeContract.cs mirror): the readiness lists and
+/// the card's answer, all the runner reads; the card's own fields pass through <see cref="Extra"/>.</summary>
+public sealed class OutageStateReply
+{
+    /// <summary>Sessions doing something / holding a lease; null on a bridge without outage.state.</summary>
+    public List<OutageParty>? Busy { get; set; }
+    /// <summary>Every other connected agent session.</summary>
+    public List<OutageParty>? Ready { get; set; }
+    /// <summary>The card's answer: null | now | notNow.</summary>
+    public string? Answer { get; set; }
+    [JsonExtensionData] public IDictionary<string, JToken>? Extra { get; set; }
+}
+
+/// <summary>One session in outage.state's busy / ready lists (bridge OutageParty).</summary>
+public sealed class OutageParty
+{
+    public string? Session { get; set; }
+    public string? Label { get; set; }
+    /// <summary>What it is doing (busy only).</summary>
+    public string? Doing { get; set; }
+    /// <summary>The lease it holds (busy only).</summary>
+    public string? Lease { get; set; }
+    [JsonExtensionData] public IDictionary<string, JToken>? Extra { get; set; }
+}
+
 /// <summary>One session as the readiness check sees it.</summary>
 public sealed record OutageSession(string Session, string Label, string? Doing, string? Lease);
 
@@ -210,10 +235,12 @@ public static class OutageLogic
     public static (List<OutageSession> Busy, List<OutageSession> Ready, string? Answer)? FromOutageState(JToken reply)
     {
         if (reply is not JObject o || (o["busy"] is not JArray && o["ready"] is not JArray)) return null;
-        static List<OutageSession> List(JToken? t) => (t as JArray ?? []).OfType<JObject>().Select(x => new OutageSession(
-            x["session"]?.ToString() ?? x["id"]?.ToString() ?? x["label"]?.ToString() ?? "?", x["label"]?.ToString() ?? x["session"]?.ToString() ?? "?",
-            Str(x["doing"]), Str(x["lease"]))).ToList();
-        return (List(o["busy"]), List(o["ready"]), o["answer"]?.Type == JTokenType.String ? o["answer"]!.ToString() : null);
+        OutageStateReply r;
+        try { r = o.ToObject<OutageStateReply>(Json)!; }
+        catch (JsonException) { return null; }   // not the shape outage.state writes: readiness falls back to session.list
+        static List<OutageSession> List(List<OutageParty>? parties) => (parties ?? []).Where(x => x != null).Select(x => new OutageSession(
+            x.Session ?? (x.Extra != null && x.Extra.TryGetValue("id", out var id) ? Str(id) : null) ?? x.Label ?? "?", x.Label ?? x.Session ?? "?", x.Doing, x.Lease)).ToList();
+        return (List(r.Busy), List(r.Ready), r.Answer);
     }
 
     /// <summary>
