@@ -220,9 +220,14 @@ public static class OutageRunner
 
     public static bool IsRunning(string id) => Running.TryGetValue(id, out var t) && !t.IsCompleted;
 
+    private static int? RunnerPid(Incident i) => i.Get("runnerPid")?.Type == JTokenType.Integer ? i.Get("runnerPid")!.Value<int>() : null;
+
     public static void Start(BridgeRegistry bridges, string game, string id)
     {
         if (IsRunning(id)) return;
+        // The worker process that runs it (a supervised session's pid stays the supervisor's across hot swaps, so the old
+        // worker and the new one would both drive it): the other one steps back (RunAsync, AdoptOrphans).
+        IncidentStore.Update(f => { if (IncidentLogic.Find(f, id) is { IsOpen: true } i) i.Set("runnerPid", Environment.ProcessId); return 0; });
         Running[id] = Task.Run(async () =>
         {
             try { await RunAsync(bridges, game, id); }
@@ -301,6 +306,7 @@ public static class OutageRunner
                 return;
             }
             if (inc.OwnerPid is { } owner && owner != SessionIdentity.Pid && DeployIncidents.PidAlive(owner, null) != false) return;   // another server drives it
+            if (RunnerPid(inc) is { } runner && runner != Environment.ProcessId && DeployIncidents.PidAlive(runner, null) != false) return;   // a newer worker of this session took over
             var now = DateTime.UtcNow;
             switch (info.Phase)
             {
@@ -391,7 +397,13 @@ public static class OutageRunner
         {
             if (IsRunning(i.Id)) continue;
             var owner = i.OwnerPid;
-            if (owner == SessionIdentity.Pid) { Start(bridges, i.Scope, i.Id); continue; }   // ours, runner gone (a swap): resume
+            if (owner == SessionIdentity.Pid)
+            {
+                // Ours: resume unless another worker of this session (before or after a hot swap) still runs it.
+                if (RunnerPid(i) is { } runner && runner != Environment.ProcessId && DeployIncidents.PidAlive(runner, null) != false) continue;
+                Start(bridges, i.Scope, i.Id);
+                continue;
+            }
             if (owner != null && DeployIncidents.PidAlive(owner.Value, null) != false) continue;
             var adopted = IncidentStore.Update(f =>
             {

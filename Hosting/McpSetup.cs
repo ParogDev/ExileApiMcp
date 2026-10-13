@@ -11,7 +11,7 @@ namespace ExileApiMcp.Hosting;
 /// <summary>Server identity, instructions and capabilities shared by the stdio and HTTP hosts.</summary>
 internal static class McpSetup
 {
-    public const string Version = "3.79.0";
+    public const string Version = "3.80.0";
 
     private const string Instructions = """
         Live game state from Path of Exile HUD overlays, for developing and debugging HUD plugins.
@@ -62,6 +62,10 @@ internal static class McpSetup
         (Restart now / Not now), and merges with a restart already under way. Never run the restart script directly. Before
         a long measurement or a piloted test that spans several tool calls, hud_lease acquire keeps other agents' restarts
         away until you release it; the tools' own activity is covered without one.
+        A HUD that can't answer for a moment is normal: an error hud_not_now (a load screen, the HUD starting or
+        restarting, the user's planned restart, the game at the menu) carries availability.waitWith: wait with that, don't
+        debug; hud_broken names the broken link. When the user restarts game + HUD themselves, hud_restart mode=user
+        announces it; agent restarts meanwhile get held_by_outage.
         The in-game card is shared: one agent holds it at a time (the bridge's attention queue: restarts first, turns in
         rotation, nothing new in combat). To ask the user while they play, use ask_user (a question with 2-4 choices on the
         card; it waits its turn and returns the answer, or pending with an id for ask_user_result) instead of chat;
