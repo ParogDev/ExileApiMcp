@@ -97,6 +97,15 @@ public static class DeployTools
         foreach (var l in elsewhere)
             r.Warnings.Add($"The {l.Game} HUD compiles {folder} from {HudSource.Describe(l.Root!)}, not {src}: this deploy doesn't reach it (cut that HUD over: tools\\hud-live.ps1 cutover -Game {l.Game}).");
 
+        // Deploying the bridge means a HUD restart: refused like hud_restart while the user's planned restart is open.
+        if (act != "status" && reload && folder == BridgeFolder)
+            foreach (var heldGame in string.IsNullOrWhiteSpace(wanted) ? r.Games : [wanted])
+                if (SessionTools.HeldBy(heldGame) is { } held)
+                {
+                    r.Error = "held_by_outage"; r.HeldBy = held;
+                    return Finish(r, "held_by_outage", false, $"Not {(act == "deploy" ? "deployed" : "restored")}: that {act} of {BridgeFolder} would restart the {heldGame} HUD. " + SessionTools.HeldText(held));
+                }
+
         var mainHead = PluginGit.ReadHead(main, out var mainWhy) ?? throw new McpException($"The HUD source's {folder} ({src}): {mainWhy}");
         r.Main = Checkout(main, mainHead);
         var pointer = PluginGit.Run(srcRoot, "ls-tree", "HEAD", "--", $"Plugins/{folder}");
@@ -378,7 +387,7 @@ public static class DeployTools
             try
             {
                 call = kind == "hud_restart"
-                    ? await SessionTools.HudRestart(bridges, reason, g, 600, false, false, ct)
+                    ? await SessionTools.HudRestart(bridges, reason, g, waitSec: 600, stopOnly: false, force: false, mode: "agent", ct: ct)
                     : await HudDevTools.ReloadPlugin(bridges, folder, true, false, false, g, ct);
             }
             catch (McpException ex) { outs.Add($"{g}: {ex.Message}"); ok = false; continue; }

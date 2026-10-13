@@ -218,6 +218,19 @@ public sealed class BridgeRegistry : IDisposable
                 await bridge.EnsureConnectedAsync(ct);
                 result = await bridge.SendRequestAsync(method, parameters, ct);
             }
+            catch (BridgeException loading) when (loading.IsHudLoading)
+            {
+                // A load screen (-32010): the bridge dropped the request unprocessed. Wait briefly for the area to come up
+                // (hud-state.json phase ready) and send it once more; still loading: "not now" with the diagnosis.
+                Console.Error.WriteLine($"[Bridge:{bridge.Game}] {method}: HUD on a load screen, waiting up to {HudAvailabilityProbe.LoadWait.TotalSeconds:0} s");
+                if (!await HudAvailabilityProbe.WaitReadyAsync(bridge, HudAvailabilityProbe.LoadWait, ct)) throw NotNowOr(bridge, loading);
+                try
+                {
+                    await bridge.EnsureConnectedAsync(ct);
+                    result = await bridge.SendRequestAsync(method, parameters, ct);
+                }
+                catch (BridgeException again) when (again is not BridgeUnavailableException) { throw NotNowOr(bridge, again); }
+            }
             Incidents.IncidentAuto.BridgeOk(bridge);   // resolves this game's bridge-down / hud-restart incidents (checked every 5 s at most)
             return (bridge, result);
         }
@@ -239,16 +252,32 @@ public sealed class BridgeRegistry : IDisposable
                         return (bridge, back);
                     }
                     catch (BridgeUnavailableException) { }   // not back yet (BridgeNotSentException included)
-                    catch (BridgeException again) { throw new McpException(again.Message); }
+                    catch (BridgeException again) { throw NotNowOr(bridge, again); }
                 }
             }
             // Name the broken link and raise it on the incident board (every session hears of it), then list what's open.
-            throw new McpException(ex.Message + RestartHint(bridge) + await Task.Run(() => Incidents.IncidentAuto.BridgeFailed(bridge, ex.Message), CancellationToken.None));
+            var suffix = RestartHint(bridge) + await Task.Run(() => Incidents.IncidentAuto.BridgeFailed(bridge, ex.Message), CancellationToken.None);
+            // hud-state.json tells "not now" (starting, restarting, the user's planned restart) from broken (HUD gone).
+            if (await Task.Run(() => HudAvailabilityProbe.Diagnose(bridge, ex), CancellationToken.None) is { } a)
+                throw HudAvailabilityProbe.Exception(a, ex.Message, suffix);
+            throw new McpException(ex.Message + suffix);
         }
         catch (BridgeException ex)
         {
-            throw new McpException(ex.Message);
+            throw NotNowOr(bridge, ex);
         }
+    }
+
+    /// <summary>
+    /// A bridge error as the tool error: a load screen, a timeout or the main thread silent get the hud-state.json diagnosis
+    /// (<see cref="HudUnavailableException"/>: not now or broken); anything else, or an older bridge without the file, stays
+    /// the bridge's message as before.
+    /// </summary>
+    private static McpException NotNowOr(BridgeClient bridge, BridgeException ex)
+    {
+        if (ex.Reason is "hud_loading" or "hud_timeout" || ex.Message.Contains("timed out after", StringComparison.Ordinal))
+            if (HudAvailabilityProbe.Diagnose(bridge, ex) is { } a) return HudAvailabilityProbe.Exception(a, ex.Message);
+        return new McpException(ex.Message);
     }
 
     /// <summary>

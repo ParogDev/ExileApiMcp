@@ -176,43 +176,36 @@ public static class SessionTools
                  "while another agent's measurement, recording, piloted step or compile runs (it goes ahead when they finish), " +
                  "and a free restart still shows a short countdown on the in-game card with Not now. The user can press Restart " +
                  "now (over the blockers) or Not now (denied: ask in chat, or retry later). If another agent is restarting " +
-                 "already, this merges into it and waits for the HUD to come back. Needed after editing Whats An AI Bridge " +
+                 "already, this merges into it and waits for the HUD to come back (back = the bridge answers and the game is in). " +
+                 "Needed after editing Whats An AI Bridge " +
                  "itself, adding a plugin folder, or a HUD core update; everything else is reload_plugin. Blocks up to waitSec " +
                  "(run it through tools\\mcp-call.ps1 in the background for long waits). force=true skips the coordination: " +
-                 "only when the user asked for that.")]
+                 "only when the user asked for that. While the user's planned restart (an outage incident) is open, an agent " +
+                 "restart is refused with held_by_outage. mode=user announces the user's own restart of game + HUD (a patch, " +
+                 "a crash): it raises the outage incident, shows the in-game card, stops the HUD once nobody is busy (or on " +
+                 "Restart now) and returns at once with {outageId, phase, busy, ready}; the incident resolves (back) when the " +
+                 "game is in again, or on Not now (cancelled).")]
     public static async Task<CallToolResult> HudRestart(BridgeRegistry bridges,
         [Description("Why, in a few words (shown on the card and in the guide log), e.g. 'bridge change: sessions'")] string reason,
         [Description("poe1 | poe2 (optional when only one HUD is configured as running)")] string? game = null,
         [Description("How long to wait for blockers and the user, seconds (0-3600, default 600; 0 = fail at once when blocked)")] int waitSec = 600,
         [Description("Stop the HUD without starting it again")] bool stopOnly = false,
         [Description("Skip the coordination (interrupts whatever runs): only when the user asked for it")] bool force = false,
+        [Description("agent (default): this agent restarts the HUD now, coordinated. user: the user restarts game + HUD by hand " +
+                     "(announce, hold for busy agents, stop the HUD, resolve when the game is back); returns at once")] string mode = "agent",
         CancellationToken ct = default)
     {
         var bridge = bridges.Resolve(game);
         var g = bridge.Game == "auto" ? (game ?? throw new McpException("Pass game: poe1 or poe2.")) : bridge.Game;
-        var repo = SessionIdentity.RepoRoot() ?? throw new McpException("tools\\restart-hud.ps1 not found: this server isn't running from the scaffolding repo (HEXILE_REPO unset).");
-        var script = Path.Combine(repo, "tools", "restart-hud.ps1");
+        var m = (mode ?? "agent").Trim().ToLowerInvariant();
+        if (m is not ("agent" or "user")) throw new McpException($"mode must be agent or user, not '{mode}'.");
+        if (m == "user") return await UserRestart(bridges, g, reason, ct);
         waitSec = Math.Clamp(waitSec, 0, 3600);
 
-        var psi = new ProcessStartInfo("powershell.exe")
-        {
-            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
-            WorkingDirectory = repo,
-            RedirectStandardInput = true,   // closed below: the script's children must not inherit our (always open) stdin
-        };
-        foreach (var arg in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Game", g, "-Who", SessionIdentity.Label, "-Reason", reason, "-WaitSec", waitSec.ToString() })
-            psi.ArgumentList.Add(arg);
-        if (stopOnly) psi.ArgumentList.Add("-StopOnly");
-        if (force) psi.ArgumentList.Add("-Force");
+        // The user's planned restart holds every agent restart until the game is back (contract: held_by_outage).
+        if (HeldBy(g) is { } held) return Held(g, reason, held);
 
-        var output = new List<string>();
         var sw = Stopwatch.StartNew();
-        using var proc = Process.Start(psi) ?? throw new McpException("Could not start powershell.exe.");
-        proc.StandardInput.Close();
-        var stdout = proc.StandardOutput.ReadToEndAsync(ct);
-        var stderr = proc.StandardError.ReadToEndAsync(ct);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(waitSec + 180));   // the restart itself: grace 15 s, start, 8 s alive check, focus
         // Once the script has the go and starts stopping the HUD (restart-state.json phase "stopping"), put the restart on the
         // incident board with an ETA, so every session hears of it at once (Incidents/IncidentAuto.cs).
         var callStart = DateTime.UtcNow;
@@ -226,54 +219,47 @@ public static class SessionTools
                 try { await Task.Delay(1000, watchStop.Token); } catch (OperationCanceledException) { }
             }
         });
-        try { await proc.WaitForExitAsync(timeout.Token); }
-        catch (OperationCanceledException)
-        {
-            try { proc.Kill(entireProcessTree: true); } catch { }
-            throw new McpException($"restart-hud.ps1 gave no result within {waitSec + 180} s.");
-        }
+        int code;
+        List<string> output;
+        try { (code, output) = await RunRestartScriptAsync(g, SessionIdentity.Label, reason, waitSec, stopOnly, force, "agent", null, ct); }
         finally
         {
             watchStop.Cancel();
             await watch;
         }
         incident ??= Incidents.IncidentAuto.CheckRestartState(bridge, callStart);
-        output.AddRange((await stdout).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r')));
-        var err = await stderr;
-        if (!string.IsNullOrWhiteSpace(err)) output.Add("stderr: " + err.Trim());
 
-        var code = proc.ExitCode;
         var status = code switch
         {
             0 => stopOnly ? "stopped" : "restarted",
             2 => "cancelled", 3 => "error", 4 => "error",
-            5 => "denied", 6 => "blocked", 7 => "merged",
+            5 => "denied", 6 => "blocked", 7 => "merged", 8 => "held_by_outage",
             _ => "error",
         };
-        var result = new RestartResult { Game = g, Status = status, Ok = code == 0, ExitCode = code, Who = SessionIdentity.Label, Reason = reason, Output = output };
+        var result = new RestartResult { Game = g, Mode = "agent", Status = status, Ok = code == 0, ExitCode = code, Who = SessionIdentity.Label, Reason = reason, Output = output };
         if (code == 0 && !stopOnly)
         {
-            // The new HUD writes a new token; our client reconnects (and re-identifies) on the next call.
-            var back = Stopwatch.StartNew();
-            while (back.Elapsed < TimeSpan.FromSeconds(60))
-            {
-                try { await bridges.QueryAsync(g, "hello", ct); result.BackAfterSec = Math.Round(back.Elapsed.TotalSeconds, 1); break; }
-                catch (McpException) { await Task.Delay(1000, ct); }
-            }
+            // The new HUD writes a new token; our client reconnects (and re-identifies) on the next call. Back = the bridge
+            // answers AND hud-state.json says the game is in (no file: an older bridge, back on the answer).
+            await WaitBackAsync(bridges, bridge, g, result, TimeSpan.Zero, TimeSpan.FromSeconds(60), ct);
             result.Note = result.BackAfterSec != null
-                ? "The HUD is back and the bridge answers. Plugins compiled at startup: check hud_plugins for the one you changed."
-                : "The HUD restarted but its bridge hasn't answered within 60 s: check hud_log and bridge_status.";
+                ? "The HUD is back, the bridge answers and the game is in. Plugins compiled at startup: check hud_plugins for the one you changed."
+                : result.BridgeAfterSec != null
+                    ? $"The HUD restarted and its bridge answers ({result.BridgeAfterSec} s), but the game isn't in yet (phase {result.Phase ?? "?"}): calls answer 'not now' until it is."
+                    : "The HUD restarted but its bridge hasn't answered within 60 s: check hud_log and bridge_status.";
         }
         else if (code == 7)
         {
-            var back = Stopwatch.StartNew();
-            await Task.Delay(5000, ct);
-            while (back.Elapsed < TimeSpan.FromSeconds(90))
-            {
-                try { await bridges.QueryAsync(g, "hello", ct); result.BackAfterSec = Math.Round(back.Elapsed.TotalSeconds, 1); break; }
-                catch (McpException) { await Task.Delay(1000, ct); }
-            }
-            result.Note = result.BackAfterSec != null ? "Another agent restarted the HUD; it is back." : "Another agent was restarting the HUD; it isn't back yet (bridge_status).";
+            await WaitBackAsync(bridges, bridge, g, result, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(90), ct);
+            result.Note = result.BackAfterSec != null ? "Another agent restarted the HUD; it is back and the game is in."
+                : result.BridgeAfterSec != null ? $"Another agent restarted the HUD; the bridge answers but the game isn't in yet (phase {result.Phase ?? "?"})."
+                : "Another agent was restarting the HUD; it isn't back yet (bridge_status).";
+        }
+        else if (code == 8)
+        {
+            result.HeldBy = HeldBy(g);
+            result.Error = "held_by_outage";
+            result.Note = result.HeldBy != null ? HeldText(result.HeldBy) : "restart-hud.ps1 refused: held by the user's planned restart (an outage incident); see output.";
         }
         else result.Note = status switch
         {
@@ -283,23 +269,158 @@ public static class SessionTools
             _ => "See output; <HUD>\\restart-hud.log has the elevated half's lines.",
         };
         // Close the board's restart incident: back, or not restarted at all. A HUD that doesn't come back keeps it open, and
-        // the incident monitor re-diagnoses it (HUD not running, bridge not listening...).
+        // the incident monitor re-diagnoses it (HUD not running, bridge not listening...) or resolves it once the game is in.
         try
         {
             if (code == 0 && !stopOnly && result.BackAfterSec != null)
-                Incidents.IncidentStore.ResolveKeys(Incidents.IncidentAuto.BridgeKeys(g), $"the {g} HUD is back, bridge answered {result.BackAfterSec} s after the restart");
-            // Not restarted at all (Loader.exe missing, UAC declined, Not now, still blocked): the HUD was never stopped.
+                Incidents.IncidentStore.ResolveKeys(Incidents.IncidentAuto.BridgeKeys(g), $"the {g} HUD is back and the game is in, {result.BackAfterSec} s after the restart");
+            // Not restarted at all (Loader.exe missing, UAC declined, Not now, still blocked, held): the HUD was never stopped.
             // A restart that failed after stopping (3, 4) leaves the HUD possibly down: its incident stays open.
-            else if (code is 1 or 2 or 5 or 6 && incident != null)
+            else if (code is 1 or 2 or 5 or 6 or 8 && incident != null)
                 Incidents.IncidentStore.Resolve(incident.Id, $"restart {status}: {result.Note}");
             var key = stopOnly ? $"bridge-down:{g}" : $"hud-restart:{g}";
             if (Incidents.IncidentLogic.Find(Incidents.IncidentStore.Read(), key) is { } inc && inc.RaisedAt >= callStart.AddSeconds(-1))
                 result.Incident = IncidentTools.View(inc, Incidents.IncidentStore.ReadHeartbeats());
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { output.Add($"incident board not updated: {ex.Message}"); }
-        var text = $"{g}: {status} (exit {code}, {sw.Elapsed.TotalSeconds:0} s)" + (result.BackAfterSec != null ? $", bridge back after {result.BackAfterSec} s" : "") + "\n" + string.Join("\n", output);
+        var text = $"{g}: {status} (exit {code}, {sw.Elapsed.TotalSeconds:0} s)" + (result.BackAfterSec != null ? $", back after {result.BackAfterSec} s" : "") +
+                   (result.Note != null && code is 0 or 7 or 8 ? "\n" + result.Note : "") + "\n" + string.Join("\n", output);
         var call = Dto.Result(result, text);
         if (code != 0) call.IsError = true;
         return call;
+    }
+
+    /// <summary>
+    /// Waits until the bridge answers (BridgeAfterSec) and hud-state.json says the game is in (BackAfterSec; no file or a
+    /// stale one: back on the answer, as with older bridges). A bridge that answers from the menu gets up to 60 s more.
+    /// </summary>
+    private static async Task WaitBackAsync(BridgeRegistry bridges, BridgeClient bridge, string g, RestartResult result, TimeSpan first, TimeSpan budget, CancellationToken ct)
+    {
+        var back = Stopwatch.StartNew();
+        var extended = false;
+        if (first > TimeSpan.Zero) await Task.Delay(first, ct);
+        while (back.Elapsed < budget)
+        {
+            try
+            {
+                await bridges.QueryAsync(g, "hello", ct);
+                result.BridgeAfterSec ??= Math.Round(back.Elapsed.TotalSeconds, 1);
+                var s = HudStateReader.Read(bridge.BridgeDir);
+                result.Phase = s?.Phase;
+                if (Incidents.IncidentAuto.BackVerdict(s, g, DateTime.UtcNow).Resolve) { result.BackAfterSec = Math.Round(back.Elapsed.TotalSeconds, 1); return; }
+                // The bridge answers from the menu or a load: give the game 60 s more from now, once.
+                if (!extended) { budget = TimeSpan.FromSeconds(Math.Max(budget.TotalSeconds, back.Elapsed.TotalSeconds + 60)); extended = true; }
+            }
+            catch (McpException) { }
+            await Task.Delay(1000, ct);
+        }
+    }
+
+    /// <summary>The open outage of this game that holds agent restarts, as the typed refusal; null when none.</summary>
+    public static OutageHold? HeldBy(string game)
+    {
+        try
+        {
+            var i = Incidents.OutageLogic.OpenFor(Incidents.IncidentStore.Read(), game);
+            if (i == null) return null;
+            var info = Incidents.OutageLogic.Info(i);
+            return new OutageHold { Id = i.Id, Phase = info?.Phase ?? "?", Game = game, Reason = info?.Reason, RequestedBy = info?.RequestedByLabel ?? i.RaisedBy };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    public static string HeldText(OutageHold h) =>
+        $"Held by the user's planned restart ({h.Id}, phase {h.Phase}{(h.Reason != null ? $": {h.Reason}" : "")}, announced by {h.RequestedBy}): " +
+        "agent restarts wait until the game is back in. incident_wait tells you when it resolves; then retry.";
+
+    private static CallToolResult Held(string g, string reason, OutageHold held)
+    {
+        var result = new RestartResult
+        {
+            Game = g, Mode = "agent", Status = "held_by_outage", Ok = false, ExitCode = 8, Who = SessionIdentity.Label, Reason = reason,
+            Error = "held_by_outage", HeldBy = held, Note = HeldText(held),
+        };
+        var call = Dto.Result(result, $"{g}: held_by_outage\n{result.Note}");
+        call.IsError = true;
+        return call;
+    }
+
+    /// <summary>mode=user: raise (or join) the outage, show the card, start the runner, answer at once.</summary>
+    private static async Task<CallToolResult> UserRestart(BridgeRegistry bridges, string g, string reason, CancellationToken ct)
+    {
+        var (inc, created) = Incidents.IncidentStore.Update(f =>
+            Incidents.OutageLogic.Raise(f, g, reason, SessionIdentity.Id, SessionIdentity.Label, SessionIdentity.Pid, DateTime.UtcNow));
+        var info = Incidents.OutageLogic.Info(inc) ?? new Incidents.OutageInfo { Game = g, Reason = reason };
+        var notes = new List<string>();
+        if (created && await Incidents.OutageRunner.SetCardAsync(bridges, g, inc.Id, info.Phase, info.Reason, info.RequestedByLabel, false, ct) is { } cardNote) notes.Add(cardNote);
+        var (busy, ready, answer, readinessNote) = await Incidents.OutageRunner.ReadinessAsync(bridges, g, inc.Id, info.RequestedBy, ct);
+        if (readinessNote != null) notes.Add(readinessNote);
+        Incidents.IncidentStore.Update(f => Incidents.IncidentLogic.Find(f, inc.Id) is { IsOpen: true } i && Incidents.OutageLogic.SetParticipants(i, answer, busy, ready, DateTime.UtcNow));
+        Incidents.OutageRunner.Start(bridges, g, inc.Id);
+        static RestartOutageSession View(Incidents.OutageSession s) => new() { Session = s.Session, Label = s.Label, Doing = s.Doing, Lease = s.Lease };
+        var result = new RestartResult
+        {
+            Game = g, Mode = "user", Status = created ? "announced" : "already_announced", Ok = true, ExitCode = 0, Who = SessionIdentity.Label, Reason = info.Reason ?? reason,
+            OutageId = inc.Id, Phase = info.Phase, Busy = busy.Select(View).ToList(), Ready = ready.Select(View).ToList(),
+            Note = (created ? $"Outage {inc.Id} announced: the in-game card tells the user. " : $"The user's restart {inc.Id} was already announced (phase {info.Phase}). ") +
+                   (busy.Count > 0 ? $"Busy: {string.Join(", ", busy.Select(b => b.Label + (b.Doing != null ? $" ({b.Doing})" : "")))}; the HUD stops when they finish or the user presses Restart now. "
+                                   : "Nobody is busy: the HUD stops within seconds. ") +
+                   "The user then restarts game + HUD by hand; the incident resolves (back) once the game is in, or cancelled on Not now. " +
+                   "Wait with incident_wait." + (notes.Count > 0 ? " (" + string.Join("; ", notes) + ")" : ""),
+        };
+        result.Output = notes;
+        return Dto.Result(result, $"{g}: {result.Status} ({inc.Id}, phase {info.Phase})\n{result.Note}");
+    }
+
+    /// <summary>
+    /// Runs tools\restart-hud.ps1 -Game g -Who who -Reason reason -WaitSec n [-StopOnly] [-Force] [-Kind kind] [-Outage id]
+    /// and returns its exit code and output. -Kind and -Outage go only to a script that declares them (an older checkout).
+    /// </summary>
+    public static async Task<(int Code, List<string> Output)> RunRestartScriptAsync(string game, string who, string reason, int waitSec,
+        bool stopOnly, bool force, string kind, string? outageId, CancellationToken ct)
+    {
+        var repo = SessionIdentity.RepoRoot() ?? throw new McpException("tools\\restart-hud.ps1 not found: this server isn't running from the scaffolding repo (HEXILE_REPO unset).");
+        var script = Path.Combine(repo, "tools", "restart-hud.ps1");
+        var psi = new ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+            WorkingDirectory = repo,
+            RedirectStandardInput = true,   // closed below: the script's children must not inherit our (always open) stdin
+        };
+        foreach (var arg in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Game", game, "-Who", who, "-Reason", reason, "-WaitSec", waitSec.ToString() })
+            psi.ArgumentList.Add(arg);
+        if (stopOnly) psi.ArgumentList.Add("-StopOnly");
+        if (force) psi.ArgumentList.Add("-Force");
+        var declared = ScriptParams(script);
+        if (declared.Contains("Kind")) { psi.ArgumentList.Add("-Kind"); psi.ArgumentList.Add(kind); }
+        if (outageId != null && declared.Contains("Outage")) { psi.ArgumentList.Add("-Outage"); psi.ArgumentList.Add(outageId); }
+
+        using var proc = Process.Start(psi) ?? throw new McpException("Could not start powershell.exe.");
+        proc.StandardInput.Close();
+        var stdout = proc.StandardOutput.ReadToEndAsync(ct);
+        var stderr = proc.StandardError.ReadToEndAsync(ct);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(waitSec + 180));   // the restart itself: grace 15 s, start, 8 s alive check, focus
+        try { await proc.WaitForExitAsync(timeout.Token); }
+        catch (OperationCanceledException)
+        {
+            try { proc.Kill(entireProcessTree: true); } catch { }
+            throw new McpException($"restart-hud.ps1 gave no result within {waitSec + 180} s.");
+        }
+        var output = (await stdout).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => l.TrimEnd('\r')).ToList();
+        var err = await stderr;
+        if (!string.IsNullOrWhiteSpace(err)) output.Add("stderr: " + err.Trim());
+        return (proc.ExitCode, output);
+    }
+
+    /// <summary>The parameters restart-hud.ps1 declares among those added later (Kind, Outage): "[...]$Name" in its text.</summary>
+    private static HashSet<string> ScriptParams(string script)
+    {
+        try
+        {
+            var text = File.ReadAllText(script);
+            return new[] { "Kind", "Outage" }.Where(n => System.Text.RegularExpressions.Regex.IsMatch(text, @"\]\s*\$" + n + @"\b")).ToHashSet();
+        }
+        catch (IOException) { return []; }
     }
 }

@@ -155,7 +155,9 @@ public sealed class RestartInfo
 public sealed class RestartResult
 {
     public string Game { get; set; } = "";
-    /// <summary>restarted | stopped | denied | blocked | merged | cancelled | error | timeout.</summary>
+    /// <summary>agent | user.</summary>
+    public string? Mode { get; set; }
+    /// <summary>restarted | stopped | denied | blocked | merged | cancelled | error | timeout | held_by_outage; mode=user: announced | already_announced.</summary>
     public string Status { get; set; } = "";
     public bool Ok { get; set; }
     public int ExitCode { get; set; }
@@ -163,10 +165,49 @@ public sealed class RestartResult
     public string? Reason { get; set; }
     /// <summary>What tools\restart-hud.ps1 printed (coordination, stop, start, focus).</summary>
     public List<string> Output { get; set; } = [];
-    /// <summary>Seconds until the new HUD's bridge answered again (null: not back within the wait).</summary>
+    /// <summary>Seconds until the new HUD was back: its bridge answers and hud-state.json says the game is in (no file:
+    /// the answer alone). Null: not back within the wait.</summary>
     public double? BackAfterSec { get; set; }
+    /// <summary>Seconds until the new HUD's bridge answered at all (it may still be at the menu or loading: see phase).</summary>
+    public double? BridgeAfterSec { get; set; }
+    /// <summary>hud-state.json's phase when last read; mode=user: the outage's phase (announced | holding | down | waitingGame | back | cancelled).</summary>
+    public string? Phase { get; set; }
     public string? Note { get; set; }
     /// <summary>The restart's incident on the board (hud-restart, or bridge-down for a stop), raised when the HUD started stopping.</summary>
     public IncidentView? Incident { get; set; }
+    /// <summary>held_by_outage when the user's planned restart refused this one.</summary>
+    public string? Error { get; set; }
+    /// <summary>The outage that holds this restart (Error held_by_outage).</summary>
+    public OutageHold? HeldBy { get; set; }
+    /// <summary>mode=user: the outage incident's id.</summary>
+    public string? OutageId { get; set; }
+    /// <summary>mode=user: sessions doing something, holding a lease or with an attention item: the HUD stops when they finish (or on Restart now).</summary>
+    public List<RestartOutageSession>? Busy { get; set; }
+    /// <summary>mode=user: every other connected session.</summary>
+    public List<RestartOutageSession>? Ready { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>The typed refusal while the user's planned restart is open: {error: held_by_outage, id, phase}.</summary>
+public sealed class OutageHold
+{
+    public string Error { get; set; } = "held_by_outage";
+    /// <summary>The outage incident's id.</summary>
+    public string Id { get; set; } = "";
+    /// <summary>announced | holding | down | waitingGame.</summary>
+    public string Phase { get; set; } = "";
+    public string? Game { get; set; }
+    public string? Reason { get; set; }
+    public string? RequestedBy { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>One session in an outage's readiness: busy (doing, lease, attention item) or ready.</summary>
+public sealed class RestartOutageSession
+{
+    public string Session { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string? Doing { get; set; }
+    public string? Lease { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }

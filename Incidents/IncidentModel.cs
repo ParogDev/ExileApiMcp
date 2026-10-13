@@ -21,7 +21,7 @@ public sealed class Incident
 {
     /// <summary>i-&lt;yyyyMMddHHmmss&gt;-&lt;4 hex&gt;</summary>
     public string Id { get; set; } = "";
-    /// <summary>bridge-down | hud-restart | deploy | mcp-down | ports-reserved | custom</summary>
+    /// <summary>bridge-down | hud-restart | deploy | mcp-down | ports-reserved | outage | custom</summary>
     public string Kind { get; set; } = "custom";
     /// <summary>poe1 | poe2 | machine</summary>
     public string Scope { get; set; } = "machine";
@@ -62,6 +62,9 @@ public sealed class Incident
 public sealed class IncidentResponse
 {
     public string Who { get; set; } = "";
+    /// <summary>The answering session's id (SessionIdentity.ResponseId; the Claude Code hook writes the Claude session id).
+    /// A session's new response replaces the one with the same id; entries without one (older writers) match by Who.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)] public string? SessionId { get; set; }
     /// <summary>ok | blocked | waiting</summary>
     public string Status { get; set; } = "ok";
     public string? Note { get; set; }
@@ -83,7 +86,7 @@ public sealed class IncidentDraft
     /// <summary>Extra fields to set (ownerPid, cause, plugin...).</summary>
     public Dictionary<string, JToken?> Fields { get; set; } = [];
 
-    public static readonly string[] Kinds = ["bridge-down", "hud-restart", "deploy", "mcp-down", "ports-reserved", "custom"];
+    public static readonly string[] Kinds = ["bridge-down", "hud-restart", "deploy", "mcp-down", "ports-reserved", "outage", "custom"];
     public static readonly string[] Scopes = ["poe1", "poe2", "machine"];
 
     /// <summary>The dedupe key when none is given, as tools\incident-lib.ps1 makes it: kind:scope; custom: custom:&lt;title, lower case&gt;.</summary>
