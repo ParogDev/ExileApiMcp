@@ -43,6 +43,10 @@ public static class HealthReportTools
         var desk = DesktopState.Read();
         o["desktop"] = desk;
         sb.AppendLine(desk["warning"] is { } w ? $"Screen: {w}" : "Screen: display on, game in front.");
+        var reflectionFindings = await ReflectionPreflight(bridges, game, o, sb, ct);
+        // Set now so every early return below (trace skipped, not started, interrupted, bridge unreachable) keeps them;
+        // the full path replaces it with a list that starts with the same findings.
+        if (reflectionFindings.Count > 0) o["findings"] = new JArray(reflectionFindings);
 
         // A trace with the game behind another window measures a hidden overlay: check first instead of tracing and warning after.
         if (await FocusGate.WaitAsync(bridges, game, "hud_health_report", waitForGameSec, ct) is { } notInFront)
@@ -97,7 +101,7 @@ public static class HealthReportTools
         string S(string k, string s = "avg") => r[k]?[s]?.ToString() ?? "-";
         var fps = r["hudFps"]?.Value<double>() ?? 0;
         sb.AppendLine($"Frames: {fps} fps, interval {S("frameIntervalMs")} ms (max {S("frameIntervalMs", "max")}, sd {S("frameIntervalMs", "sd")}); work {S("updateMs")} ms = plugins {S("pluginsMs")} + HUD core {S("coreMs")}");
-        var findings = new List<string>();
+        var findings = new List<string>(reflectionFindings);
         // A measurement with the game in the background measures a hidden overlay and, often, a game capped to 30 fps.
         if (r["foreground"]?["share"]?.Value<double?>() is { } share && share < 0.95)
         {
@@ -183,6 +187,117 @@ public static class HealthReportTools
         actions.Add(Action("Check drawing lag", "overlay_accuracy", new JObject()));
         o["actions"] = actions;
         return (o, sb.ToString());
+    }
+
+    /// <summary>
+    /// The bridge's reflection preflight (hello.reflection): HUD internals the bridge reaches by reflection, checked when it
+    /// loaded. Copied into the report as reflection, one text line, and a finding per broken link. Older bridges have none.
+    /// </summary>
+    private static async Task<List<string>> ReflectionPreflight(BridgeRegistry bridges, string? game, JObject o, StringBuilder sb, CancellationToken ct)
+    {
+        var findings = new List<string>();
+        try
+        {
+            var (_, hello) = await bridges.QueryAsync(game, "hello", ct);
+            if (ReflectionOf(hello, out var unavailable) is not { } r)
+            {
+                // No preflight to read is itself worth saying: the report never goes quiet about drift it couldn't check.
+                o["reflectionError"] = unavailable;
+                sb.AppendLine($"Reflection preflight: unavailable ({unavailable}).");
+                findings.Add(UnavailableFinding(unavailable!));
+                return findings;
+            }
+            // One source: report.reflection (HealthReport.Reflection) is this object, and the text line and the findings are
+            // derived from it (ReflectionFindings), so they can't disagree.
+            o["reflection"] = r;
+            sb.AppendLine(ReflectionLine(r));
+            findings.AddRange(ReflectionFindings(r));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // The report goes on without it; the failure is in the report, not swallowed.
+            o["reflectionError"] = $"{ex.GetType().Name}: {ex.Message}";
+            sb.AppendLine($"Reflection preflight: hello failed ({ex.GetType().Name}: {ex.Message})");
+        }
+        return findings;
+    }
+
+    /// <summary>The report's one line on hello.reflection.</summary>
+    public static string ReflectionLine(JObject r)
+    {
+        var broken = r["broken"]?.Value<int?>() ?? 0;
+        var blocked = r["blocked"]?.Value<int?>() ?? 0;
+        var changed = r["changedFrom"]?.Value<string>() is { } from ? $" (HUD build changed since the last check, was {from})" : "";
+        // No targets checked: the bridge's preflight itself failed (its problems say why), never "ok".
+        if ((r["targets"]?.Value<int?>() ?? 0) == 0)
+            return $"Reflection preflight: did not run ({string.Join("; ", (r["problems"] as JArray ?? []).Select(x => x.ToString()).DefaultIfEmpty("no targets and no reason given"))}).";
+        return broken + blocked == 0
+            ? $"Reflection preflight: {r["ok"]}/{r["targets"]} HUD internals ok{changed}."
+            : $"Reflection preflight: {broken} broken, {blocked} blocked of {r["targets"]} HUD internals{changed}.";
+    }
+
+    /// <summary>hello.reflection, or null with why there is none: hello answered an error object, or the bridge has no
+    /// reflection field (a build from before the preflight).</summary>
+    public static JObject? ReflectionOf(JToken? hello, out string? unavailable)
+    {
+        unavailable = null;
+        if (hello is not JObject h) { unavailable = $"hello answered {hello?.Type.ToString() ?? "nothing"}, not an object"; return null; }
+        if (h["error"] is { Type: not JTokenType.Null } e)
+        {
+            var msg = h["message"]?.Value<string>();
+            unavailable = $"hello returned an error: {(e is JObject eo ? eo.ToString(Newtonsoft.Json.Formatting.None) : e.ToString())}{(msg != null ? $" ({msg})" : "")}";
+            return null;
+        }
+        if (h["reflection"] is JObject r) return r;
+        unavailable = h["reflection"] is null or { Type: JTokenType.Null }
+            ? "bridge has no reflection field (predates preflight)"
+            : $"hello.reflection is {h["reflection"]!.Type}, not an object";
+        return null;
+    }
+
+    public static string UnavailableFinding(string why) =>
+        $"bridge reflection preflight unavailable: {why}; HUD-update drift isn't checked until the bridge reports it (update / reload the bridge, then bridge_status)";
+
+    /// <summary>One finding per broken or blocked link of hello.reflection, read from the typed counts and rows (each
+    /// row's status), never from the problem text; not_now rows are not findings. A preflight that checked no targets
+    /// failed (its problems say why) and is a finding too.</summary>
+    public static List<string> ReflectionFindings(JObject r)
+    {
+        var findings = new List<string>();
+        var problems = (r["problems"] as JArray ?? []).Select(x => x.ToString()).ToList();
+        if ((r["targets"]?.Value<int?>() ?? 0) == 0)
+        {
+            foreach (var p in problems)
+                findings.Add($"bridge reflection preflight: {p} (bridge method reflection.preflight refresh=true re-runs it; the bridge's Shared/Preflight.cs)");
+            if (findings.Count == 0)
+                findings.Add("bridge reflection preflight checked no targets and gave no reason: run bridge method reflection.preflight refresh=true");
+            return findings;
+        }
+        const string fix = ": fix the link in the bridge's Shared/HudLinks.cs (rows: bridge method reflection.preflight)";
+        var bad = (r["broken"]?.Value<int?>() ?? 0) + (r["blocked"]?.Value<int?>() ?? 0);
+        if (r["links"] is JArray links)
+        {
+            // Broken first, then blocked (the bridge's order).
+            foreach (var row in links.OfType<JObject>().Where(x => (string?)x["status"] is "broken" or "blocked")
+                         .OrderBy(x => (string?)x["status"] == "broken" ? 0 : 1))
+            {
+                var id = (string?)row["id"];
+                findings.Add((string?)row["status"] == "broken"
+                    ? $"bridge reflection link {id} BROKEN: {row["type"]}: expected {row["expected"]}; {row["found"]} (breaks {row["feature"]}){fix}"
+                    : $"bridge reflection link {id} blocked: {row["found"]}{fix}");
+            }
+            if (findings.Count < bad)
+                findings.Add($"bridge reflection preflight counts {bad} broken/blocked link(s) but hello lists {findings.Count} of them: run bridge method reflection.preflight for every row");
+        }
+        else
+        {
+            // A bridge whose hello carries no rows: its problems are ordered broken, blocked, not_now, so the first
+            // broken + blocked of them are the findings.
+            foreach (var p in problems.Take(bad)) findings.Add($"bridge reflection link {p}{fix}");
+            if (problems.Count < bad)
+                findings.Add($"bridge reflection preflight counts {bad} broken/blocked link(s) but names {problems.Count}: run bridge method reflection.preflight for every row");
+        }
+        return findings;
     }
 
     private static JObject Action(string label, string tool, JObject args) => new() { ["label"] = label, ["tool"] = tool, ["args"] = args };

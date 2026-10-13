@@ -485,6 +485,54 @@ public sealed class BridgeHello
     public string? BridgeBuild { get; set; }
     public bool? InGame { get; set; }
     public List<string>? Unsupported { get; set; }
+    /// <summary>The bridge's HUD-update drift preflight of this load (bridge Shared/Preflight.cs); absent on older bridges.</summary>
+    public BridgeReflectionPreflight? Reflection { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>
+/// Every private/internal reflection target of the bridge checked against this HUD build when the bridge loaded.
+/// problems lists each link that isn't ok ("id BROKEN: type: expected ...; what is there instead (breaks feature)",
+/// blocked, not now); the full rows come from the bridge method reflection.preflight.
+/// </summary>
+public sealed class BridgeReflectionPreflight
+{
+    /// <summary>HUD assembly version + module id and the .NET runtime.</summary>
+    public string? Stamp { get; set; }
+    /// <summary>The previous check's stamp when it differs: a HUD or .NET update since.</summary>
+    public string? ChangedFrom { get; set; }
+    public DateTimeOffset? CheckedAt { get; set; }
+    public double? Ms { get; set; }
+    public int? Targets { get; set; }
+    public int? Ok { get; set; }
+    /// <summary>Gone after an update: the feature named in its problem line doesn't work.</summary>
+    public int? Broken { get; set; }
+    /// <summary>There, but its value isn't set yet (e.g. the logger before the HUD made it).</summary>
+    public int? NotNow { get; set; }
+    /// <summary>Needs a broken link.</summary>
+    public int? Blocked { get; set; }
+    public List<string>? Problems { get; set; }
+    /// <summary>Links broken at the previous load's check that work now.</summary>
+    public List<string>? Recovered { get; set; }
+    /// <summary>The rows that aren't ok (hello) or every row (reflection.preflight); absent on bridges before the typed rows.</summary>
+    public List<BridgeReflectionLink>? Links { get; set; }
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>One reflection target of the bridge's preflight.</summary>
+public sealed class BridgeReflectionLink
+{
+    public string? Id { get; set; }
+    /// <summary>ok | broken (gone after an update) | not_now (there, value not set yet) | blocked (needs a broken link).</summary>
+    public string? Status { get; set; }
+    public string? Type { get; set; }
+    public string? Member { get; set; }
+    public string? Expected { get; set; }
+    /// <summary>Broken: what the type has instead; blocked: which link it needs.</summary>
+    public string? Found { get; set; }
+    public string? Note { get; set; }
+    /// <summary>What stops working while it is broken.</summary>
+    public string? Feature { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 

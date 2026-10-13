@@ -129,6 +129,10 @@ public sealed class HealthReport
     public PipelineTraceResult? Trace { get; set; }
     /// <summary>Set instead of trace when the game wasn't in front, so no trace ran (Hud/FocusGate.cs): {error: game_not_in_front, message, waitedSec}.</summary>
     public JsonElement? Skipped { get; set; }
+    /// <summary>The bridge's reflection preflight (hello.reflection): HUD internals the bridge reaches that a HUD update broke.</summary>
+    public BridgeReflectionPreflight? Reflection { get; set; }
+    /// <summary>Why reflection is missing: the hello that carries it failed.</summary>
+    public string? ReflectionError { get; set; }
     public List<string>? Findings { get; set; }
     public List<PerfPlugin>? Plugins { get; set; }
     public List<PerfLint>? Lint { get; set; }
