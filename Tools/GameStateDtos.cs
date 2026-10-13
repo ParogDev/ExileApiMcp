@@ -516,6 +516,10 @@ public sealed class BridgeReflectionPreflight
     public List<string>? Recovered { get; set; }
     /// <summary>The rows that aren't ok (hello) or every row (reflection.preflight); absent on bridges before the typed rows.</summary>
     public List<BridgeReflectionLink>? Links { get; set; }
+    /// <summary>True when the check itself failed (nothing checked: the zero counts are unknown, never "0 broken"); absent otherwise.</summary>
+    public bool? Failed { get; set; }
+    /// <summary>Why the check failed (with <see cref="Failed"/>).</summary>
+    public string? Error { get; set; }
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
