@@ -27,6 +27,8 @@ public static class IncidentAuto
         try
         {
             if (bridge.Game is not ("poe1" or "poe2")) return Suffix(null);
+            // The user's planned restart is under way: its outage incident already says why the bridge is down.
+            if (OutageLogic.OpenFor(IncidentStore.Read(), bridge.Game) != null) return Suffix(bridge.Game);
             var facts = BridgeDiagnosis.Gather(bridge, error);
             if (BridgeDiagnosis.Diagnose(facts) is { } v) RaiseVerdict(v, bridge.Game);
             return Suffix(bridge.Game);
@@ -111,12 +113,48 @@ public static class IncidentAuto
             if (RestartStopping(bridge)) keys = [$"bridge-down:{bridge.Game}"];
             var open = IncidentStore.Read().Incidents.Where(i => i.IsOpen && keys.Contains(i.Key)).ToList();
             if (open.Count == 0) return;
-            var note = $"the {bridge.Game} bridge answers again" + (open.FirstOrDefault(i => i.Kind == "hud-restart")?.RaisedAt is { } at
+            // "Back" means the game is in, not just a bridge that answers from the login screen (hud-state.json; no file:
+            // an older bridge, back as before).
+            var (resolve, keepTitle, why) = BackVerdict(HudStateReader.Read(bridge.BridgeDir), bridge.Game, now);
+            if (!resolve)
+            {
+                IncidentStore.Update(f =>
+                {
+                    foreach (var i in f.Incidents.Where(i => i.IsOpen && keys.Contains(i.Key)))
+                    {
+                        if (i.Title == keepTitle) continue;
+                        i.Title = keepTitle!;
+                        i.Detail = $"The {bridge.Game} bridge answers again, but hud-state.json says the game isn't in yet: this resolves once it is (or after 30 min at the menu).";
+                        i.Eta = null;
+                    }
+                    return 0;
+                });
+                return;
+            }
+            var note = why ?? $"the {bridge.Game} bridge answers again and the game is in" + (open.FirstOrDefault(i => i.Kind == "hud-restart")?.RaisedAt is { } at
                 ? $" ({(int)(now - at).TotalSeconds} s after the restart was raised)" : "");
             IncidentStore.ResolveKeys(keys, note);
             Console.Error.WriteLine($"[Incidents] resolved {string.Join(", ", open.Select(i => i.Key))}: {note}");
         }
         catch (Exception ex) { Console.Error.WriteLine($"[Incidents] resolving {bridge.Game} failed: {ex.Message}"); }
+    }
+
+    /// <summary>How long a HUD that is back but sits at login / character select keeps its bridge-down / hud-restart incident open.</summary>
+    public static readonly TimeSpan MenuGrace = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// Is a bridge that answers again "back"? Yes when the game is in (hud-state.json inGame / ready), when there is no
+    /// file or its heartbeat is over a minute old (an older bridge: back on the answer, as before), and after 30 min at
+    /// the menu (with a note). Otherwise no, with the title to keep the incident under: "HUD back, game not in yet (phase X)".
+    /// </summary>
+    public static (bool Resolve, string? KeepTitle, string? Note) BackVerdict(HudStateFile? s, string game, DateTime now)
+    {
+        if (s == null || s.IsInGame || s.Heartbeat is not { } hb || now - hb > TimeSpan.FromMinutes(1)) return (true, null, null);
+        var since = s.Since is { } t ? now - t : TimeSpan.Zero;
+        if (s.Phase == "menu" && since > MenuGrace)
+            return (true, null, $"the {game} HUD is back, but the game stayed at login / character select for {(int)since.TotalMinutes} min: not holding the incident for it");
+        var G = game == "poe1" ? "PoE1" : game == "poe2" ? "PoE2" : game;
+        return (false, $"{G} HUD back, game not in yet (phase {s.Phase ?? "?"})", null);
     }
 
     /// <summary>restart-state.json says phase "stopping", written in the last 3 minutes.</summary>
@@ -149,6 +187,7 @@ public static class IncidentAuto
             var G = bridge.Game == "poe1" ? "PoE1" : "PoE2";
             var key = stopOnly ? $"bridge-down:{bridge.Game}" : $"hud-restart:{bridge.Game}";
             var board = IncidentStore.Read();
+            if (OutageLogic.OpenFor(board, bridge.Game) != null) return null;   // the user's planned restart: its outage incident tells the sessions
             var open = board.Incidents.FirstOrDefault(i => i.IsOpen && i.Key == key);
             if (open != null) return open;
             // Once per restart: an incident for this restart that was resolved already (the script's, or ours) stays resolved.

@@ -14,6 +14,12 @@ namespace ExileApiMcp.Hosting;
 public sealed record CallerIdentity(string Label, string? Branch, string? Cwd)
 {
     public const string AgentHeader = "X-Hexile-Agent", BranchHeader = "X-Hexile-Branch", CwdHeader = "X-Hexile-Cwd";
+    /// <summary>Optional: the client's own session id (the Claude Code session id, as the incident hook knows it), so the
+    /// caller's incident responses match the hook's. Absent: SessionIdentity.IdOf names the caller.</summary>
+    public const string SessionHeader = "X-Hexile-Session";
+
+    /// <summary>The client's session id from <see cref="SessionHeader"/>, when the caller sent one.</summary>
+    public string? ClientSessionId { get; init; }
 
     /// <summary>The shared server's own machinery calling as a named caller (the F8 route-dispatcher), not an agent: its
     /// session.hello says role infra, so the HUD's agent count leaves it out.</summary>
@@ -60,11 +66,11 @@ public sealed record CallerIdentity(string Label, string? Branch, string? Cwd)
     }
 
     /// <summary>The caller named by a request's headers, or null when it names none (or only garbage).</summary>
-    public static CallerIdentity? FromHeaders(string? agent, string? branch, string? cwd)
+    public static CallerIdentity? FromHeaders(string? agent, string? branch, string? cwd, string? session = null)
     {
         var label = Clean(agent, 40);
         if (label == null) return null;
-        return new CallerIdentity(label, Clean(branch, 200), Clean(cwd, 400));
+        return new CallerIdentity(label, Clean(branch, 200), Clean(cwd, 400)) { ClientSessionId = Clean(session, 100) };
     }
 
     private static string? Clean(string? raw, int max)
@@ -84,7 +90,7 @@ public static class CallerIdentityMiddleware
     public static IApplicationBuilder UseCallerIdentity(this IApplicationBuilder app) => app.Use(async (ctx, next) =>
     {
         var h = ctx.Request.Headers;
-        var caller = CallerIdentity.FromHeaders(h[CallerIdentity.AgentHeader], h[CallerIdentity.BranchHeader], h[CallerIdentity.CwdHeader]);
+        var caller = CallerIdentity.FromHeaders(h[CallerIdentity.AgentHeader], h[CallerIdentity.BranchHeader], h[CallerIdentity.CwdHeader], h[CallerIdentity.SessionHeader]);
         if (caller == null) { await next(ctx); return; }
         // Only POSTs count as an open call (a tool call, a blocking wait): a GET is a long-lived stream that would keep its
         // caller present forever.

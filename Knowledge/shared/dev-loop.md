@@ -27,6 +27,14 @@ How a HUD turns plugin source into running code, and the fastest verified loop f
 - The user sees the request on the guide card with the blockers and can press **Restart now** (over them) or **Not now** (`denied`: say in chat what you need the restart for, or retry later). A second request **merges** into one already granted: wait for the HUD to come back, don't restart again.
 - `hud_sessions` shows who else is connected and what they do. Before a before/after comparison or a piloted session that spans several calls, `hud_lease acquire` keeps others' restarts away; release it when done.
 - While the HUD is down, bridge calls fail with "the HUD is being restarted by X (reason), retry": wait ~20 s instead of debugging.
+- "Back" means the bridge answers **and the game is in** (`hud-state.json` inGame): `hud_restart` reports `backAfterSec` only then (`bridgeAfterSec` when the bridge answered from the menu), and restart incidents stay open as "HUD back, game not in yet (phase X)" until it is.
+
+## Not now vs broken
+
+The HUD being briefly unavailable is normal. A call that hits it returns `error: hud_not_now` with `availability {state, reason, phase, sinceSec, from, expectedBackSec, waitWith, detail}`:
+- `loading` (a load screen; the bridge answers JSON-RPC -32010 after ~1.5 s, ordinary calls already waited up to 15 s for `area.ready`), `starting` (usually ~35 s, up to ~100 s, mostly ExileCore2's preload before plugins compile; `expectedBackSec` from the bridge's measured startup times when it has them; broken `stuckStarting` only after 150 s without a listener), `restarting`, `user-restart` (the user's planned restart: `outageId`), `menu` (login / character select). Wait with what `waitWith` names and never `guide.log` these (the user sees the game's own screen; the bridge posts outage and long-load toasts itself); waiting tools (`await_change`, guided steps, `observe_wait`, `pubsub_wait`, queue waits) pause across these by themselves.
+- `error: hud_broken` is not normal: `stuckLoading` (a load over 60 s), `gameGone`, `hudGone` (no HUD process and nothing announced), `frozen` (main thread or heartbeat silent). The detail names the broken link; report it or ask the user.
+- The user restarting game + HUD themselves (patch, crash): `hud_restart mode=user` announces it on the board (`outage:<game>`) and the in-game card (busy and ready sessions), stops the HUD only on the user's Restart now (an 8 s countdown with Cancel first), and resolves `back` once the game is in. `hud_restart` (agent mode) reports `hudAliveSec` / `bridgeAfterSec` / `inGameAfterSec` after the HUD started: alive (~8 s) is not back; the listener comes at ~15-100 s. Meanwhile agent restarts and bridge deploys are refused with `held_by_outage {id, phase}`: `incident_wait`, then retry.
 
 ## The setting reloads depend on
 **Core → Plugin Settings → "Avoid locking plugin dlls"** is off by default on both HUDs.

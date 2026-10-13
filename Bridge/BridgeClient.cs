@@ -242,7 +242,8 @@ public sealed class BridgeClient : IDisposable
                     var id = msg["id"]?.Value<long>() ?? 0;
                     if (!_pending.TryRemove(id, out var tcs)) continue;
                     if (msg["error"] is { } error)
-                        tcs.TrySetException(new BridgeException(Game, error["message"]?.Value<string>() ?? "unknown bridge error"));
+                        tcs.TrySetException(new BridgeException(Game, error["message"]?.Value<string>() ?? "unknown bridge error",
+                            error["code"]?.Type == JTokenType.Integer ? error["code"]!.Value<int>() : null, error["data"] as JObject));
                     else
                         tcs.TrySetResult(msg["result"] ?? JValue.CreateNull());
                 }
@@ -284,10 +285,23 @@ public sealed class BridgeClient : IDisposable
     }
 }
 
-/// <summary>The bridge answered with an error, or a request timed out.</summary>
-public class BridgeException(string game, string message) : Exception($"[{game}] {message}")
+/// <summary>The bridge answered with an error, or a request timed out. A JSON-RPC error keeps its code and data: the
+/// bridge's listener answers a request the HUD can't serve now with -32010 (data.reason "hud_loading": a load screen) and
+/// its 10 s timeout with data.reason "hud_timeout" (Bridge/HudState.cs reads what they mean).</summary>
+public class BridgeException(string game, string message, int? code = null, JObject? data = null) : Exception($"[{game}] {message}")
 {
+    /// <summary>The listener's "the HUD is on a load screen" answer: the request was dropped unprocessed, so a resend is safe.</summary>
+    public const int HudLoadingCode = -32010;
+
     public string Game { get; } = game;
+    /// <summary>The JSON-RPC error code, when the bridge sent one.</summary>
+    public int? Code { get; } = code;
+    /// <summary>The JSON-RPC error's data object, when the bridge sent one.</summary>
+    public JObject? ErrorData { get; } = data;
+    /// <summary>data.reason: hud_loading | hud_timeout (newer bridges), else null.</summary>
+    public string? Reason => ErrorData?["reason"]?.Type == JTokenType.String ? ErrorData["reason"]!.ToString() : Code == HudLoadingCode ? "hud_loading" : null;
+    /// <summary>The HUD was on a load screen and the bridge dropped the request unprocessed (safe to send again).</summary>
+    public bool IsHudLoading => Code == HudLoadingCode || Reason == "hud_loading";
 }
 
 /// <summary>The HUD bridge for a game is not reachable (HUD closed, plugin disabled, wrong dir).</summary>

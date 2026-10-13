@@ -57,6 +57,10 @@ public sealed class IncidentView
 public sealed class IncidentResponseView
 {
     public string Who { get; set; } = "";
+    /// <summary>The answering session's id (absent on responses written before ids existed).</summary>
+    public string? SessionId { get; set; }
+    /// <summary>Who, unique among the responses ("Claude Desktop (2)" when two sessions share a label).</summary>
+    public string? Display { get; set; }
     /// <summary>ok | blocked | waiting</summary>
     public string Status { get; set; } = "";
     public string? Note { get; set; }

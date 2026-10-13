@@ -36,6 +36,18 @@ public static class SessionIdentity
     /// carry over like after a hot swap), and two checkouts on the same branch stay two sessions.</summary>
     public static string IdOf(CallerIdentity c) => $"{c.Label}#http-{Hash8(c.Cwd?.Replace('/', '\\').TrimEnd('\\') ?? c.Label)}";
 
+    /// <summary>
+    /// The id this session's incident responses carry (IncidentResponse.SessionId), so its new answer replaces its own and
+    /// not another session's with the same label. The client's own session id when it gives one: a shared-server caller's
+    /// X-Hexile-Session header, or, for a stdio server, CLAUDE_CODE_SESSION_ID / CLAUDE_SESSION_ID in the environment Claude
+    /// Code started it with (the id the incident hook uses). Else <see cref="Id"/>. Gap: Claude Desktop shares one stdio
+    /// server among its conversations and sends no per-conversation id, so they answer as one session.
+    /// </summary>
+    public static string ResponseId => CallerIdentity.Current is { } c ? c.ClientSessionId ?? IdOf(c) : (Kind == "mcp" ? ClientSessionEnv : null) ?? _id;
+
+    private static readonly string? ClientSessionEnv =
+        new[] { "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID" }.Select(Environment.GetEnvironmentVariable).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))?.Trim();
+
     private static string Hash8(string s)
     {
         var h = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(s.ToLowerInvariant()));

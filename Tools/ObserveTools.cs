@@ -79,6 +79,7 @@ public static partial class ObserveTools
         CancellationToken ct = default)
     {
         var until = DateTime.UtcNow.AddSeconds(Math.Clamp(timeoutSec, 5, 3600));
+        var pause = new HudPause();   // a "not now" (load screen, restart) pauses the wait instead of failing it
         var wide = kinds is { Length: > 0 } ? kinds.ToHashSet() : null;
         bool Noteworthy(ObserveEvent e) => wide != null
             ? wide.Contains(e.Kind) || (wide.Contains("ui-new") && e.Kind == "ui" && e.FirstSeen == true)
@@ -87,7 +88,7 @@ public static partial class ObserveTools
         {
             JToken r;
             try { (_, r) = await bridges.CallAsync(game, "observe.events", new JObject { ["since"] = since, ["limit"] = 500 }, ct); }
-            catch (McpException) when (DateTime.UtcNow < until) { await Task.Delay(5000, ct); continue; }   // HUD restarting
+            catch (McpException ex) when (pause.Holds(ex) || DateTime.UtcNow < until) { if (pause.Holds(ex)) until = pause.Extend(until, TimeSpan.FromMilliseconds(5000)); await Task.Delay(5000, ct); continue; }   // HUD restarting; a "not now" (load screen, restart) pauses the wait
             Need(r);
             var result = Dto.From<ObserveEventsResult>(r);
             if (!result.Enabled)

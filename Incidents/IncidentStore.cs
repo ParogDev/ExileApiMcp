@@ -75,15 +75,43 @@ public static class IncidentLogic
         if (string.IsNullOrWhiteSpace(d.Title)) throw new ArgumentException("title is empty: one line saying what is wrong");
     }
 
-    /// <summary>One response per session: a session's new response replaces its previous one.</summary>
-    public static IncidentResponse Respond(Incident i, string who, string status, string? note, DateTime? until, DateTime now)
+    /// <summary>
+    /// One response per session: a session's new response replaces its previous one. With a session id, that is the
+    /// response with the same id (plus an older id-less one under the same label, written before ids existed); without
+    /// one, the id-less response with the same label. Two sessions sharing a label (two Claude Desktop conversations,
+    /// two servers on one branch) keep a response each; <see cref="DisplayNames"/> tells them apart.
+    /// </summary>
+    public static IncidentResponse Respond(Incident i, string who, string status, string? note, DateTime? until, DateTime now, string? sessionId = null)
     {
         if (status is not ("ok" or "blocked" or "waiting")) throw new ArgumentException($"status '{status}' is not ok | blocked | waiting");
-        i.Responses.RemoveAll(r => string.Equals(r.Who, who, StringComparison.OrdinalIgnoreCase));
-        var r = new IncidentResponse { Who = who, Status = status, Note = note, Until = until, At = now };
+        var id = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId.Trim();
+        i.Responses.RemoveAll(r => id != null && r.SessionId == id
+                                   || r.SessionId == null && string.Equals(r.Who, who, StringComparison.OrdinalIgnoreCase));
+        var r = new IncidentResponse { Who = who, SessionId = id, Status = status, Note = note, Until = until, At = now };
         i.Responses.Add(r);
         return r;
     }
+
+    /// <summary>
+    /// Display names unique per label, in order: the first session with a label shows it plain, the next different session
+    /// with the same label "Label (2)", then "Label (3)". Entries without an id are their label's own session each.
+    /// </summary>
+    public static List<string> DisplayNames(IReadOnlyList<(string Label, string? Id)> items)
+    {
+        var seen = new Dictionary<string, List<string?>>(StringComparer.OrdinalIgnoreCase);
+        var names = new List<string>(items.Count);
+        foreach (var (label, id) in items)
+        {
+            if (!seen.TryGetValue(label, out var ids)) seen[label] = ids = [];
+            var k = id != null ? ids.IndexOf(id) : -1;
+            if (k < 0) { ids.Add(id); k = ids.Count - 1; }
+            names.Add(k == 0 ? label : $"{label} ({k + 1})");
+        }
+        return names;
+    }
+
+    /// <summary>The responses' display names (<see cref="DisplayNames"/>), in the same order.</summary>
+    public static List<string> ResponseNames(Incident i) => DisplayNames(i.Responses.Select(r => (r.Who, r.SessionId)).ToList());
 
     /// <summary>Resolve an open incident (false when it was resolved already).</summary>
     public static bool Resolve(Incident i, string who, string? note, DateTime now)
@@ -115,7 +143,11 @@ public static class IncidentLogic
         var parts = new List<string> { $"by {i.RaisedBy}, {Ago(i.RaisedAt, now)}" };
         if (i.Eta is { } eta) parts.Add(eta > now ? $"eta {Math.Max(1, (int)Math.Ceiling((eta - now).TotalMinutes))} min" : "eta passed");
         if (!string.IsNullOrWhiteSpace(i.Fix)) parts.Add("fix: " + Clip(i.Fix!, 160));
-        if (i.Responses.Count > 0) parts.Add(string.Join(", ", i.Responses.Select(r => $"{r.Who}: {r.Status}" + (r.Until is { } u && u > now ? $" until {u:HH:mm}Z" : ""))));
+        if (i.Responses.Count > 0)
+        {
+            var names = ResponseNames(i);
+            parts.Add(string.Join(", ", i.Responses.Select((r, k) => $"{names[k]}: {r.Status}" + (r.Until is { } u && u > now ? $" until {u:HH:mm}Z" : ""))));
+        }
         return $"[{i.Kind}] {i.Title} ({string.Join("; ", parts)}) id={i.Id}";
     }
 
@@ -271,11 +303,12 @@ public static class IncidentStore
     public static (Incident Incident, bool Created) Raise(IncidentDraft d, string? who = null) =>
         Update(f => IncidentLogic.Raise(f, d, who ?? Hosting.SessionIdentity.Label, DateTime.UtcNow));
 
-    public static Incident Respond(string idOrKey, string status, string? note, DateTime? until, string? who = null) =>
+    /// <param name="sessionId">The answering session (default: this server's <see cref="Hosting.SessionIdentity.ResponseId"/>).</param>
+    public static Incident Respond(string idOrKey, string status, string? note, DateTime? until, string? who = null, string? sessionId = null) =>
         Update(f =>
         {
             var i = IncidentLogic.Find(f, idOrKey) ?? throw new ArgumentException(NotFound(f, idOrKey));
-            IncidentLogic.Respond(i, who ?? Hosting.SessionIdentity.Label, status, note, until, DateTime.UtcNow);
+            IncidentLogic.Respond(i, who ?? Hosting.SessionIdentity.Label, status, note, until, DateTime.UtcNow, sessionId ?? Hosting.SessionIdentity.ResponseId);
             return i;
         });
 
@@ -324,6 +357,43 @@ public static class IncidentStore
             return d;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return []; }
+    }
+
+    // ── Server heartbeats (sidecar, per pid): which servers run under which label, for the deploy same-label rule ──
+
+    /// <summary>Per server pid: its label, kind and last beat (DeployIncidents.Judge: a dead owner pid isn't orphaned while a
+    /// same-label server beats).</summary>
+    public static string ServerBeatsPath => Path.Combine(Dir, "server-heartbeats.json");
+
+    public static Dictionary<int, ServerBeat> ReadServerBeats()
+    {
+        try
+        {
+            if (!File.Exists(ServerBeatsPath)) return [];
+            var d = JsonConvert.DeserializeObject<Dictionary<string, ServerBeat>>(ReadShared(ServerBeatsPath), IncidentJson.Settings) ?? [];
+            return d.Where(kv => int.TryParse(kv.Key, out _) && kv.Value != null).ToDictionary(kv => int.Parse(kv.Key), kv => kv.Value);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return []; }
+    }
+
+    /// <summary>This server beats (and beats older than an hour go), under the board's mutex. Best effort.</summary>
+    public static void BeatServer(int pid, string label, string kind)
+    {
+        Directory.CreateDirectory(Dir);
+        using var mutex = new Mutex(false, MutexName);
+        var owned = false;
+        try
+        {
+            try { owned = mutex.WaitOne(MutexTimeout); } catch (AbandonedMutexException) { owned = true; }
+            if (!owned) return;
+            var now = DateTime.UtcNow;
+            var beats = ReadServerBeats().Where(kv => kv.Value.At is { } at && now - at < TimeSpan.FromHours(1))
+                .ToDictionary(kv => kv.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), kv => kv.Value);
+            beats[pid.ToString(System.Globalization.CultureInfo.InvariantCulture)] = new ServerBeat { Label = label, Kind = kind, At = now };
+            WriteAtomic(ServerBeatsPath, JsonConvert.SerializeObject(beats, IncidentJson.Settings));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        finally { if (owned) mutex.ReleaseMutex(); }
     }
 
     /// <summary>Beat for these incident ids (and drop beats of incidents no longer open), under the board's mutex.</summary>

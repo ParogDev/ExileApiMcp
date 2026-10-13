@@ -11,6 +11,7 @@ MCP server (C# SDK 2.2, spec 2026-07-28) exposing live PoE1/PoE2 HUD state throu
 | `Hosting/LocalHttpSecurity.cs` | Host allowlist (421), Origin (403), bearer token (401) - the SDK does none of these |
 | `Bridge/BridgeClient.cs` | one bridge connection; re-reads port/token files each connect; 5 s connect budget |
 | `Bridge/BridgeRegistry.cs` | poe1/poe2 bridges, `game` resolution, bridge errors -> McpException |
+| `Bridge/HudState.cs`, `Incidents/Outage.cs` | "Not now" vs broken: the bridge's `hud-state.json`, the -32010 load-screen reply, the typed `HudAvailability` every failed call carries (`hud_not_now` / `hud_broken`), `HudPause` for waiting tools; the user's planned restart (`hud_restart mode=user`, incident kind `outage`, its runner, `held_by_outage`) |
 | `Tools/*.cs` | static tool classes; inject `BridgeRegistry`; annotate ReadOnly/Destructive/Idempotent/OpenWorld |
 | `Hud/HudInstall.cs` | A HUD folder on disk: Serilog log parsing (latest run), source plugins, path redaction, stack compaction |
 | `Hud/HudTypes.cs`, `Tools/HudTypeTools.cs` | `hud_find_types`, `hud_type`: HUD DLL metadata via MetadataLoadContext (cached per HUD folder, rebuilt when ExileCore*/GameOffsets* change) |

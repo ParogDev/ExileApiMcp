@@ -12,8 +12,12 @@ public sealed class DeployResult
     public string Plugin { get; set; } = "";
     /// <summary>deploy | restore | status.</summary>
     public string Action { get; set; } = "";
-    /// <summary>deployed | restored | unchanged | status | refused | failed.</summary>
+    /// <summary>deployed | restored | unchanged | status | refused | failed | held_by_outage.</summary>
     public string Status { get; set; } = "";
+    /// <summary>held_by_outage: the deploy needs a HUD restart (Whats An AI Bridge) and the user's planned restart is open.</summary>
+    public string? Error { get; set; }
+    /// <summary>The outage that holds it (Error held_by_outage).</summary>
+    public OutageHold? HeldBy { get; set; }
     public bool Ok { get; set; }
     /// <summary>The HUD game(s) whose Plugins\Source junction points at the HUD source's folder.</summary>
     public List<string> Games { get; set; } = [];
