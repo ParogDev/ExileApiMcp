@@ -85,6 +85,12 @@ public sealed class BridgeRegistry : IDisposable
         return set.Bridges;
     }
 
+    /// <summary>The bridge session ids (SessionIdentity.IdOf) of this server's callers with this client session id: one Claude
+    /// Code session that entered another worktree is a new label and cwd, so a new bridge session, while its earlier one
+    /// (and that one's leases) lives on until idle. Empty for null (stdio: one bridge session per process anyway).</summary>
+    public List<string> SessionIdsOfClient(string? clientSession) => clientSession is not { Length: > 0 } ? []
+        : _callers.Where(kv => kv.Value.Bridges.FirstOrDefault()?.Caller?.ClientSessionId == clientSession).Select(kv => kv.Key).ToList();
+
     /// <summary>
     /// Once a minute, per caller: one with an HTTP call still running (Hosting/CallerIdentity.cs OpenCalls: incident_wait, a
     /// long observe_wait) sends session.touch on its open connections, so the HUD keeps it present; one that made no call for

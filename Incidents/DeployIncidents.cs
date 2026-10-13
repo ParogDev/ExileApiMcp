@@ -60,6 +60,17 @@ public static class DeployIncidents
     public static bool SameOwner(Incident i, string label, string? session) =>
         OwnerSession(i) is { } s ? string.Equals(s, session, StringComparison.Ordinal) : string.Equals(OwnerLabel(i), label, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Is this deploy the caller's own (pure; tests call it)? When both the deploy and the caller know the client session
+    /// (ownerSession / SessionIdentity.ServerSession: the Claude Code session id), that decides, whatever the label or pid: a
+    /// session that entered another worktree is a new label, and a resumed one a new pid, but the same session. Else the
+    /// older rule: the same owner pid, and on the shared HTTP server (one pid for every caller) the same label too.
+    /// </summary>
+    public static bool IsOwnDeploy(Incident i, int pid, string kind, string label, string? session) =>
+        OwnerSession(i) is { } s && session is { Length: > 0 }
+            ? string.Equals(s, session, StringComparison.Ordinal)
+            : i.OwnerPid == pid && (kind != "mcp-http" || string.Equals(i.RaisedBy, label, StringComparison.Ordinal));
+
     /// <summary>Servers that beat within this long count as alive for the same-owner rule.</summary>
     public static readonly TimeSpan ServerBeatFresh = TimeSpan.FromMinutes(2);
 
