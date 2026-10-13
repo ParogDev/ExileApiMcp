@@ -7,6 +7,9 @@ using ExileApiMcp.Hosting;
 using ExileApiMcp.Incidents;
 using Newtonsoft.Json.Linq;
 
+// --refresh-contract / --emit-mirror (Tests/Contract.cs): tools, not checks.
+if (await ContractChecks.Cli(args) is { } cliExit) return cliExit;
+
 var failures = 0;
 void Check(string name, bool ok, string? detail = null)
 {
@@ -1259,6 +1262,9 @@ foreach (var asm in new[] { typeof(ExileApiMcp.Hud.PluginLint).Assembly, typeof(
         && byPath["CurHP"].Changes == 2 && byPath["CurHP"].First == "100" && byPath["CurHP"].Last == "80" && byPath["CurHP"].LastChangeAtMs == 750);
     Check("watch diff: samples and counts", w.Samples == 4 && w.ChangedLeaves == 4 && w.Changes.Count == 4);
 }
+
+// ── The bridge DTO contract: MCP mirrors vs the committed bridge snapshot (Tests/Contract.cs) ──
+ContractChecks.Run(Check);
 
 Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) FAILED.");
 return failures;

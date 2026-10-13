@@ -102,7 +102,7 @@ public static class HealthReportTools
         if ((o["reflection"]?["notNow"]?.Value<int?>() ?? 0) > 0)
         {
             var (o2, sb2) = (new JObject(), new StringBuilder());
-            var again = await ReflectionPreflight(bridges, game, o2, sb2, ct);
+            var again = await ReflectionPreflight(bridges, game, o2, sb2, ct, contract: false);
             if (o2["reflection"] is JObject r2) { o["reflection"] = r2; reflectionFindings = again; sb.Append("After the trace: ").Append(sb2); }
         }
 
@@ -201,12 +201,25 @@ public static class HealthReportTools
     /// The bridge's reflection preflight (hello.reflection): HUD internals the bridge reaches by reflection, checked when it
     /// loaded. Copied into the report as reflection, one text line, and a finding per broken link. Older bridges have none.
     /// </summary>
-    private static async Task<List<string>> ReflectionPreflight(BridgeRegistry bridges, string? game, JObject o, StringBuilder sb, CancellationToken ct)
+    private static async Task<List<string>> ReflectionPreflight(BridgeRegistry bridges, string? game, JObject o, StringBuilder sb, CancellationToken ct, bool contract = true)
     {
         var findings = new List<string>();
         try
         {
-            var (_, hello) = await bridges.QueryAsync(game, "hello", ct);
+            var (bridge, hello) = await bridges.QueryAsync(game, "hello", ct);
+            // The DTO contract rides on the same hello: drift between the bridge and the MCP's mirrors, named per field.
+            if (contract) try
+            {
+                var cs = await BridgeContract.LiveAsync(bridge, hello, ct);
+                o["contract"] = JObject.Parse(System.Text.Json.JsonSerializer.Serialize(cs, Dto.Options));
+                sb.AppendLine(cs.Line);
+                if (cs.Drift is { Count: > 0 } drift)
+                    findings.AddRange(drift.Select(d => $"{d} (Bridge/BridgeContract.cs mirrors; fix the MCP DTO, then Tests --refresh-contract)"));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                sb.AppendLine($"Bridge contract: check failed ({ex.GetType().Name}: {ex.Message})");
+            }
             if (ReflectionOf(hello, out var unavailable) is not { } r)
             {
                 // No preflight to read is itself worth saying: the report never goes quiet about drift it couldn't check.

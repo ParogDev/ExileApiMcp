@@ -1,0 +1,5358 @@
+{
+  "version": 1,
+  "hash": "8d8389de02caf281",
+  "typeCount": 100,
+  "types": [
+    {
+      "name": "ActorDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "action",
+          "clr": "Action",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "actionId",
+          "clr": "ActionId",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "animation",
+          "clr": "Animation",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "animationId",
+          "clr": "AnimationId",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "currentAction",
+          "clr": "CurrentAction",
+          "type": "object:CurrentActionDto",
+          "clrType": "CurrentActionDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "isAttacking",
+          "clr": "IsAttacking",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isMoving",
+          "clr": "IsMoving",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "AnimControllerDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "animId",
+          "clr": "AnimId",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "progress",
+          "clr": "Progress",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        },
+        {
+          "json": "speed",
+          "clr": "Speed",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        },
+        {
+          "json": "stage",
+          "clr": "Stage",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "AnimatedDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "baseEntityId",
+          "clr": "BaseEntityId",
+          "type": "integer",
+          "clrType": "UInt32",
+          "nullable": false
+        },
+        {
+          "json": "baseEntityPath",
+          "clr": "BaseEntityPath",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "AreaDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "act",
+          "clr": "Act",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "areaLevel",
+          "clr": "AreaLevel",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "AreaLoadingEvent",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "at",
+          "clr": "At",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "from",
+          "clr": "From",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "AreaReadyEvent",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "area",
+          "clr": "Area",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "from",
+          "clr": "From",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "loadMs",
+          "clr": "LoadMs",
+          "type": "integer",
+          "clrType": "Int64?",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "BeamDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "end",
+          "clr": "End",
+          "type": "list<number>",
+          "clrType": "Single[]",
+          "nullable": false
+        },
+        {
+          "json": "start",
+          "clr": "Start",
+          "type": "list<number>",
+          "clrType": "Single[]",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "BridgeResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "area",
+          "clr": "Area",
+          "type": "object:AreaDto",
+          "clrType": "AreaDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "buffProbe",
+          "clr": "BuffProbe",
+          "type": "list<object:BuffProbeDto>",
+          "clrType": "List<BuffProbeDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "entities",
+          "clr": "Entities",
+          "type": "list<object:EntityDto>",
+          "clrType": "List<EntityDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "filter",
+          "clr": "Filter",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "mapData",
+          "clr": "MapData",
+          "type": "object:MapDataDto",
+          "clrType": "MapDataDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "matchCount",
+          "clr": "MatchCount",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "npcDialog",
+          "clr": "NpcDialog",
+          "type": "object:NpcDialogDto",
+          "clrType": "NpcDialogDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "player",
+          "clr": "Player",
+          "type": "object:PlayerDto",
+          "clrType": "PlayerDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "query",
+          "clr": "Query",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "stashTabs",
+          "clr": "StashTabs",
+          "type": "list<object:StashTabDto>",
+          "clrType": "List<StashTabDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "stats",
+          "clr": "Stats",
+          "type": "map<integer>",
+          "clrType": "Dictionary<String,Int32>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "timestamp",
+          "clr": "Timestamp",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "ui",
+          "clr": "Ui",
+          "type": "object:UiDto",
+          "clrType": "UiDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "unsupported",
+          "clr": "Unsupported",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "BuffDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "charges",
+          "clr": "Charges",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "description",
+          "clr": "Description",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "displayName",
+          "clr": "DisplayName",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "maxTime",
+          "clr": "MaxTime",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "sourceEntityId",
+          "clr": "SourceEntityId",
+          "type": "integer",
+          "clrType": "UInt32",
+          "nullable": false
+        },
+        {
+          "json": "sourceName",
+          "clr": "SourceName",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "sourceSkillId",
+          "clr": "SourceSkillId",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "stacks",
+          "clr": "Stacks",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "timer",
+          "clr": "Timer",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "BuffProbeDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "address",
+          "clr": "Address",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "raw",
+          "clr": "Raw",
+          "type": "map<string>",
+          "clrType": "Dictionary<String,String>",
+          "nullable": false
+        },
+        {
+          "json": "sv80",
+          "clr": "Sv80",
+          "type": "object:StdVectorDto",
+          "clrType": "StdVectorDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "timer",
+          "clr": "Timer",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        },
+        {
+          "json": "treeNode0",
+          "clr": "TreeNode0",
+          "type": "map<any>",
+          "clrType": "Dictionary<String,Object>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "treeNode1",
+          "clr": "TreeNode1",
+          "type": "map<any>",
+          "clrType": "Dictionary<String,Object>",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "ChestDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "destroyAfterOpen",
+          "clr": "DestroyAfterOpen",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isLarge",
+          "clr": "IsLarge",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isLocked",
+          "clr": "IsLocked",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isOpened",
+          "clr": "IsOpened",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isStrongbox",
+          "clr": "IsStrongbox",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "openOnDamage",
+          "clr": "OpenOnDamage",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "stompable",
+          "clr": "Stompable",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ColorDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "b",
+          "clr": "B",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "g",
+          "clr": "G",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "r",
+          "clr": "R",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ContractFieldDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "clr",
+          "clr": "Clr",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "clrType",
+          "clr": "ClrType",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "json",
+          "clr": "Json",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "nullable",
+          "clr": "Nullable",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "omitNull",
+          "clr": "OmitNull",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "type",
+          "clr": "Type",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ContractSchemaDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "errors",
+          "clr": "Errors",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "hash",
+          "clr": "Hash",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "ms",
+          "clr": "Ms",
+          "type": "number",
+          "clrType": "Double",
+          "nullable": false
+        },
+        {
+          "json": "typeCount",
+          "clr": "TypeCount",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "types",
+          "clr": "Types",
+          "type": "list<object:ContractTypeDto>",
+          "clrType": "List<ContractTypeDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "version",
+          "clr": "Version",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ContractSummaryDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "hash",
+          "clr": "Hash",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "typeCount",
+          "clr": "TypeCount",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "version",
+          "clr": "Version",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ContractTypeDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "fields",
+          "clr": "Fields",
+          "type": "list<object:ContractFieldDto>",
+          "clrType": "List<ContractFieldDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "kind",
+          "clr": "Kind",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "open",
+          "clr": "Open",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "values",
+          "clr": "Values",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "CurrentActionDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "destination",
+          "clr": "Destination",
+          "type": "list<integer>",
+          "clrType": "Int32[]",
+          "nullable": false
+        },
+        {
+          "json": "skill",
+          "clr": "Skill",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "targetId",
+          "clr": "TargetId",
+          "type": "integer",
+          "clrType": "UInt32?",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "EntityDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "_end",
+          "clr": "End",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "actor",
+          "clr": "Actor",
+          "type": "object:ActorDto",
+          "clrType": "ActorDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "alive",
+          "clr": "Alive",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "allComponents",
+          "clr": "AllComponents",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "animController",
+          "clr": "AnimController",
+          "type": "object:AnimControllerDto",
+          "clrType": "AnimControllerDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "animated",
+          "clr": "Animated",
+          "type": "object:AnimatedDto",
+          "clrType": "AnimatedDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "beam",
+          "clr": "Beam",
+          "type": "object:BeamDto",
+          "clrType": "BeamDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "buffs",
+          "clr": "Buffs",
+          "type": "list<object:BuffDto>",
+          "clrType": "List<BuffDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "chest",
+          "clr": "Chest",
+          "type": "object:ChestDto",
+          "clrType": "ChestDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "deep",
+          "clr": "Deep",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "dist",
+          "clr": "Dist",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        },
+        {
+          "json": "groundEffect",
+          "clr": "GroundEffect",
+          "type": "object:GroundEffectDto",
+          "clrType": "GroundEffectDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "hasEffectPack",
+          "clr": "HasEffectPack",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "hostile",
+          "clr": "Hostile",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "hp",
+          "clr": "Hp",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "integer",
+          "clrType": "UInt32",
+          "nullable": false
+        },
+        {
+          "json": "isValid",
+          "clr": "IsValid",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "life",
+          "clr": "Life",
+          "type": "object:LifeDto",
+          "clrType": "LifeDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "maxHp",
+          "clr": "MaxHp",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "minimapIcon",
+          "clr": "MinimapIcon",
+          "type": "object:MinimapIconDto",
+          "clrType": "MinimapIconDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "npc",
+          "clr": "Npc",
+          "type": "object:NpcDto",
+          "clrType": "NpcDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "omp",
+          "clr": "Omp",
+          "type": "object:OmpDto",
+          "clrType": "OmpDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "path",
+          "clr": "Path",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "pos",
+          "clr": "Pos",
+          "type": "list<number>",
+          "clrType": "Single[]",
+          "nullable": false
+        },
+        {
+          "json": "positioned",
+          "clr": "Positioned",
+          "type": "object:PositionedDto",
+          "clrType": "PositionedDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "rarity",
+          "clr": "Rarity",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "render",
+          "clr": "Render",
+          "type": "object:RenderDto",
+          "clrType": "RenderDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "stateMachine",
+          "clr": "StateMachine",
+          "type": "object:StateMachineDto",
+          "clrType": "StateMachineDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "stats",
+          "clr": "Stats",
+          "type": "object:StatsDto",
+          "clrType": "StatsDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "targetable",
+          "clr": "Targetable",
+          "type": "object:TargetableDto",
+          "clrType": "TargetableDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "type",
+          "clr": "Type",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ErrorResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "file",
+          "clr": "File",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "query",
+          "clr": "Query",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "totalFrames",
+          "clr": "TotalFrames",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "GroundEffectDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "duration",
+          "clr": "Duration",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        },
+        {
+          "json": "maxDuration",
+          "clr": "MaxDuration",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        },
+        {
+          "json": "scale",
+          "clr": "Scale",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        },
+        {
+          "json": "sizeIncrease",
+          "clr": "SizeIncrease",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "HelloDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "bridgeBuild",
+          "clr": "BridgeBuild",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "contract",
+          "clr": "Contract",
+          "type": "object:ContractSummaryDto",
+          "clrType": "ContractSummaryDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "hud",
+          "clr": "Hud",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "hudBuild",
+          "clr": "HudBuild",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "inGame",
+          "clr": "InGame",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "protocolVersion",
+          "clr": "ProtocolVersion",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "reflection",
+          "clr": "Reflection",
+          "type": "object:ReflectionPreflightDto",
+          "clrType": "ReflectionPreflightDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "unsupported",
+          "clr": "Unsupported",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "HudFailedPluginDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "folder",
+          "clr": "Folder",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "HudLoadingErrorData",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "lastArea",
+          "clr": "LastArea",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "lastLoadMs",
+          "clr": "LastLoadMs",
+          "type": "integer",
+          "clrType": "Int64?",
+          "nullable": true
+        },
+        {
+          "json": "phase",
+          "clr": "Phase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "reason",
+          "clr": "Reason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "retryAfterMs",
+          "clr": "RetryAfterMs",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "since",
+          "clr": "Since",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "sinceMs",
+          "clr": "SinceMs",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "HudPhaseEvent",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "area",
+          "clr": "Area",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "inGame",
+          "clr": "InGame",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "phase",
+          "clr": "Phase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "prev",
+          "clr": "Prev",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "since",
+          "clr": "Since",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "HudPluginDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "enabled",
+          "clr": "Enabled",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "folder",
+          "clr": "Folder",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "HudPluginsResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "avoidLockingDllFiles",
+          "clr": "AvoidLockingDllFiles",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "failed",
+          "clr": "Failed",
+          "type": "list<object:HudFailedPluginDto>",
+          "clrType": "List<HudFailedPluginDto>",
+          "nullable": false
+        },
+        {
+          "json": "instrumentation",
+          "clr": "Instrumentation",
+          "type": "any",
+          "clrType": "JObject",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "loaded",
+          "clr": "Loaded",
+          "type": "list<object:HudPluginDto>",
+          "clrType": "List<HudPluginDto>",
+          "nullable": false
+        },
+        {
+          "json": "reloadEnabled",
+          "clr": "ReloadEnabled",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "HudStartupDto",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "firstReadyAt",
+          "clr": "FirstReadyAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "initAt",
+          "clr": "InitAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "listenerAt",
+          "clr": "ListenerAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "processStartedAt",
+          "clr": "ProcessStartedAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "sec",
+          "clr": "Sec",
+          "type": "number",
+          "clrType": "Double?",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "HudStateDto",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "area",
+          "clr": "Area",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "areaChangedAt",
+          "clr": "AreaChangedAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "closeReason",
+          "clr": "CloseReason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "gamePid",
+          "clr": "GamePid",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true
+        },
+        {
+          "json": "heartbeat",
+          "clr": "Heartbeat",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "hudPid",
+          "clr": "HudPid",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "inGame",
+          "clr": "InGame",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "lastArea",
+          "clr": "LastArea",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "lastLoadMs",
+          "clr": "LastLoadMs",
+          "type": "integer",
+          "clrType": "Int64?",
+          "nullable": true
+        },
+        {
+          "json": "listenerUp",
+          "clr": "ListenerUp",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "loading",
+          "clr": "Loading",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "phase",
+          "clr": "Phase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "port",
+          "clr": "Port",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true
+        },
+        {
+          "json": "prevCloseReason",
+          "clr": "PrevCloseReason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "prevPhase",
+          "clr": "PrevPhase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "recentStartupSec",
+          "clr": "RecentStartupSec",
+          "type": "list<number>",
+          "clrType": "List<Double>",
+          "nullable": false
+        },
+        {
+          "json": "reloading",
+          "clr": "Reloading",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "schema",
+          "clr": "Schema",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "seq",
+          "clr": "Seq",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "since",
+          "clr": "Since",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "startup",
+          "clr": "Startup",
+          "type": "object:HudStartupDto",
+          "clrType": "HudStartupDto",
+          "nullable": true
+        },
+        {
+          "json": "tickAt",
+          "clr": "TickAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "typicalStartupSec",
+          "clr": "TypicalStartupSec",
+          "type": "number",
+          "clrType": "Double?",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "HudStateReplyDto",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "area",
+          "clr": "Area",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "areaChangedAt",
+          "clr": "AreaChangedAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "closeReason",
+          "clr": "CloseReason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "gamePid",
+          "clr": "GamePid",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true
+        },
+        {
+          "json": "heartbeat",
+          "clr": "Heartbeat",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "hudPid",
+          "clr": "HudPid",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "inGame",
+          "clr": "InGame",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "lastArea",
+          "clr": "LastArea",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "lastLoadMs",
+          "clr": "LastLoadMs",
+          "type": "integer",
+          "clrType": "Int64?",
+          "nullable": true
+        },
+        {
+          "json": "listenerUp",
+          "clr": "ListenerUp",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "loading",
+          "clr": "Loading",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "ok",
+          "clr": "Ok",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "pending",
+          "clr": "Pending",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "phase",
+          "clr": "Phase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "phaseSinceMs",
+          "clr": "PhaseSinceMs",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "port",
+          "clr": "Port",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true
+        },
+        {
+          "json": "prevCloseReason",
+          "clr": "PrevCloseReason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "prevPhase",
+          "clr": "PrevPhase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "recentStartupSec",
+          "clr": "RecentStartupSec",
+          "type": "list<number>",
+          "clrType": "List<Double>",
+          "nullable": false
+        },
+        {
+          "json": "reloading",
+          "clr": "Reloading",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "schema",
+          "clr": "Schema",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "seq",
+          "clr": "Seq",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "since",
+          "clr": "Since",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "startup",
+          "clr": "Startup",
+          "type": "object:HudStartupDto",
+          "clrType": "HudStartupDto",
+          "nullable": true
+        },
+        {
+          "json": "tickAgeMs",
+          "clr": "TickAgeMs",
+          "type": "integer",
+          "clrType": "Int64?",
+          "nullable": true
+        },
+        {
+          "json": "tickAt",
+          "clr": "TickAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "typicalStartupSec",
+          "clr": "TypicalStartupSec",
+          "type": "number",
+          "clrType": "Double?",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "HudTimeoutErrorData",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "lastArea",
+          "clr": "LastArea",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "pending",
+          "clr": "Pending",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "phase",
+          "clr": "Phase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "reason",
+          "clr": "Reason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "sinceMs",
+          "clr": "SinceMs",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "tickAgeMs",
+          "clr": "TickAgeMs",
+          "type": "integer",
+          "clrType": "Int64?",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "IncidentBoardDto",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "incidents",
+          "clr": "Incidents",
+          "type": "list<object:IncidentDto>",
+          "clrType": "List<IncidentDto>",
+          "nullable": true
+        },
+        {
+          "json": "rev",
+          "clr": "Rev",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "IncidentDto",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "key",
+          "clr": "Key",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "kind",
+          "clr": "Kind",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "outage",
+          "clr": "Outage",
+          "type": "object:IncidentOutageDto",
+          "clrType": "IncidentOutageDto",
+          "nullable": true
+        },
+        {
+          "json": "scope",
+          "clr": "Scope",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "state",
+          "clr": "State",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "IncidentOutageDto",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "participants",
+          "clr": "Participants",
+          "type": "map<object:IncidentParticipantDto>",
+          "clrType": "Dictionary<String,IncidentParticipantDto>",
+          "nullable": true
+        },
+        {
+          "json": "phase",
+          "clr": "Phase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "phaseAt",
+          "clr": "PhaseAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "reason",
+          "clr": "Reason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "IncidentParticipantDto",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "label",
+          "clr": "Label",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "state",
+          "clr": "State",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "LeagueMechanicButtonsDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "cc",
+          "clr": "Cc",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "vis",
+          "clr": "Vis",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "LifeDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "es",
+          "clr": "Es",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "hp",
+          "clr": "Hp",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "maxEs",
+          "clr": "MaxEs",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "maxHp",
+          "clr": "MaxHp",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "LinkCheckDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "expected",
+          "clr": "Expected",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "feature",
+          "clr": "Feature",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "found",
+          "clr": "Found",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "member",
+          "clr": "Member",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "note",
+          "clr": "Note",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "status",
+          "clr": "Status",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "type",
+          "clr": "Type",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "MapDataDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "dialogDepth",
+          "clr": "DialogDepth",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "mapStats",
+          "clr": "MapStats",
+          "type": "map<integer>",
+          "clrType": "Dictionary<String,Int32>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "questFlags",
+          "clr": "QuestFlags",
+          "type": "object:QuestFlagsDto",
+          "clrType": "QuestFlagsDto",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "MinimapIconDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "isHide",
+          "clr": "IsHide",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isVisible",
+          "clr": "IsVisible",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "NpcDialogDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "dialogDepth",
+          "clr": "DialogDepth",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "isLoreTalk",
+          "clr": "IsLoreTalk",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "isVisible",
+          "clr": "IsVisible",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "lines",
+          "clr": "Lines",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "npcName",
+          "clr": "NpcName",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "NpcDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "hasIconOverhead",
+          "clr": "HasIconOverhead",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isIgnoreHidden",
+          "clr": "IsIgnoreHidden",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isMinMapLabelVisible",
+          "clr": "IsMinMapLabelVisible",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ObjectFindMatchDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "by",
+          "clr": "By",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "csharp",
+          "clr": "Csharp",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "kind",
+          "clr": "Kind",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "level",
+          "clr": "Level",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "path",
+          "clr": "Path",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "type",
+          "clr": "Type",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "value",
+          "clr": "Value",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "ObjectFindResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "aliases",
+          "clr": "Aliases",
+          "type": "list<object:ObjectWalkAliasDto>",
+          "clrType": "List<ObjectWalkAliasDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "budget",
+          "clr": "Budget",
+          "type": "object:ObjectWalkBudgetDto",
+          "clrType": "ObjectWalkBudgetDto",
+          "nullable": false
+        },
+        {
+          "json": "depth",
+          "clr": "Depth",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "errors",
+          "clr": "Errors",
+          "type": "list<object:ObjectWalkErrorDto>",
+          "clrType": "List<ObjectWalkErrorDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "matches",
+          "clr": "Matches",
+          "type": "list<object:ObjectFindMatchDto>",
+          "clrType": "List<ObjectFindMatchDto>",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "root",
+          "clr": "Root",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "truncated",
+          "clr": "Truncated",
+          "type": "object:ObjectWalkTruncationDto",
+          "clrType": "ObjectWalkTruncationDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "value",
+          "clr": "Value",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "ObjectPathErrorDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "message",
+          "clr": "Message",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "path",
+          "clr": "Path",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ObjectSnapshotResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "aliases",
+          "clr": "Aliases",
+          "type": "list<object:ObjectWalkAliasDto>",
+          "clrType": "List<ObjectWalkAliasDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "budget",
+          "clr": "Budget",
+          "type": "object:ObjectWalkBudgetDto",
+          "clrType": "ObjectWalkBudgetDto",
+          "nullable": false
+        },
+        {
+          "json": "depth",
+          "clr": "Depth",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "errors",
+          "clr": "Errors",
+          "type": "list<object:ObjectWalkErrorDto>",
+          "clrType": "List<ObjectWalkErrorDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "leaves",
+          "clr": "Leaves",
+          "type": "map<string>",
+          "clrType": "Dictionary<String,String>",
+          "nullable": false
+        },
+        {
+          "json": "path",
+          "clr": "Path",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "truncated",
+          "clr": "Truncated",
+          "type": "object:ObjectWalkTruncationDto",
+          "clrType": "ObjectWalkTruncationDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "type",
+          "clr": "Type",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ObjectWalkAliasDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "path",
+          "clr": "Path",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "sameAs",
+          "clr": "SameAs",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ObjectWalkBudgetDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "atDepthLimit",
+          "clr": "AtDepthLimit",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "blocked",
+          "clr": "Blocked",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "cycles",
+          "clr": "Cycles",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "deepestLevel",
+          "clr": "DeepestLevel",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "elapsedMs",
+          "clr": "ElapsedMs",
+          "type": "number",
+          "clrType": "Double",
+          "nullable": false
+        },
+        {
+          "json": "getterErrors",
+          "clr": "GetterErrors",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "itemsSkipped",
+          "clr": "ItemsSkipped",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "maxNodes",
+          "clr": "MaxNodes",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "membersRead",
+          "clr": "MembersRead",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "nodesOpened",
+          "clr": "NodesOpened",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "plumbing",
+          "clr": "Plumbing",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "timeMs",
+          "clr": "TimeMs",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ObjectWalkErrorDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "at",
+          "clr": "At",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "message",
+          "clr": "Message",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ObjectWalkTruncationDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "at",
+          "clr": "At",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "hint",
+          "clr": "Hint",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "pending",
+          "clr": "Pending",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "reason",
+          "clr": "Reason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "OmpDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "mods",
+          "clr": "Mods",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "rarity",
+          "clr": "Rarity",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "OutageAnswerEvent",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "answer",
+          "clr": "Answer",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "at",
+          "clr": "At",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "OutageParty",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "doing",
+          "clr": "Doing",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "label",
+          "clr": "Label",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "lease",
+          "clr": "Lease",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "session",
+          "clr": "Session",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "since",
+          "clr": "Since",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "until",
+          "clr": "Until",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "OutageSetParams",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "busy",
+          "clr": "Busy",
+          "type": "list<object:OutageParty>",
+          "clrType": "List<OutageParty>",
+          "nullable": true
+        },
+        {
+          "json": "by",
+          "clr": "By",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "byLabel",
+          "clr": "ByLabel",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "clear",
+          "clr": "Clear",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "phase",
+          "clr": "Phase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "ready",
+          "clr": "Ready",
+          "type": "list<object:OutageParty>",
+          "clrType": "List<OutageParty>",
+          "nullable": true
+        },
+        {
+          "json": "reason",
+          "clr": "Reason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "stopAt",
+          "clr": "StopAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "stopOnly",
+          "clr": "StopOnly",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "OutageStateDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "answer",
+          "clr": "Answer",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "answeredAt",
+          "clr": "AnsweredAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "busy",
+          "clr": "Busy",
+          "type": "list<object:OutageParty>",
+          "clrType": "List<OutageParty>",
+          "nullable": false
+        },
+        {
+          "json": "by",
+          "clr": "By",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "byLabel",
+          "clr": "ByLabel",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "cardShown",
+          "clr": "CardShown",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "cleared",
+          "clr": "Cleared",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "lease",
+          "clr": "Lease",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "ok",
+          "clr": "Ok",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "partiesFrom",
+          "clr": "PartiesFrom",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "phase",
+          "clr": "Phase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "ready",
+          "clr": "Ready",
+          "type": "list<object:OutageParty>",
+          "clrType": "List<OutageParty>",
+          "nullable": false
+        },
+        {
+          "json": "reason",
+          "clr": "Reason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "stopAt",
+          "clr": "StopAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "stopOnly",
+          "clr": "StopOnly",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "PlayerDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "actor",
+          "clr": "Actor",
+          "type": "object:ActorDto",
+          "clrType": "ActorDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "buffs",
+          "clr": "Buffs",
+          "type": "list<object:BuffDto>",
+          "clrType": "List<BuffDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "es",
+          "clr": "Es",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "hp",
+          "clr": "Hp",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "mana",
+          "clr": "Mana",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "maxEs",
+          "clr": "MaxEs",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "maxHp",
+          "clr": "MaxHp",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "maxMana",
+          "clr": "MaxMana",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "path",
+          "clr": "Path",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "pos",
+          "clr": "Pos",
+          "type": "list<number>",
+          "clrType": "Single[]",
+          "nullable": false
+        },
+        {
+          "json": "rotation",
+          "clr": "Rotation",
+          "type": "number",
+          "clrType": "Single?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "skills",
+          "clr": "Skills",
+          "type": "list<object:SkillDto>",
+          "clrType": "List<SkillDto>",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "PositionedDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "grid",
+          "clr": "Grid",
+          "type": "list<integer>",
+          "clrType": "Int32[]",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "reaction",
+          "clr": "Reaction",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "rotation",
+          "clr": "Rotation",
+          "type": "number",
+          "clrType": "Single?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "scale",
+          "clr": "Scale",
+          "type": "number",
+          "clrType": "Single?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "size",
+          "clr": "Size",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "travelProgress",
+          "clr": "TravelProgress",
+          "type": "number",
+          "clrType": "Single?",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "PreflightStateDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "broken",
+          "clr": "Broken",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": false
+        },
+        {
+          "json": "checkedAt",
+          "clr": "CheckedAt",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "stamp",
+          "clr": "Stamp",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "QuestFlagsDto",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "_total",
+          "clr": "Total",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RecordingFileDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "modified",
+          "clr": "Modified",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "sizeBytes",
+          "clr": "SizeBytes",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RecordingFramesResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "frames",
+          "clr": "Frames",
+          "type": "list<any>",
+          "clrType": "List<Object>",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RecordingInterrupted",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "endedAt",
+          "clr": "EndedAt",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "file",
+          "clr": "File",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "frames",
+          "clr": "Frames",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "startedAt",
+          "clr": "StartedAt",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "who",
+          "clr": "Who",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "why",
+          "clr": "Why",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RecordingListResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "recordings",
+          "clr": "Recordings",
+          "type": "list<object:RecordingFileDto>",
+          "clrType": "List<RecordingFileDto>",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RecordingLoadResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "file",
+          "clr": "File",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "frames",
+          "clr": "Frames",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "status",
+          "clr": "Status",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RecordingSearchResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "frames",
+          "clr": "Frames",
+          "type": "list<integer>",
+          "clrType": "List<Int32>",
+          "nullable": false
+        },
+        {
+          "json": "matchCount",
+          "clr": "MatchCount",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "term",
+          "clr": "Term",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RecordingStartResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "file",
+          "clr": "File",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "intervalMs",
+          "clr": "IntervalMs",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "status",
+          "clr": "Status",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RecordingStatusResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "durationMs",
+          "clr": "DurationMs",
+          "type": "number",
+          "clrType": "Double?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "file",
+          "clr": "File",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "frames",
+          "clr": "Frames",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "interrupted",
+          "clr": "Interrupted",
+          "type": "object:RecordingInterrupted",
+          "clrType": "RecordingInterrupted",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "intervalMs",
+          "clr": "IntervalMs",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "isRecording",
+          "clr": "IsRecording",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "status",
+          "clr": "Status",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RecordingStopResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "durationMs",
+          "clr": "DurationMs",
+          "type": "number",
+          "clrType": "Double",
+          "nullable": false
+        },
+        {
+          "json": "file",
+          "clr": "File",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "frames",
+          "clr": "Frames",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "sizeBytes",
+          "clr": "SizeBytes",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "status",
+          "clr": "Status",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RecordingSummaryDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "file",
+          "clr": "File",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "firstTimestamp",
+          "clr": "FirstTimestamp",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "lastTimestamp",
+          "clr": "LastTimestamp",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "totalFrames",
+          "clr": "TotalFrames",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "uniqueBuffNames",
+          "clr": "UniqueBuffNames",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": false
+        },
+        {
+          "json": "uniqueEntityPaths",
+          "clr": "UniqueEntityPaths",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ReflectionPreflightDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "blocked",
+          "clr": "Blocked",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "broken",
+          "clr": "Broken",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "changedFrom",
+          "clr": "ChangedFrom",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "checkedAt",
+          "clr": "CheckedAt",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "failed",
+          "clr": "Failed",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "links",
+          "clr": "Links",
+          "type": "list<object:LinkCheckDto>",
+          "clrType": "List<LinkCheckDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "ms",
+          "clr": "Ms",
+          "type": "number",
+          "clrType": "Double",
+          "nullable": false
+        },
+        {
+          "json": "notNow",
+          "clr": "NotNow",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "ok",
+          "clr": "Ok",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "problems",
+          "clr": "Problems",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": false
+        },
+        {
+          "json": "recovered",
+          "clr": "Recovered",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "simulated",
+          "clr": "Simulated",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "stamp",
+          "clr": "Stamp",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "targets",
+          "clr": "Targets",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ReloadQueuedResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "message",
+          "clr": "Message",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "plugin",
+          "clr": "Plugin",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "queued",
+          "clr": "Queued",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ReloadResultDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "durationMs",
+          "clr": "DurationMs",
+          "type": "integer",
+          "clrType": "Int64?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "finishedAt",
+          "clr": "FinishedAt",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "initialized",
+          "clr": "Initialized",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "instances",
+          "clr": "Instances",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "message",
+          "clr": "Message",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "ok",
+          "clr": "Ok",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "plugin",
+          "clr": "Plugin",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "queuedAt",
+          "clr": "QueuedAt",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "staleBridgeMethods",
+          "clr": "StaleBridgeMethods",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "startedAt",
+          "clr": "StartedAt",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "via",
+          "clr": "Via",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "warnings",
+          "clr": "Warnings",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ReloadStatusResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "last",
+          "clr": "Last",
+          "type": "object:ReloadResultDto",
+          "clrType": "ReloadResultDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "pending",
+          "clr": "Pending",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RenderDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "bounds",
+          "clr": "Bounds",
+          "type": "list<number>",
+          "clrType": "Single[]",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "pos",
+          "clr": "Pos",
+          "type": "list<number>",
+          "clrType": "Single[]",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "RestartStateFileDto",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "at",
+          "clr": "At",
+          "type": "datetime",
+          "clrType": "DateTime?",
+          "nullable": true
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "phase",
+          "clr": "Phase",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "reason",
+          "clr": "Reason",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "who",
+          "clr": "Who",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "ScriptDiagnosticDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "code",
+          "clr": "Code",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "col",
+          "clr": "Col",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "line",
+          "clr": "Line",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "message",
+          "clr": "Message",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "ScriptResultDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "cached",
+          "clr": "Cached",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "compileMs",
+          "clr": "CompileMs",
+          "type": "integer",
+          "clrType": "Int64?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "diagnostics",
+          "clr": "Diagnostics",
+          "type": "list<object:ScriptDiagnosticDto>",
+          "clrType": "List<ScriptDiagnosticDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "log",
+          "clr": "Log",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "message",
+          "clr": "Message",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "ok",
+          "clr": "Ok",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "returnType",
+          "clr": "ReturnType",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "runMs",
+          "clr": "RunMs",
+          "type": "integer",
+          "clrType": "Int64?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "stackTrace",
+          "clr": "StackTrace",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "status",
+          "clr": "Status",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "thread",
+          "clr": "Thread",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "value",
+          "clr": "Value",
+          "type": "any",
+          "clrType": "JToken",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "SkillDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "canBeUsed",
+          "clr": "CanBeUsed",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "cooldown",
+          "clr": "Cooldown",
+          "type": "number",
+          "clrType": "Single",
+          "nullable": false
+        },
+        {
+          "json": "cost",
+          "clr": "Cost",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "displayName",
+          "clr": "DisplayName",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "internalName",
+          "clr": "InternalName",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "isMine",
+          "clr": "IsMine",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "isOnSkillBar",
+          "clr": "IsOnSkillBar",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isUserSkill",
+          "clr": "IsUserSkill",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "isUsing",
+          "clr": "IsUsing",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "totalUses",
+          "clr": "TotalUses",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "SnapshotCaptureResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "entityCount",
+          "clr": "EntityCount",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "file",
+          "clr": "File",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "frame",
+          "clr": "Frame",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "message",
+          "clr": "Message",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "sizeBytes",
+          "clr": "SizeBytes",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "timestamp",
+          "clr": "Timestamp",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "SnapshotResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "_end",
+          "clr": "End",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "area",
+          "clr": "Area",
+          "type": "object:AreaDto",
+          "clrType": "AreaDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "elapsedMs",
+          "clr": "ElapsedMs",
+          "type": "number",
+          "clrType": "Double",
+          "nullable": false
+        },
+        {
+          "json": "entities",
+          "clr": "Entities",
+          "type": "list<object:EntityDto>",
+          "clrType": "List<EntityDto>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "frame",
+          "clr": "Frame",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "player",
+          "clr": "Player",
+          "type": "object:PlayerDto",
+          "clrType": "PlayerDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "timestamp",
+          "clr": "Timestamp",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "StashTabDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "affinity",
+          "clr": "Affinity",
+          "type": "integer",
+          "clrType": "UInt32?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "color",
+          "clr": "Color",
+          "type": "object:ColorDto",
+          "clrType": "ColorDto",
+          "nullable": false
+        },
+        {
+          "json": "index",
+          "clr": "Index",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "isHidden",
+          "clr": "IsHidden",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isMapSeries",
+          "clr": "IsMapSeries",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isPremium",
+          "clr": "IsPremium",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isPublic",
+          "clr": "IsPublic",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isRemoveOnly",
+          "clr": "IsRemoveOnly",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "name",
+          "clr": "Name",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "rawFlags",
+          "clr": "RawFlags",
+          "type": "integer",
+          "clrType": "Byte",
+          "nullable": false
+        },
+        {
+          "json": "type",
+          "clr": "Type",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "visibleIndex",
+          "clr": "VisibleIndex",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "StatDetailResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "isWeaponLocal",
+          "clr": "IsWeaponLocal",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "present",
+          "clr": "Present",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "recordType",
+          "clr": "RecordType",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "stat",
+          "clr": "Stat",
+          "type": "object:StatDto",
+          "clrType": "StatDto",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "StatDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "category",
+          "clr": "Category",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "isLocal",
+          "clr": "IsLocal",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "key",
+          "clr": "Key",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "pinned",
+          "clr": "Pinned",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "text",
+          "clr": "Text",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "value",
+          "clr": "Value",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "StatPairDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "stat",
+          "clr": "Stat",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "statId",
+          "clr": "StatId",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "val",
+          "clr": "Val",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "StateMachineDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "canBeTarget",
+          "clr": "CanBeTarget",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "inTarget",
+          "clr": "InTarget",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "states",
+          "clr": "States",
+          "type": "map<integer>",
+          "clrType": "Dictionary<String,Int32>",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "StatsDto",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "_truncated",
+          "clr": "Truncated",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "StatsMutationResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "message",
+          "clr": "Message",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "ok",
+          "clr": "Ok",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "rev",
+          "clr": "Rev",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "state",
+          "clr": "State",
+          "type": "object:StatsUiState",
+          "clrType": "StatsUiState",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "StatsPageResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "categories",
+          "clr": "Categories",
+          "type": "map<integer>",
+          "clrType": "Dictionary<String,Int32>",
+          "nullable": false
+        },
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "items",
+          "clr": "Items",
+          "type": "list<object:StatDto>",
+          "clrType": "List<StatDto>",
+          "nullable": false
+        },
+        {
+          "json": "page",
+          "clr": "Page",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "pageSize",
+          "clr": "PageSize",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "pinned",
+          "clr": "Pinned",
+          "type": "list<object:StatDto>",
+          "clrType": "List<StatDto>",
+          "nullable": false
+        },
+        {
+          "json": "rev",
+          "clr": "Rev",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "total",
+          "clr": "Total",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "StatsUiState",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "category",
+          "clr": "Category",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "filter",
+          "clr": "Filter",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "panelOpen",
+          "clr": "PanelOpen",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "pinnedStatKeys",
+          "clr": "PinnedStatKeys",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": false
+        },
+        {
+          "json": "rev",
+          "clr": "Rev",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "selectedStatKey",
+          "clr": "SelectedStatKey",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "sortBy",
+          "clr": "SortBy",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "sortDesc",
+          "clr": "SortDesc",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "StatsUiStateResponse",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "game",
+          "clr": "Game",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "inGame",
+          "clr": "InGame",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "rev",
+          "clr": "Rev",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "state",
+          "clr": "State",
+          "type": "object:StatsUiState",
+          "clrType": "StatsUiState",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "unchanged",
+          "clr": "Unchanged",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "vitals",
+          "clr": "Vitals",
+          "type": "object:VitalsDto",
+          "clrType": "VitalsDto",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "StdVectorDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "dataInts",
+          "clr": "DataInts",
+          "type": "list<any>",
+          "clrType": "List<Object>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "dataSize",
+          "clr": "DataSize",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "first",
+          "clr": "First",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "last",
+          "clr": "Last",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "statPairs",
+          "clr": "StatPairs",
+          "type": "list<any>",
+          "clrType": "List<Object>",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "TargetableDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "isTargetable",
+          "clr": "IsTargetable",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "isTargeted",
+          "clr": "IsTargeted",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "UiChildDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "cc",
+          "clr": "Cc",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "ct",
+          "clr": "Ct",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "i",
+          "clr": "I",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "t",
+          "clr": "T",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "UiDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "dialogDepth",
+          "clr": "DialogDepth",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "error",
+          "clr": "Error",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "leagueMechanicButtons",
+          "clr": "LeagueMechanicButtons",
+          "type": "object:LeagueMechanicButtonsDto",
+          "clrType": "LeagueMechanicButtonsDto",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "mapDeviceWindow",
+          "clr": "MapDeviceWindow",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "mercenaryEncounterWindow",
+          "clr": "MercenaryEncounterWindow",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "npcDialog",
+          "clr": "NpcDialog",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "popUpWindow",
+          "clr": "PopUpWindow",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "purchaseWindow",
+          "clr": "PurchaseWindow",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "ritualWindow",
+          "clr": "RitualWindow",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "sellWindow",
+          "clr": "SellWindow",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "tradeWindow",
+          "clr": "TradeWindow",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "villageRewardWindow",
+          "clr": "VillageRewardWindow",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "visibleChildren",
+          "clr": "VisibleChildren",
+          "type": "list<object:UiChildDto>",
+          "clrType": "List<UiChildDto>",
+          "nullable": false
+        },
+        {
+          "json": "zanaMissionChoice",
+          "clr": "ZanaMissionChoice",
+          "type": "bool",
+          "clrType": "Boolean?",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "VitalsDto",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "es",
+          "clr": "Es",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "hp",
+          "clr": "Hp",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "mana",
+          "clr": "Mana",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "maxEs",
+          "clr": "MaxEs",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "maxHp",
+          "clr": "MaxHp",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "maxMana",
+          "clr": "MaxMana",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "weaponSet",
+          "clr": "WeaponSet",
+          "type": "integer",
+          "clrType": "Int32?",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "WhatsAnAiBridge.HighlightVerdict",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "answer",
+          "clr": "Answer",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "ask",
+          "clr": "Ask",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "at",
+          "clr": "At",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "child",
+          "clr": "Child",
+          "type": "list<integer>",
+          "clrType": "Int32[]",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "highlightRev",
+          "clr": "HighlightRev",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "highlightTitle",
+          "clr": "HighlightTitle",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "item",
+          "clr": "Item",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "key",
+          "clr": "Key",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "label",
+          "clr": "Label",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "layer",
+          "clr": "Layer",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "panel",
+          "clr": "Panel",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "path",
+          "clr": "Path",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "rect",
+          "clr": "Rect",
+          "type": "list<number>",
+          "clrType": "Single[]",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "seq",
+          "clr": "Seq",
+          "type": "integer",
+          "clrType": "Int64",
+          "nullable": false
+        },
+        {
+          "json": "session",
+          "clr": "Session",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "target",
+          "clr": "Target",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "text",
+          "clr": "Text",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "who",
+          "clr": "Who",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "WhatsAnAiBridge.LayerSpec",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "enabled",
+          "clr": "Enabled",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "hz",
+          "clr": "Hz",
+          "type": "number",
+          "clrType": "Double",
+          "nullable": false
+        },
+        {
+          "json": "id",
+          "clr": "Id",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "key",
+          "clr": "Key",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "mode",
+          "clr": "Mode",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "path",
+          "clr": "Path",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "props",
+          "clr": "Props",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    },
+    {
+      "name": "WhatsAnAiBridge.UiCatalogueEntry",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "areas",
+          "clr": "Areas",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": false
+        },
+        {
+          "json": "firstSeen",
+          "clr": "FirstSeen",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "key",
+          "clr": "Key",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "lastSeen",
+          "clr": "LastSeen",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "mapped",
+          "clr": "Mapped",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "npc",
+          "clr": "Npc",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "opened",
+          "clr": "Opened",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "options",
+          "clr": "Options",
+          "type": "list<object:WhatsAnAiBridge.UiCatalogueOption>",
+          "clrType": "List<UiCatalogueOption>",
+          "nullable": false
+        },
+        {
+          "json": "recognise",
+          "clr": "Recognise",
+          "type": "list<string>",
+          "clrType": "List<String>",
+          "nullable": false
+        },
+        {
+          "json": "rect",
+          "clr": "Rect",
+          "type": "list<number>",
+          "clrType": "Single[]",
+          "nullable": true
+        },
+        {
+          "json": "title",
+          "clr": "Title",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true
+        },
+        {
+          "json": "viewHashes",
+          "clr": "ViewHashes",
+          "type": "list<integer>",
+          "clrType": "List<Int32>",
+          "nullable": false
+        },
+        {
+          "json": "views",
+          "clr": "Views",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "WhatsAnAiBridge.UiCatalogueFile",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "entries",
+          "clr": "Entries",
+          "type": "list<object:WhatsAnAiBridge.UiCatalogueEntry>",
+          "clrType": "List<UiCatalogueEntry>",
+          "nullable": false
+        },
+        {
+          "json": "version",
+          "clr": "Version",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "WhatsAnAiBridge.UiCatalogueOption",
+      "kind": "object",
+      "open": true,
+      "fields": [
+        {
+          "json": "child",
+          "clr": "Child",
+          "type": "list<integer>",
+          "clrType": "Int32[]",
+          "nullable": false
+        },
+        {
+          "json": "clickable",
+          "clr": "Clickable",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        },
+        {
+          "json": "highlight",
+          "clr": "Highlight",
+          "type": "object:WhatsAnAiBridge.UiHighlightRecipe",
+          "clrType": "UiHighlightRecipe",
+          "nullable": false
+        },
+        {
+          "json": "lastSeen",
+          "clr": "LastSeen",
+          "type": "datetime",
+          "clrType": "DateTime",
+          "nullable": false
+        },
+        {
+          "json": "rect",
+          "clr": "Rect",
+          "type": "list<number>",
+          "clrType": "Single[]",
+          "nullable": true
+        },
+        {
+          "json": "seen",
+          "clr": "Seen",
+          "type": "integer",
+          "clrType": "Int32",
+          "nullable": false
+        },
+        {
+          "json": "text",
+          "clr": "Text",
+          "type": "string",
+          "clrType": "String",
+          "nullable": false
+        },
+        {
+          "json": "unique",
+          "clr": "Unique",
+          "type": "bool",
+          "clrType": "Boolean",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "name": "WhatsAnAiBridge.UiHighlightRecipe",
+      "kind": "object",
+      "fields": [
+        {
+          "json": "child",
+          "clr": "Child",
+          "type": "list<integer>",
+          "clrType": "Int32[]",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "panel",
+          "clr": "Panel",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "text",
+          "clr": "Text",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        },
+        {
+          "json": "within",
+          "clr": "Within",
+          "type": "string",
+          "clrType": "String",
+          "nullable": true,
+          "omitNull": true
+        }
+      ]
+    }
+  ]
+}
